@@ -1,0 +1,46 @@
+{
+  "name": "location-scout",
+  "version": "0.1.0",
+  "description": "Location Scout Agent — Location research agent. Finds and evaluates filming locations based on scene requirements and production design briefs.",
+  "tools": [
+    {
+      "name": "search_locations",
+      "description": "TODO: Add description for search_locations",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "evaluate_location",
+      "description": "TODO: Add description for evaluate_location",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "create_bible",
+      "description": "TODO: Add description for create_bible",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "assess_logistics",
+      "description": "TODO: Add description for assess_logistics",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "resources": [
+    {
+      "uri": "agent://location-scout/status",
+      "name": "Agent Status",
+      "mimeType": "application/json"
+    }
+  ]
+}

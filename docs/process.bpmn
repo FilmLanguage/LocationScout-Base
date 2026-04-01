@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  id="Definitions_1"
+                  targetNamespace="http://filmlanguage.ai/bpmn/location-scout">
+  <bpmn:process id="Process_location_scout" name="Location Scout Process" isExecutable="false">
+    <bpmn:startEvent id="Start_1" name="Receive Task"/>
+    <bpmn:endEvent id="End_1" name="Deliver Result"/>
+    <!-- TODO: Add process steps, gateways, and data objects -->
+  </bpmn:process>
+</bpmn:definitions>

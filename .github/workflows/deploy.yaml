@@ -1,0 +1,56 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - release
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest
+
+      - name: Run tests
+        run: python -m pytest tests/ -v
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and push Docker image
+        run: |
+          gcloud builds submit --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/fl-location-scout-base:${{ github.ref_name }}
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy fl-location-scout-base \
+            --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/fl-location-scout-base:${{ github.ref_name }} \
+            --region us-central1 \
+            --platform managed
