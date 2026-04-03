@@ -1,0 +1,55 @@
+{
+  "$schema": "location-bible-v2",
+  "bible_id": "",
+  "location_name": "",
+
+  "passport": {
+    "type": "",
+    "time_of_day": [],
+    "era": "",
+    "recurring": false,
+    "scenes": [],
+    "cluster_id": null
+  },
+
+  "space_description": "",
+
+  "atmosphere": "",
+
+  "light_base_state": {
+    "primary_source": "",
+    "direction": "",
+    "color_temp_kelvin": 0,
+    "shadow_hardness": "",
+    "fill_to_key_ratio": "",
+    "practical_sources": []
+  },
+
+  "key_details": [],
+
+  "negative_list": [],
+
+  "approval_status": "draft",
+
+  "_field_guide": {
+    "bible_id": "Unique ID, format: loc_{number}, e.g. loc_001",
+    "location_name": "Human-readable name, e.g. 'Jesse's Apartment — Living Room'",
+    "passport.type": "INT | EXT | INT/EXT",
+    "passport.time_of_day": "Array of: DAY, NIGHT, DAWN, DUSK, CONTINUOUS",
+    "passport.era": "Specific period, e.g. '2004 Albuquerque' or '1962 Brooklyn'",
+    "passport.recurring": "true if location appears in 3+ scenes",
+    "passport.scenes": "Array of scene IDs where this location appears",
+    "passport.cluster_id": "ID of location cluster if part of a group (e.g. 'Jesse's apartment' cluster includes living room, bedroom, bathroom)",
+    "space_description": "400-600 words. Dense, specific. Every sentence = visual information for generation. Cover: dimensions, layout, materials, condition, wear patterns, color of walls/floor/ceiling",
+    "atmosphere": "100-200 words. How the space FEELS — temperature, smells, sounds, emotional quality. Sensory, not abstract",
+    "light_base_state.primary_source": "Main light: 'window', 'overhead fluorescent', 'table lamp', 'neon sign', etc.",
+    "light_base_state.direction": "Cardinal: N, S, E, W, NE, NW, SE, SW, OVERHEAD, MULTIPLE",
+    "light_base_state.color_temp_kelvin": "Integer. 2700=warm tungsten, 4000=neutral, 5500=daylight, 6500=overcast",
+    "light_base_state.shadow_hardness": "hard | soft | mixed",
+    "light_base_state.fill_to_key_ratio": "e.g. '1:2' (subtle fill) or '1:8' (deep shadows)",
+    "light_base_state.practical_sources": "Array of in-scene light sources: ['desk lamp with green shade', 'TV glow', 'window — east facing']",
+    "key_details": "Array of 5-8 strings. SPECIFIC objects: 'rotary phone with frayed cord' not 'a phone'. These details make the space unique and recognizable across shots",
+    "negative_list": "Array of strings. Things that must NEVER appear. Added mechanically to negative_prompt of every generation. e.g. ['modern appliances', 'LED lights', 'smartphones', 'flat screen TV']",
+    "approval_status": "draft | research_review | approved | locked"
+  }
+}
