@@ -1,46 +1,27 @@
 {
-  "name": "location-scout",
-  "version": "0.1.0",
-  "description": "Location Scout Agent — Location research agent. Finds and evaluates filming locations based on scene requirements and production design briefs.",
-  "tools": [
-    {
-      "name": "search_locations",
-      "description": "TODO: Add description for search_locations",
-      "inputSchema": {
-        "type": "object",
-        "properties": {}
-      }
-    },
-    {
-      "name": "evaluate_location",
-      "description": "TODO: Add description for evaluate_location",
-      "inputSchema": {
-        "type": "object",
-        "properties": {}
-      }
-    },
-    {
-      "name": "create_bible",
-      "description": "TODO: Add description for create_bible",
-      "inputSchema": {
-        "type": "object",
-        "properties": {}
-      }
-    },
-    {
-      "name": "assess_logistics",
-      "description": "TODO: Add description for assess_logistics",
-      "inputSchema": {
-        "type": "object",
-        "properties": {}
-      }
-    }
-  ],
-  "resources": [
-    {
-      "uri": "agent://location-scout/status",
-      "name": "Agent Status",
-      "mimeType": "application/json"
-    }
+  "name": "location-scout-base",
+  "version": "1.0.0",
+  "description": "Location research, Bible writing, anchor generation, mood states, and spatial planning",
+  "transport": {
+    "type": "streamable-http",
+    "url": "/mcp"
+  },
+  "capabilities": {
+    "tools": true,
+    "resources": true,
+    "notifications": true
+  },
+  "authentication": {
+    "type": "bearer",
+    "description": "GCP Identity Token via Cloud Run IAM"
+  },
+  "platform": {
+    "registry": "Film Language",
+    "schema_package": "@filmlanguage/schemas",
+    "orchestrator": "1ad-base"
+  },
+  "dependencies": [
+    "agent://1ad/film-ir/{project_id}",
+    "agent://director/vision/dfv/{project_id}"
   ]
 }

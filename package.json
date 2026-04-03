@@ -1,0 +1,25 @@
+{
+  "name": "fl-location-scout-base",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "inspect": "npx @modelcontextprotocol/inspector"
+  },
+  "dependencies": {
+    "@filmlanguage/schemas": "file:./_schemas",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "express": "^4.21.0",
+    "swagger-ui-express": "^5.0.1",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.0.0",
+    "@types/swagger-ui-express": "^4.1.8",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "@filmlanguage/schemas",
+  "version": "1.0.0",
+  "description": "Shared Zod schemas, JSON Schema exports, and TypeScript types for all Film Language agents",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./common/*": "./dist/common/*.js",
+    "./artifacts/*": "./dist/artifacts/*.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "zod": "^3.23.0",
+    "zod-to-json-schema": "^3.23.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  },
+  "files": [
+    "dist",
+    "package.json"
+  ]
+}

@@ -1,138 +1,62 @@
-# LocationScout-Base
+# Location Scout — MCP Server
 
-> **Location Scout** Agent — Film Language / Stanislavsky AI Platform
+Location research, Bible writing, anchor image generation, mood state creation, and spatial planning agent for the Film Language platform.
 
-Location research agent. Finds and evaluates filming locations based on scene requirements and production design briefs.
+## MCP Server: `location-scout-base`
 
-## Role in Pipeline
+**Cloud Run:** `fl-location-scout-base`
+**Endpoint:** `/mcp`
+**Transport:** Streamable HTTP (stateless)
 
-| | |
-|---|---|
-| **Input Artifacts** | Scene Breakdown, Production Design |
-| **Output Artifacts** | Location Bible, Location Options, Logistics Report |
-| **Cloud Run Service** | `fl-location-scout-base` |
-| **Protocol** | FLACP/1.0 |
+## Tools
 
-## Architecture
+### Common (all agents)
+- `ping` — Health check
+- `get_info` — Agent metadata
+- `get_task_status` — Async task status
+- `get_task_result` — Completed task result
+- `cancel_task` — Cancel running task
+- `approve_artifact` — Gate approval
+- `reject_artifact` — Gate rejection
+- `request_revision` — Request artifact revision
+- `submit_feedback` — Advisory feedback
 
-```
-API Layer (FastAPI) → Core Logic → Knowledge Base → Data Store
-```
+### Domain
+- `scout_location` — Full pipeline: research + bible + anchor + floorplan
+- `research_era` — Historical research step
+- `write_bible` — Generate Location Bible
+- `generate_anchor` — Generate anchor image
+- `create_mood_states` — Generate mood deltas per scene
+- `create_floorplan` — Generate spatial layout
+- `extract_setups` — Per-scene camera setups
+- `get_bible` — Read Location Bible
+- `get_mood_state` — Read mood state
+- `check_era_accuracy` — Validate against anachronisms
+- `check_consistency` — Cross-artifact consistency check
 
-| Layer | Responsibility |
-|-------|---------------|
-| **API Layer** | REST endpoints, OpenAPI docs, health checks |
-| **Core Logic** | Location Scout methodology implementation |
-| **Knowledge Base** | Domain expertise, references, prompt templates |
-| **Data Store** | PostgreSQL state, Cloud Storage artifacts |
+## Resources
 
-## Quick Start
+- `agent://location-scout/bible/{id}` — Location Bible (JSON)
+- `agent://location-scout/anchor/{id}` — Anchor image (PNG)
+- `agent://location-scout/mood/{id}` — Mood state (JSON)
+- `agent://location-scout/floorplan/{id}` — Floorplan (PNG)
+- `agent://location-scout/setup/{id}` — Setup extraction (JSON)
+- `agent://location-scout/task/{id}` — Task status (JSON)
+- `agent://location-scout/schema/{type}` — JSON Schema
+
+## Development
 
 ```bash
-# Clone
-git clone https://github.com/FilmLanguage/LocationScout-Base.git
-cd LocationScout-Base
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run locally
-uvicorn src.agent:app --reload --port 8080
-
-# Run with Docker
-docker build -t fl-location-scout-base .
-docker run -p 8080:8080 fl-location-scout-base
+npm install
+npm run dev          # Start with hot-reload
+npm run build        # Compile TypeScript
+npm run inspect      # MCP Inspector
 ```
 
-## API Endpoints
+## Testing
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health` | Health check — status, version, uptime |
-| GET | `/info` | Agent metadata — role, capabilities, version |
-| POST | `/process` | Main endpoint — submit task for processing |
-| GET | `/process/{task_id}/status` | Check task execution status |
-| GET | `/process/{task_id}/result` | Get processing result |
-| POST | `/feedback` | Receive feedback from other agents |
-| GET | `/schema` | JSON schema of input/output data |
-| GET | `/docs` | Swagger UI (auto-generated) |
-
-## MCP Tools
-
-| Tool | Description |
-|------|-------------|
-| `search_locations` | TODO |
-| `evaluate_location` | TODO |
-| `create_bible` | TODO |
-| `assess_logistics` | TODO |
-
-## Project Structure
-
+```bash
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}'
 ```
-LocationScout-Base/
-├── README.md
-├── LICENSE
-├── CHANGELOG.md
-├── Dockerfile
-├── requirements.txt
-├── cloudbuild.yaml
-├── openapi.yaml
-├── mcp-manifest.json
-├── src/
-│   ├── agent.py              # FastAPI entry point
-│   ├── config.py             # Environment configuration
-│   ├── api/                  # Route handlers
-│   ├── core/                 # Business logic
-│   ├── models/               # Pydantic / DB models
-│   └── tools/                # External integrations
-├── knowledge/
-│   ├── methodology/          # Domain theory & principles
-│   ├── references/           # Reference materials
-│   ├── examples/             # Example inputs/outputs
-│   └── prompts/              # LLM prompt templates
-├── db/
-│   ├── schema.sql            # Database DDL
-│   └── migrations/
-├── tests/
-│   ├── unit/
-│   └── integration/
-├── docs/
-│   ├── data-model.md
-│   ├── api-examples.md
-│   └── process.bpmn
-└── .github/workflows/
-    └── deploy.yaml
-```
-
-## Pre-Release Checklist
-
-- [ ] Repository follows `{Role}-{Variant}` naming convention
-- [ ] Branches: `main`, `release`, `development` exist
-- [ ] README.md: description, quick start, artifacts list
-- [ ] `openapi.yaml`: complete API specification, Swagger UI at `/docs`
-- [ ] `mcp-manifest.json`: all tools and resources described
-- [ ] Mandatory endpoints: `/health`, `/info`, `/process`, `/schema`
-- [ ] Database schema in `db/schema.sql`, migrations configured
-- [ ] Knowledge base populated in `knowledge/`
-- [ ] BPMN process diagram in `docs/process.bpmn` + SVG export
-- [ ] Dockerfile builds, cold start < 10 sec
-- [ ] Unit tests cover core logic, integration tests cover API
-- [ ] CI/CD pipeline (`cloudbuild.yaml` / GitHub Actions) configured
-- [ ] FLACP envelope correctly formed and parsed
-- [ ] Environment variables documented
-
-## Environment Variables
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `PORT` | Server port (set by Cloud Run) | Yes |
-| `DATABASE_URL` | PostgreSQL connection string | Yes |
-| `GCS_BUCKET` | Cloud Storage bucket for artifacts | Yes |
-| `ANTHROPIC_API_KEY` | Claude API key (via Secret Manager) | Per agent |
-| `OPENAI_API_KEY` | OpenAI API key (via Secret Manager) | Per agent |
-| `ORCHESTRATOR_URL` | Orchestrator callback URL | Yes |
-| `AGENT_ENV` | Environment: dev / staging / prod | Yes |
-
-## License
-
-MIT — see [LICENSE](LICENSE)
