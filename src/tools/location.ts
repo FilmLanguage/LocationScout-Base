@@ -26,6 +26,13 @@ const DirectorVisionInputSchema = z.object({
   light_vision: z.string().optional().describe("Lighting philosophy"),
 });
 
+/** Strip markdown code fences that LLMs sometimes wrap around JSON. */
+function stripCodeFence(text: string): string {
+  const trimmed = text.trim();
+  const match = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
+  return match ? match[1].trim() : trimmed;
+}
+
 export function registerLocationTools(server: McpServer) {
 
   // Composite pipeline tool
@@ -53,7 +60,7 @@ export function registerLocationTools(server: McpServer) {
             [{ role: "user", content: `Location: ${location_brief.location_name}\nEra: ${location_brief.era}\nType: ${location_brief.location_type}\nDirector style: ${director_vision.era_style}` }],
           );
           const researchId = `research_${location_brief.location_id}`;
-          await saveArtifact("research", researchId, JSON.parse(research.content));
+          await saveArtifact("research", researchId, JSON.parse(stripCodeFence(research.content)));
           updateTask(task_id, { progress: 0.3, current_step: "Research complete, writing Bible" });
 
           // Step 2: Write Bible
@@ -62,7 +69,7 @@ export function registerLocationTools(server: McpServer) {
             [{ role: "user", content: `Location: ${JSON.stringify(location_brief)}\nDirector vision: ${JSON.stringify(director_vision)}\nResearch: ${research.content}` }],
           );
           const bibleId = location_brief.location_id;
-          await saveArtifact("bible", bibleId, JSON.parse(bible.content));
+          await saveArtifact("bible", bibleId, JSON.parse(stripCodeFence(bible.content)));
           updateTask(task_id, {
             progress: 1.0,
             status: "completed",
@@ -111,7 +118,7 @@ export function registerLocationTools(server: McpServer) {
             [{ role: "user", content: `Location: ${location_brief.location_name}\nEra: ${location_brief.era}\nType: ${location_brief.location_type}\nStyle: ${director_vision.era_style}` }],
           );
           const researchId = `research_${location_brief.location_id}`;
-          await saveArtifact("research", researchId, JSON.parse(result.content));
+          await saveArtifact("research", researchId, JSON.parse(stripCodeFence(result.content)));
           updateTask(task_id, {
             status: "completed", progress: 1.0, current_step: "Research complete",
             artifacts: [{ uri: `agent://location-scout/research/${researchId}`, mime_type: "application/json", created_at: new Date().toISOString() }],
@@ -156,7 +163,7 @@ export function registerLocationTools(server: McpServer) {
             { maxTokens: 8192 },
           );
           const bibleId = location_brief.location_id;
-          await saveArtifact("bible", bibleId, JSON.parse(result.content));
+          await saveArtifact("bible", bibleId, JSON.parse(stripCodeFence(result.content)));
           updateTask(task_id, {
             status: "completed", progress: 1.0, current_step: "Bible written",
             artifacts: [{ uri: `agent://location-scout/bible/${bibleId}`, mime_type: "application/json", created_at: new Date().toISOString() }],
