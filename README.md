@@ -21,16 +21,37 @@ Location research, Bible writing, anchor image generation, mood state creation, 
 - `request_revision` — Request artifact revision
 - `submit_feedback` — Advisory feedback
 
-### Domain
+### Domain — Pipeline
 - `scout_location` — Full pipeline: research + bible + anchor + floorplan
 - `research_era` — Historical research step
 - `write_bible` — Generate Location Bible
 - `generate_anchor` — Generate anchor image
 - `create_mood_states` — Generate mood deltas per scene
-- `generate_floorplan` — Generate spatial layout + light map
+- `create_floorplan` — Generate spatial layout + light map
 - `extract_setups` — Per-scene camera setups
+
+### Domain — Read
 - `get_bible` — Read Location Bible
 - `get_mood_state` — Read mood state
+- `get_setup_prompt` — Get generation prompt for a setup image
+- `get_outputs` — All output artifacts grouped by consumer
+
+### Domain — Validation
+- `check_era_accuracy` — Validate Bible against research pack for anachronisms
+- `check_consistency` — Cross-check Bible, anchor, and mood states
+
+### Domain — Research Cycle (W2)
+- `add_fact` — Add period fact to research pack
+- `add_anachronism` — Add anachronism to negative list
+
+### Domain — Reference Generation (W4)
+- `manual_setup_input` — Manually add/edit a camera setup
+
+### Domain — Setups & Variations (W5/W6)
+- `compare_with_anchor` — Compare setup image vs anchor (perceptual similarity)
+- `apply_mood_suggestion` — Apply AI-suggested mood configuration
+- `dismiss_mood_suggestion` — Dismiss AI mood suggestion
+- `add_mood_variation` — Add mood variation and trigger image generation
 
 ## Resources
 

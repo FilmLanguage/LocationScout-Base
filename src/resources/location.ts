@@ -15,7 +15,8 @@ export function registerResources(server: McpServer) {
       mimeType: "application/json",
     },
     async (uri) => {
-      // TODO: resolve URI → GCS/store → return content
+      // STUB: When GCS storage is wired, resolve bible_id from URI path,
+      // fetch JSON from gs://fl-bibles/{bible_id}.json, return parsed content.
       return {
         contents: [{
           uri: uri.href,
@@ -35,7 +36,8 @@ export function registerResources(server: McpServer) {
       mimeType: "image/png",
     },
     async (uri) => {
-      // TODO: resolve URI → GCS → return image
+      // STUB: When GCS storage is wired, resolve anchor_id from URI path,
+      // fetch PNG from gs://fl-anchors/{anchor_id}.png, return as blob.
       return {
         contents: [{
           uri: uri.href,
@@ -55,7 +57,8 @@ export function registerResources(server: McpServer) {
       mimeType: "application/json",
     },
     async (uri) => {
-      // TODO: resolve URI → store → return content
+      // STUB: When GCS storage is wired, resolve state_id from URI path,
+      // fetch JSON from gs://fl-moods/{state_id}.json.
       return {
         contents: [{
           uri: uri.href,
@@ -113,7 +116,8 @@ export function registerResources(server: McpServer) {
       mimeType: "application/json",
     },
     async (uri) => {
-      // TODO: look up task status
+      // STUB: When task store is wired, look up task_id in in-memory
+      // task map or Redis, return {status, progress, current_step}.
       return {
         contents: [{
           uri: uri.href,
@@ -133,7 +137,8 @@ export function registerResources(server: McpServer) {
       mimeType: "application/json",
     },
     async (uri) => {
-      // TODO: resolve URI → GCS/store → return content
+      // STUB: When GCS storage is wired, resolve research_id from URI path,
+      // fetch JSON from gs://fl-research/{research_id}.json.
       return {
         contents: [{
           uri: uri.href,
@@ -153,7 +158,8 @@ export function registerResources(server: McpServer) {
       mimeType: "application/json",
     },
     async (uri) => {
-      // TODO: return JSON schema based on type
+      // STUB: Parse {type} from URI, look up matching JsonSchema export
+      // from @filmlanguage/schemas (e.g. LocationBibleJsonSchema).
       return {
         contents: [{
           uri: uri.href,

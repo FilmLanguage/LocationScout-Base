@@ -10,6 +10,11 @@ import { ARTIFACT_TYPE as SHOT_RECIPE, URI_PATTERN as SHOT_RECIPE_URI, PRODUCED_
 import { ARTIFACT_TYPE as DIRECTOR_VISION, URI_PATTERN as DIRECTOR_VISION_URI, PRODUCED_BY as DIRECTOR_VISION_PRODUCER, MIME_TYPE as DIRECTOR_VISION_MIME } from "./director-vision-v1.js";
 import { ARTIFACT_TYPE as RESEARCH_PACK, URI_PATTERN as RESEARCH_PACK_URI, PRODUCED_BY as RESEARCH_PACK_PRODUCER, MIME_TYPE as RESEARCH_PACK_MIME } from "./research-pack-v1.js";
 import { ARTIFACT_TYPE as REVIEW_REPORT, URI_PATTERN as REVIEW_REPORT_URI, PRODUCED_BY as REVIEW_REPORT_PRODUCER, MIME_TYPE as REVIEW_REPORT_MIME } from "./review-report-v1.js";
+import { ARTIFACT_TYPE as CHARACTER_BIBLE, URI_PATTERN as CHARACTER_BIBLE_URI, PRODUCED_BY as CHARACTER_BIBLE_PRODUCER, MIME_TYPE as CHARACTER_BIBLE_MIME } from "./character-bible-v1.js";
+import { ARTIFACT_TYPE as CHARACTER_RESEARCH, URI_PATTERN as CHARACTER_RESEARCH_URI, PRODUCED_BY as CHARACTER_RESEARCH_PRODUCER, MIME_TYPE as CHARACTER_RESEARCH_MIME } from "./character-research-pack-v1.js";
+import { ARTIFACT_TYPE as WARDROBE_BIBLE, URI_PATTERN as WARDROBE_BIBLE_URI, PRODUCED_BY as WARDROBE_BIBLE_PRODUCER, MIME_TYPE as WARDROBE_BIBLE_MIME } from "./wardrobe-bible-v1.js";
+import { ARTIFACT_TYPE as APPEARANCE_STATES, URI_PATTERN as APPEARANCE_STATES_URI, PRODUCED_BY as APPEARANCE_STATES_PRODUCER, MIME_TYPE as APPEARANCE_STATES_MIME } from "./appearance-state-v1.js";
+import { ARTIFACT_TYPE as MODEL_SHEET, URI_PATTERN as MODEL_SHEET_URI, PRODUCED_BY as MODEL_SHEET_PRODUCER, MIME_TYPE as MODEL_SHEET_MIME } from "./model-sheet-v1.js";
 
 export const ARTIFACT_REGISTRY = {
   [FILM_IR]: { uriPattern: FILM_IR_URI, producedBy: FILM_IR_PRODUCER, mimeType: FILM_IR_MIME },
@@ -34,8 +39,11 @@ export const ARTIFACT_REGISTRY = {
   camera_movement_map: { uriPattern: "agent://cinematographer/camera-map/{id}" as const,      producedBy: "cinematographer-base" as const,      mimeType: "application/json" as const },
   set_design_bible:    { uriPattern: "agent://production-designer/set-design/{id}" as const,  producedBy: "production-designer-base" as const,  mimeType: "application/json" as const },
   props_list:          { uriPattern: "agent://production-designer/props/{id}" as const,       producedBy: "production-designer-base" as const,  mimeType: "application/json" as const },
-  cast_list:           { uriPattern: "agent://casting-director/cast-list/{id}" as const,      producedBy: "casting-director-base" as const,     mimeType: "application/json" as const },
-  actor_profile:       { uriPattern: "agent://casting-director/actor-profile/{id}" as const,  producedBy: "casting-director-base" as const,     mimeType: "application/json" as const },
+  [CHARACTER_BIBLE]:   { uriPattern: CHARACTER_BIBLE_URI, producedBy: CHARACTER_BIBLE_PRODUCER, mimeType: CHARACTER_BIBLE_MIME },
+  [CHARACTER_RESEARCH]: { uriPattern: CHARACTER_RESEARCH_URI, producedBy: CHARACTER_RESEARCH_PRODUCER, mimeType: CHARACTER_RESEARCH_MIME },
+  [WARDROBE_BIBLE]:    { uriPattern: WARDROBE_BIBLE_URI, producedBy: WARDROBE_BIBLE_PRODUCER, mimeType: WARDROBE_BIBLE_MIME },
+  [APPEARANCE_STATES]: { uriPattern: APPEARANCE_STATES_URI, producedBy: APPEARANCE_STATES_PRODUCER, mimeType: APPEARANCE_STATES_MIME },
+  [MODEL_SHEET]:       { uriPattern: MODEL_SHEET_URI, producedBy: MODEL_SHEET_PRODUCER, mimeType: MODEL_SHEET_MIME },
   storyboard_panel:    { uriPattern: "agent://storyboard/panel/{id}" as const,                producedBy: "storyboard-base" as const,           mimeType: "image/png" as const },
   visual_sequence:     { uriPattern: "agent://storyboard/sequence/{id}" as const,             producedBy: "storyboard-base" as const,           mimeType: "application/json" as const },
   shot_image:          { uriPattern: "agent://shot-generation/image/{id}" as const,           producedBy: "shot-generation-base" as const,      mimeType: "image/png" as const },
