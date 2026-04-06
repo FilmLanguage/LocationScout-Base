@@ -1,0 +1,21 @@
+{
+  "name": "@filmlanguage/tokens",
+  "version": "1.0.0",
+  "description": "Design tokens for all Film Language agent UIs — CSS custom properties and JSON export",
+  "type": "module",
+  "main": "dist/tokens.json",
+  "exports": {
+    ".": "./dist/tokens.json",
+    "./css": "./dist/tokens.css",
+    "./json": "./dist/tokens.json",
+    "./ts": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "node build.js",
+    "clean": "rm -rf dist"
+  },
+  "files": [
+    "dist",
+    "package.json"
+  ]
+}

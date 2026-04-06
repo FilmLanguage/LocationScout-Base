@@ -27,6 +27,15 @@ function createServer(): McpServer {
 const app = express();
 app.use(express.json());
 
+// CORS for local dev (Vite on :5173 → Express on :8080)
+app.use((_req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
+  if (_req.method === "OPTIONS") { res.sendStatus(204); return; }
+  next();
+});
+
 app.post("/mcp", async (req, res) => {
   const server = createServer();
   const transport = new StreamableHTTPServerTransport({
