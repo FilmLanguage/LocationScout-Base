@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { getTask, updateTask, deleteTask } from "../lib/storage.js";
 
 export function registerCommonTools(server: McpServer) {
 
@@ -56,12 +57,29 @@ export function registerCommonTools(server: McpServer) {
     "Get current status of an async task. Returns state (accepted/processing/completed/failed), progress (0.0-1.0), and current_step description.",
     { task_id: z.string().describe("UUID of the task to check") },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    async ({ task_id }) => ({
-      content: [{
-        type: "text" as const,
-        text: JSON.stringify({ task_id, status: "processing", progress: 0.5, current_step: "..." }),
-      }],
-    }),
+    async ({ task_id }) => {
+      const task = getTask(task_id);
+      if (!task) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({ error: "not_found", task_id }),
+          }],
+          isError: true,
+        };
+      }
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            task_id: task.task_id,
+            status: task.status,
+            progress: task.progress,
+            current_step: task.current_step,
+          }),
+        }],
+      };
+    },
   );
 
   // 4. get_task_result
@@ -70,9 +88,26 @@ export function registerCommonTools(server: McpServer) {
     "Get the result of a completed async task, including artifact references.",
     { task_id: z.string().describe("UUID of the completed task") },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    async ({ task_id }) => ({
-      content: [{ type: "text" as const, text: JSON.stringify({ task_id, status: "completed", artifacts: [] }) }],
-    }),
+    async ({ task_id }) => {
+      const task = getTask(task_id);
+      if (!task) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ error: "not_found", task_id }) }],
+          isError: true,
+        };
+      }
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            task_id: task.task_id,
+            status: task.status,
+            artifacts: task.artifacts,
+            error: task.error,
+          }),
+        }],
+      };
+    },
   );
 
   // 5. cancel_task
@@ -81,9 +116,15 @@ export function registerCommonTools(server: McpServer) {
     "Cancel a running or queued task. Idempotent — cancelling an already-cancelled task is a no-op.",
     { task_id: z.string().describe("UUID of the task to cancel") },
     { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-    async ({ task_id }) => ({
-      content: [{ type: "text" as const, text: JSON.stringify({ task_id, cancelled: true }) }],
-    }),
+    async ({ task_id }) => {
+      const task = getTask(task_id);
+      if (task && (task.status === "accepted" || task.status === "processing")) {
+        updateTask(task_id, { status: "failed", error: "cancelled" });
+      }
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ task_id, cancelled: true }) }],
+      };
+    },
   );
 
   // 6. approve_artifact

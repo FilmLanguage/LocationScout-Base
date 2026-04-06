@@ -6,10 +6,13 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
-    "inspect": "npx @modelcontextprotocol/inspector"
+    "inspect": "npx @modelcontextprotocol/inspector",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@filmlanguage/schemas": "file:./_schemas",
+    "@filmlanguage/tokens": "file:../ai-stanislavsky-workspace/packages/tokens",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "express": "^4.21.0",
     "swagger-ui-express": "^5.0.1",
@@ -20,6 +23,7 @@
     "@types/node": "^22.0.0",
     "@types/swagger-ui-express": "^4.1.8",
     "tsx": "^4.19.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "vitest": "^3.1.0"
   }
 }

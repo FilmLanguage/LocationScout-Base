@@ -1,5 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { createTask, updateTask, saveArtifact, loadArtifact } from "../lib/storage.js";
+import { llmComplete, generateImage } from "../lib/api-client.js";
 
 const LocationBriefSchema = z.object({
   location_id: z.string().describe("Unique location ID, e.g. loc_001"),
@@ -37,8 +39,48 @@ export function registerLocationTools(server: McpServer) {
       priority: z.enum(["low", "normal", "high", "critical"]).default("normal"),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async ({ project_id, location_brief }) => {
+    async ({ project_id, location_brief, director_vision }) => {
       const task_id = crypto.randomUUID();
+      createTask(task_id, "Starting location scouting pipeline");
+
+      // Run pipeline async (fire and forget)
+      (async () => {
+        try {
+          // Step 1: Research
+          updateTask(task_id, { status: "processing", progress: 0.1, current_step: "Researching era" });
+          const research = await llmComplete(
+            "You are a film location research specialist. Research the era and location described. Return a JSON object with fields: period_facts (array of strings), typical_elements (array of strings), anachronism_list (array of strings to avoid).",
+            [{ role: "user", content: `Location: ${location_brief.location_name}\nEra: ${location_brief.era}\nType: ${location_brief.location_type}\nDirector style: ${director_vision.era_style}` }],
+          );
+          const researchId = `research_${location_brief.location_id}`;
+          await saveArtifact("research", researchId, JSON.parse(research.content));
+          updateTask(task_id, { progress: 0.3, current_step: "Research complete, writing Bible" });
+
+          // Step 2: Write Bible
+          const bible = await llmComplete(
+            "You are a film location Bible writer. Write a detailed Location Bible JSON matching the LocationBible v2 schema. Include: passport, space_description (400+ words), atmosphere, light_base_state, key_details (5-8 items), negative_list (3+ items).",
+            [{ role: "user", content: `Location: ${JSON.stringify(location_brief)}\nDirector vision: ${JSON.stringify(director_vision)}\nResearch: ${research.content}` }],
+          );
+          const bibleId = location_brief.location_id;
+          await saveArtifact("bible", bibleId, JSON.parse(bible.content));
+          updateTask(task_id, {
+            progress: 1.0,
+            status: "completed",
+            current_step: "Pipeline complete",
+            artifacts: [
+              { uri: `agent://location-scout/research/${researchId}`, mime_type: "application/json", created_at: new Date().toISOString() },
+              { uri: `agent://location-scout/bible/${bibleId}`, mime_type: "application/json", created_at: new Date().toISOString() },
+            ],
+          });
+        } catch (err) {
+          updateTask(task_id, {
+            status: "failed",
+            error: err instanceof Error ? err.message : String(err),
+            current_step: "Pipeline failed",
+          });
+        }
+      })();
+
       return {
         content: [{
           type: "text" as const,
@@ -57,8 +99,28 @@ export function registerLocationTools(server: McpServer) {
       director_vision: DirectorVisionInputSchema,
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    async () => {
+    async ({ location_brief, director_vision }) => {
       const task_id = crypto.randomUUID();
+      createTask(task_id, "Researching era");
+
+      (async () => {
+        try {
+          updateTask(task_id, { status: "processing", progress: 0.2, current_step: "Querying LLM for era research" });
+          const result = await llmComplete(
+            "You are a film location research specialist. Return a JSON object with: period_facts (array of strings about the era), typical_elements (array of period-accurate items), anachronism_list (array of items that must NOT appear).",
+            [{ role: "user", content: `Location: ${location_brief.location_name}\nEra: ${location_brief.era}\nType: ${location_brief.location_type}\nStyle: ${director_vision.era_style}` }],
+          );
+          const researchId = `research_${location_brief.location_id}`;
+          await saveArtifact("research", researchId, JSON.parse(result.content));
+          updateTask(task_id, {
+            status: "completed", progress: 1.0, current_step: "Research complete",
+            artifacts: [{ uri: `agent://location-scout/research/${researchId}`, mime_type: "application/json", created_at: new Date().toISOString() }],
+          });
+        } catch (err) {
+          updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) });
+        }
+      })();
+
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ task_id, status: "accepted" }) }],
       };
@@ -75,8 +137,35 @@ export function registerLocationTools(server: McpServer) {
       director_vision: DirectorVisionInputSchema,
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async () => {
+    async ({ location_brief, research_pack_uri, director_vision }) => {
       const task_id = crypto.randomUUID();
+      createTask(task_id, "Writing Location Bible");
+
+      (async () => {
+        try {
+          updateTask(task_id, { status: "processing", progress: 0.1, current_step: "Loading research pack" });
+
+          // Try to load research
+          const researchId = research_pack_uri.split("/").pop() || "";
+          const research = await loadArtifact("research", researchId);
+
+          updateTask(task_id, { progress: 0.3, current_step: "Generating Bible with LLM" });
+          const result = await llmComplete(
+            "You are a film Location Bible writer. Write a Location Bible as JSON conforming to LocationBible v2 schema. Include: $schema, bible_id, passport (type, time_of_day, era, recurring, scenes), space_description (min 400 words), atmosphere, light_base_state (primary_source, direction, color_temp_kelvin, shadow_hardness, fill_to_key_ratio, practical_sources), key_details (5-8 items), negative_list (3+ must-never-appear items), approval_status: \"draft\".",
+            [{ role: "user", content: `Brief: ${JSON.stringify(location_brief)}\nVision: ${JSON.stringify(director_vision)}\nResearch: ${JSON.stringify(research)}` }],
+            { maxTokens: 8192 },
+          );
+          const bibleId = location_brief.location_id;
+          await saveArtifact("bible", bibleId, JSON.parse(result.content));
+          updateTask(task_id, {
+            status: "completed", progress: 1.0, current_step: "Bible written",
+            artifacts: [{ uri: `agent://location-scout/bible/${bibleId}`, mime_type: "application/json", created_at: new Date().toISOString() }],
+          });
+        } catch (err) {
+          updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) });
+        }
+      })();
+
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ task_id, status: "accepted" }) }],
       };
@@ -95,8 +184,46 @@ export function registerLocationTools(server: McpServer) {
       }).optional(),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async () => {
+    async ({ bible_uri, generation_params }) => {
       const task_id = crypto.randomUUID();
+      createTask(task_id, "Generating anchor image");
+
+      (async () => {
+        try {
+          updateTask(task_id, { status: "processing", progress: 0.1, current_step: "Loading Bible" });
+          const bibleId = bible_uri.split("/").pop() || "";
+          const bible = await loadArtifact<{ space_description?: string; negative_list?: Array<{ item: string }> }>("bible", bibleId);
+
+          if (!bible) {
+            updateTask(task_id, { status: "failed", error: "Bible not found" });
+            return;
+          }
+
+          updateTask(task_id, { progress: 0.3, current_step: "Generating image via FAL.ai" });
+          const negativePrompt = bible.negative_list?.map((n) => n.item).join(", ") || "";
+          const result = await generateImage({
+            prompt: `Cinematic film location photograph. ${bible.space_description ?? ""}`.slice(0, 2000),
+            negative_prompt: negativePrompt || undefined,
+            seed: generation_params?.seed,
+          });
+
+          if (result.images.length > 0) {
+            // Download and save image
+            const imgRes = await fetch(result.images[0].url);
+            const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+            const { saveImage } = await import("../lib/storage.js");
+            await saveImage("anchor", bibleId, imgBuf);
+          }
+
+          updateTask(task_id, {
+            status: "completed", progress: 1.0, current_step: "Anchor generated",
+            artifacts: [{ uri: `agent://location-scout/anchor/${bibleId}`, mime_type: "image/png", created_at: new Date().toISOString() }],
+          });
+        } catch (err) {
+          updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) });
+        }
+      })();
+
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ task_id, status: "accepted" }) }],
       };
@@ -166,9 +293,13 @@ export function registerLocationTools(server: McpServer) {
       bible_id: z.string().describe("Location Bible ID, e.g. loc_001"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
-    async ({ bible_id }) => ({
-      content: [{ type: "text" as const, text: JSON.stringify({ error: "not_found", bible_id }) }],
-    }),
+    async ({ bible_id }) => {
+      const bible = await loadArtifact("bible", bible_id);
+      if (!bible) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ error: "not_found", bible_id }) }] };
+      }
+      return { content: [{ type: "text" as const, text: JSON.stringify(bible) }] };
+    },
   );
 
   server.tool(
@@ -178,9 +309,13 @@ export function registerLocationTools(server: McpServer) {
       state_id: z.string().describe("Mood state ID, e.g. mood_loc_001_01"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
-    async ({ state_id }) => ({
-      content: [{ type: "text" as const, text: JSON.stringify({ error: "not_found", state_id }) }],
-    }),
+    async ({ state_id }) => {
+      const mood = await loadArtifact("mood", state_id);
+      if (!mood) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ error: "not_found", state_id }) }] };
+      }
+      return { content: [{ type: "text" as const, text: JSON.stringify(mood) }] };
+    },
   );
 
   // Validation tools

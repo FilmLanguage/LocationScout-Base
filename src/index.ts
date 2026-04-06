@@ -7,19 +7,28 @@ import { registerLocationTools } from "./tools/location.js";
 import { registerResources } from "./resources/location.js";
 import { mountSwagger } from "./swagger.js";
 
-const server = new McpServer({
-  name: "location-scout-base",
-  version: "1.0.0",
-});
-
-registerCommonTools(server);
-registerLocationTools(server);
-registerResources(server);
+// PERF: McpServer is created per-request to avoid the SDK's
+// "Already connected to a transport" crash on concurrent/sequential calls.
+// This re-registers all tools on every request — acceptable for now,
+// but should be replaced with a pooling or session-based approach
+// once the MCP SDK supports multiple transports on a single server.
+// See CHANGELOG.md [PERF-001].
+function createServer(): McpServer {
+  const server = new McpServer({
+    name: "location-scout-base",
+    version: "1.0.0",
+  });
+  registerCommonTools(server);
+  registerLocationTools(server);
+  registerResources(server);
+  return server;
+}
 
 const app = express();
 app.use(express.json());
 
 app.post("/mcp", async (req, res) => {
+  const server = createServer();
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless
   });

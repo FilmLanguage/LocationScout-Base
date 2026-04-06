@@ -1,4 +1,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { loadArtifact, loadImage, getTask } from "../lib/storage.js";
+import {
+  LocationBibleJsonSchema,
+  MoodStateJsonSchema,
+  ResearchPackJsonSchema,
+} from "@filmlanguage/schemas";
 
 /**
  * MCP Resource handlers for Location Scout.
@@ -6,7 +12,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
  */
 export function registerResources(server: McpServer) {
 
-  // Location Bible resource
+  // ─── Extract ID from URI path ───────────────────────────────────
+
+  function extractId(uri: URL): string {
+    const parts = uri.pathname.split("/");
+    return parts[parts.length - 1] || "";
+  }
+
+  // ─── Location Bible ─────────────────────────────────────────────
+
   server.resource(
     "bible",
     "agent://location-scout/bible/{bible_id}",
@@ -15,40 +29,64 @@ export function registerResources(server: McpServer) {
       mimeType: "application/json",
     },
     async (uri) => {
-      // STUB: When GCS storage is wired, resolve bible_id from URI path,
-      // fetch JSON from gs://fl-bibles/{bible_id}.json, return parsed content.
+      const id = extractId(uri);
+      const bible = await loadArtifact("bible", id);
+
+      if (!bible) {
+        return {
+          contents: [{
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify({ error: "not_found", bible_id: id }),
+          }],
+        };
+      }
+
       return {
         contents: [{
           uri: uri.href,
           mimeType: "application/json",
-          text: JSON.stringify({ error: "not_implemented" }),
+          text: JSON.stringify(bible),
         }],
       };
     },
   );
 
-  // Anchor image resource
+  // ─── Anchor Image ───────────────────────────────────────────────
+
   server.resource(
     "anchor",
     "agent://location-scout/anchor/{anchor_id}",
     {
-      description: "Location anchor image. Returns PNG binary.",
+      description: "Location anchor image. Returns PNG binary as base64.",
       mimeType: "image/png",
     },
     async (uri) => {
-      // STUB: When GCS storage is wired, resolve anchor_id from URI path,
-      // fetch PNG from gs://fl-anchors/{anchor_id}.png, return as blob.
+      const id = extractId(uri);
+      const image = await loadImage("anchor", id);
+
+      if (!image) {
+        return {
+          contents: [{
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify({ error: "not_found", anchor_id: id }),
+          }],
+        };
+      }
+
       return {
         contents: [{
           uri: uri.href,
-          mimeType: "application/json",
-          text: JSON.stringify({ error: "not_implemented" }),
+          mimeType: image.contentType,
+          blob: image.data.toString("base64"),
         }],
       };
     },
   );
 
-  // Mood state resource
+  // ─── Mood State ─────────────────────────────────────────────────
+
   server.resource(
     "mood",
     "agent://location-scout/mood/{state_id}",
@@ -57,38 +95,64 @@ export function registerResources(server: McpServer) {
       mimeType: "application/json",
     },
     async (uri) => {
-      // STUB: When GCS storage is wired, resolve state_id from URI path,
-      // fetch JSON from gs://fl-moods/{state_id}.json.
+      const id = extractId(uri);
+      const mood = await loadArtifact("mood", id);
+
+      if (!mood) {
+        return {
+          contents: [{
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify({ error: "not_found", state_id: id }),
+          }],
+        };
+      }
+
       return {
         contents: [{
           uri: uri.href,
           mimeType: "application/json",
-          text: JSON.stringify({ error: "not_implemented" }),
+          text: JSON.stringify(mood),
         }],
       };
     },
   );
 
-  // Floorplan resource
+  // ─── Floorplan ──────────────────────────────────────────────────
+
   server.resource(
     "floorplan",
     "agent://location-scout/floorplan/{floorplan_id}",
     {
-      description: "Location floorplan image. Returns PNG binary.",
+      description: "Location floorplan image. Returns PNG binary as base64.",
       mimeType: "image/png",
     },
     async (uri) => {
+      const id = extractId(uri);
+      const image = await loadImage("floorplan", id);
+
+      if (!image) {
+        return {
+          contents: [{
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify({ error: "not_found", floorplan_id: id }),
+          }],
+        };
+      }
+
       return {
         contents: [{
           uri: uri.href,
-          mimeType: "application/json",
-          text: JSON.stringify({ error: "not_implemented" }),
+          mimeType: image.contentType,
+          blob: image.data.toString("base64"),
         }],
       };
     },
   );
 
-  // Setup extraction resource
+  // ─── Setup Extraction ───────────────────────────────────────────
+
   server.resource(
     "setup",
     "agent://location-scout/setup/{setup_id}",
@@ -97,38 +161,64 @@ export function registerResources(server: McpServer) {
       mimeType: "application/json",
     },
     async (uri) => {
+      const id = extractId(uri);
+      const setup = await loadArtifact("setup", id);
+
+      if (!setup) {
+        return {
+          contents: [{
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify({ error: "not_found", setup_id: id }),
+          }],
+        };
+      }
+
       return {
         contents: [{
           uri: uri.href,
           mimeType: "application/json",
-          text: JSON.stringify({ error: "not_implemented" }),
+          text: JSON.stringify(setup),
         }],
       };
     },
   );
 
-  // Task resource (required by all agents)
+  // ─── Task Status ────────────────────────────────────────────────
+
   server.resource(
     "task",
     "agent://location-scout/task/{task_id}",
     {
-      description: "Async task status. Subscribe for real-time updates.",
+      description: "Async task status. Returns task state, progress, and artifacts.",
       mimeType: "application/json",
     },
     async (uri) => {
-      // STUB: When task store is wired, look up task_id in in-memory
-      // task map or Redis, return {status, progress, current_step}.
+      const id = extractId(uri);
+      const task = getTask(id);
+
+      if (!task) {
+        return {
+          contents: [{
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify({ error: "not_found", task_id: id }),
+          }],
+        };
+      }
+
       return {
         contents: [{
           uri: uri.href,
           mimeType: "application/json",
-          text: JSON.stringify({ status: "unknown" }),
+          text: JSON.stringify(task),
         }],
       };
     },
   );
 
-  // Research pack resource
+  // ─── Research Pack ──────────────────────────────────────────────
+
   server.resource(
     "research",
     "agent://location-scout/research/{research_id}",
@@ -137,34 +227,67 @@ export function registerResources(server: McpServer) {
       mimeType: "application/json",
     },
     async (uri) => {
-      // STUB: When GCS storage is wired, resolve research_id from URI path,
-      // fetch JSON from gs://fl-research/{research_id}.json.
+      const id = extractId(uri);
+      const research = await loadArtifact("research", id);
+
+      if (!research) {
+        return {
+          contents: [{
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify({ error: "not_found", research_id: id }),
+          }],
+        };
+      }
+
       return {
         contents: [{
           uri: uri.href,
           mimeType: "application/json",
-          text: JSON.stringify({ error: "not_implemented" }),
+          text: JSON.stringify(research),
         }],
       };
     },
   );
 
-  // Schema resource (required by all agents)
+  // ─── Schema (JSON Schema export) ────────────────────────────────
+
+  const schemaMap: Record<string, unknown> = {
+    "location-bible": LocationBibleJsonSchema,
+    "mood-state": MoodStateJsonSchema,
+    "research-pack": ResearchPackJsonSchema,
+  };
+
   server.resource(
     "schema",
     "agent://location-scout/schema/{type}",
     {
-      description: "JSON Schema for agent's artifact types.",
+      description: "JSON Schema for agent's artifact types. Supported: location-bible, mood-state, research-pack.",
       mimeType: "application/json",
     },
     async (uri) => {
-      // STUB: Parse {type} from URI, look up matching JsonSchema export
-      // from @filmlanguage/schemas (e.g. LocationBibleJsonSchema).
+      const type = extractId(uri);
+      const schema = schemaMap[type];
+
+      if (!schema) {
+        return {
+          contents: [{
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify({
+              error: "unknown_schema_type",
+              type,
+              available: Object.keys(schemaMap),
+            }),
+          }],
+        };
+      }
+
       return {
         contents: [{
           uri: uri.href,
           mimeType: "application/json",
-          text: JSON.stringify({ error: "not_implemented" }),
+          text: JSON.stringify(schema),
         }],
       };
     },

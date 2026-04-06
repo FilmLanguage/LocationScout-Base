@@ -30,7 +30,7 @@ The **Location Scout** researches locations, creates Location Bibles, generates 
 
 ## Implementation status: COMPLETE
 
-All 23 domain tools + 9 common tools + 7 resources are implemented.
+All 20 domain tools + 9 common tools (29 total) + 8 resources are implemented.
 
 ## Key patterns for other agents to follow
 
