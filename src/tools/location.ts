@@ -29,7 +29,8 @@ const DirectorVisionInputSchema = z.object({
 /** Strip markdown code fences that LLMs sometimes wrap around JSON. */
 function stripCodeFence(text: string): string {
   const trimmed = text.trim();
-  const match = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
+  // Match fenced block — closing fence may be missing if response was truncated
+  const match = trimmed.match(/```(?:json)?\s*\n([\s\S]*?)(?:\n\s*```|$)/);
   return match ? match[1].trim() : trimmed;
 }
 
@@ -65,8 +66,9 @@ export function registerLocationTools(server: McpServer) {
 
           // Step 2: Write Bible
           const bible = await llmComplete(
-            "You are a film location Bible writer. Write a detailed Location Bible JSON matching the LocationBible v2 schema. Include: passport, space_description (400+ words), atmosphere, light_base_state, key_details (5-8 items), negative_list (3+ items).",
+            "You are a film location Bible writer. Write a detailed Location Bible JSON matching the LocationBible v2 schema. Include: passport, space_description (400+ words), atmosphere, light_base_state, key_details (5-8 items), negative_list (3+ items). Return ONLY the JSON object, no markdown fences.",
             [{ role: "user", content: `Location: ${JSON.stringify(location_brief)}\nDirector vision: ${JSON.stringify(director_vision)}\nResearch: ${research.content}` }],
+            { maxTokens: 8192 },
           );
           const bibleId = location_brief.location_id;
           await saveArtifact("bible", bibleId, JSON.parse(stripCodeFence(bible.content)));
