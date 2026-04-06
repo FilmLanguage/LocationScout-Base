@@ -27,12 +27,10 @@ Location research, Bible writing, anchor image generation, mood state creation, 
 - `write_bible` — Generate Location Bible
 - `generate_anchor` — Generate anchor image
 - `create_mood_states` — Generate mood deltas per scene
-- `create_floorplan` — Generate spatial layout
+- `generate_floorplan` — Generate spatial layout + light map
 - `extract_setups` — Per-scene camera setups
 - `get_bible` — Read Location Bible
 - `get_mood_state` — Read mood state
-- `check_era_accuracy` — Validate against anachronisms
-- `check_consistency` — Cross-artifact consistency check
 
 ## Resources
 
