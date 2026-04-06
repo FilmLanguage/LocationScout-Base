@@ -12,36 +12,35 @@
 
 export const colors = {
   // Backgrounds
-  bg:         "#111111",    // Page BG
-  surface:    "#131416",    // Card BG
-  "surface-2": "#1e2024",   // Nested containers
-  "surface-3": "#26272b",   // Tertiary depth
+  bg:         "#0c0c0f",    // Page BG
+  surface:    "#16161b",    // Card BG
+  "surface-2": "#1e1e25",   // Nested containers
+  "surface-3": "#26262f",   // Tertiary depth
 
   // Borders
-  border:       "#2b2e31",  // Page Border
-  "border-accent": "#43474c", // Card / Chip Border
+  border:       "#2a2a35",  // Page Border
+  "border-accent": "#3a3a48", // Card / Chip Border
 
   // Text
-  text:      "#eaebec",     // Primary Text
-  "text-muted": "#a1a6aa",  // Secondary Text
-  "text-dim":   "#6b6e72",  // Tertiary text
+  text:      "#e8e6e3",     // Primary Text
+  "text-muted": "#9a9890",  // Secondary Text
+  "text-dim":   "#6b6960",  // Tertiary text
 
   // Accent & semantic
-  accent:    "#f7e27e",     // Gold / Active
-  "accent-dim": "#c4a746",  // Muted accent
-  blue:      "#156bf4",     // Blue / CTA
-  "blue-border": "#4186f6", // CTA Border
-  green:     "#a6f77e",     // Green / Status
-  red:       "#ef4444",     // Error, gates, negative list
+  accent:    "#f0c040",     // Gold / Active
+  "accent-dim": "#c09a20",  // Muted accent
+  blue:      "#5b9bd5",     // Blue / CTA
+  green:     "#7bc47f",     // Green / Status
+  red:       "#d97070",     // Error, gates, negative list
   pink:      "#d08ab4",     // Gate badges, keywords
   cyan:      "#60c0c0",     // Technical tags
   orange:    "#e0904a",     // Warnings
 
   // Chip/Tag fills
   "chip-fill": "rgba(255,255,255,0.1)",   // 10% white
-  "flag-fill": "rgba(253,231,118,0.25)",  // 25% gold
-  "tag-green": "rgba(166,247,126,0.2)",   // 20% green
-  "tag-red":   "rgba(239,68,68,0.2)",     // 20% red
+  "flag-fill": "rgba(240,192,64,0.25)",   // 25% gold
+  "tag-green": "rgba(123,196,127,0.2)",   // 20% green
+  "tag-red":   "rgba(217,112,112,0.2)",   // 20% red
 
   // Focus
   "focus-ring": "#7f8081",
