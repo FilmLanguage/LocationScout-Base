@@ -66,7 +66,7 @@ export function registerLocationTools(server: McpServer) {
 
           // Step 2: Write Bible
           const bible = await llmComplete(
-            "You are a film location Bible writer. Write a detailed Location Bible JSON matching the LocationBible v2 schema. Include: passport, space_description (400+ words), atmosphere, light_base_state, key_details (5-8 items), negative_list (3+ items). Return ONLY the JSON object, no markdown fences.",
+            "You are a film location Bible writer. Write a detailed Location Bible JSON matching the LocationBible v2 schema. The JSON MUST include: \"$schema\": \"location-bible-v2\", bible_id, passport (type, time_of_day, era, recurring, scenes), space_description (min 400 words of precise physical detail), atmosphere, light_base_state (primary_source, direction, color_temp_kelvin, shadow_hardness, fill_to_key_ratio, practical_sources), key_details (5-8 items), negative_list (3+ anachronistic items that must never appear), approval_status: \"draft\". Return ONLY the JSON object, no markdown fences.",
             [{ role: "user", content: `Location: ${JSON.stringify(location_brief)}\nDirector vision: ${JSON.stringify(director_vision)}\nResearch: ${research.content}` }],
             { maxTokens: 8192 },
           );
