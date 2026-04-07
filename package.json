@@ -9,7 +9,10 @@
     "inspect": "npx @modelcontextprotocol/inspector",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dev:ui": "vite"
+    "dev:ui": "vite",
+    "build:ui": "tsc -p tsconfig.ui.json",
+    "build:all": "npm run build && npm run build:ui",
+    "dev:all": "concurrently \"npm run dev\" \"npm run dev:ui\""
   },
   "dependencies": {
     "@filmlanguage/schemas": "file:./_schemas",
@@ -31,6 +34,9 @@
     "tsx": "^4.19.0",
     "typescript": "^5.5.0",
     "vite": "^8.0.5",
-    "vitest": "^3.1.0"
+    "vitest": "^3.1.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "concurrently": "^9.1.0"
   }
 }
