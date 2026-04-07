@@ -1,4 +1,12 @@
 .git
+.gitignore
 node_modules
 _schemas/node_modules
 dist
+dist-ui
+.env
+.env.*
+*.log
+*.tsbuildinfo
+.vscode
+.idea
