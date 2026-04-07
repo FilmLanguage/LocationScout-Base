@@ -44,6 +44,7 @@ export const ARTIFACT_REGISTRY = {
   [WARDROBE_BIBLE]:    { uriPattern: WARDROBE_BIBLE_URI, producedBy: WARDROBE_BIBLE_PRODUCER, mimeType: WARDROBE_BIBLE_MIME },
   [APPEARANCE_STATES]: { uriPattern: APPEARANCE_STATES_URI, producedBy: APPEARANCE_STATES_PRODUCER, mimeType: APPEARANCE_STATES_MIME },
   [MODEL_SHEET]:       { uriPattern: MODEL_SHEET_URI, producedBy: MODEL_SHEET_PRODUCER, mimeType: MODEL_SHEET_MIME },
+  face_anchor:         { uriPattern: "agent://casting-director/face-anchor/{id}" as const,    producedBy: "casting-director-base" as const,     mimeType: "image/png" as const },
   storyboard_panel:    { uriPattern: "agent://storyboard/panel/{id}" as const,                producedBy: "storyboard-base" as const,           mimeType: "image/png" as const },
   visual_sequence:     { uriPattern: "agent://storyboard/sequence/{id}" as const,             producedBy: "storyboard-base" as const,           mimeType: "application/json" as const },
   shot_image:          { uriPattern: "agent://shot-generation/image/{id}" as const,           producedBy: "shot-generation-base" as const,      mimeType: "image/png" as const },
