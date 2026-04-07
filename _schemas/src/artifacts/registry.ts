@@ -15,6 +15,7 @@ import { ARTIFACT_TYPE as CHARACTER_RESEARCH, URI_PATTERN as CHARACTER_RESEARCH_
 import { ARTIFACT_TYPE as WARDROBE_BIBLE, URI_PATTERN as WARDROBE_BIBLE_URI, PRODUCED_BY as WARDROBE_BIBLE_PRODUCER, MIME_TYPE as WARDROBE_BIBLE_MIME } from "./wardrobe-bible-v1.js";
 import { ARTIFACT_TYPE as APPEARANCE_STATES, URI_PATTERN as APPEARANCE_STATES_URI, PRODUCED_BY as APPEARANCE_STATES_PRODUCER, MIME_TYPE as APPEARANCE_STATES_MIME } from "./appearance-state-v1.js";
 import { ARTIFACT_TYPE as MODEL_SHEET, URI_PATTERN as MODEL_SHEET_URI, PRODUCED_BY as MODEL_SHEET_PRODUCER, MIME_TYPE as MODEL_SHEET_MIME } from "./model-sheet-v1.js";
+import { ARTIFACT_TYPE as VALIDATION_REPORT, URI_PATTERN as VALIDATION_REPORT_URI, PRODUCED_BY as VALIDATION_REPORT_PRODUCER, MIME_TYPE as VALIDATION_REPORT_MIME } from "./validation-report-v1.js";
 
 export const ARTIFACT_REGISTRY = {
   [FILM_IR]: { uriPattern: FILM_IR_URI, producedBy: FILM_IR_PRODUCER, mimeType: FILM_IR_MIME },
@@ -24,6 +25,7 @@ export const ARTIFACT_REGISTRY = {
   [DIRECTOR_VISION]: { uriPattern: DIRECTOR_VISION_URI, producedBy: DIRECTOR_VISION_PRODUCER, mimeType: DIRECTOR_VISION_MIME },
   [RESEARCH_PACK]: { uriPattern: RESEARCH_PACK_URI, producedBy: RESEARCH_PACK_PRODUCER, mimeType: RESEARCH_PACK_MIME },
   [REVIEW_REPORT]: { uriPattern: REVIEW_REPORT_URI, producedBy: REVIEW_REPORT_PRODUCER, mimeType: REVIEW_REPORT_MIME },
+  [VALIDATION_REPORT]: { uriPattern: VALIDATION_REPORT_URI, producedBy: VALIDATION_REPORT_PRODUCER, mimeType: VALIDATION_REPORT_MIME },
 
   // Placeholders for agents not yet implemented — add schema files when developing
   location_anchor:     { uriPattern: "agent://location-scout/anchor/{id}" as const,           producedBy: "location-scout-base" as const,       mimeType: "image/png" as const },

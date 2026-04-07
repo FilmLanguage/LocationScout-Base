@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { RationaleSchema } from "../common/rationale.js";
 
 export const ARTIFACT_TYPE = "character_bible" as const;
 export const ARTIFACT_VERSION = "v1" as const;
@@ -65,6 +66,7 @@ export const CharacterBibleSchema = z.object({
   negative_list: z.array(z.string()).min(1).describe("Visual elements that must NEVER appear (goes to negative_prompt)"),
   face_anchor: FaceAnchorSchema.optional().describe("Generated face reference images (added after generation step)"),
   body_anchor: BodyAnchorSchema.optional().describe("Generated body reference image (added after generation step)"),
+  rationale: RationaleSchema.optional().describe("Optional explainability: why these creative choices were made (face structure, body physics, wardrobe palette). Filled by LLM during write_character_bible when explainability is enabled."),
   approval_status: z.enum(["draft", "pending_review", "approved", "rejected"]).default("draft"),
 });
 
