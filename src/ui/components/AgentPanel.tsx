@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { color, font, spacing, radius, motion } from "../tokens.js";
+import { color, font, spacing, radius, motion, type GateStatus } from "../tokens.js";
 import { useMcpClient } from "../hooks/useMcpClient.js";
+import { GateBadge } from "./GateBadge.js";
 
 interface AgentPanelProps {
   mcpEndpoint?: string;
@@ -10,6 +11,9 @@ export function AgentPanel({ mcpEndpoint = "/mcp" }: AgentPanelProps) {
   const { callTool, loading } = useMcpClient(mcpEndpoint);
   const [status, setStatus] = useState<{ ok: boolean; version?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Bible First demo state — full pipeline UI to be wired up via Figma handoff.
+  const [bibleStatus, setBibleStatus] = useState<GateStatus>("draft");
+  const isAnchorBlocked = bibleStatus !== "approved";
 
   const handlePing = async () => {
     setError(null);
@@ -91,6 +95,74 @@ export function AgentPanel({ mcpEndpoint = "/mcp" }: AgentPanelProps) {
               Connected — v{status.version}
             </div>
           )}
+
+          {/* Bible First demo: shows the gate pattern that locks downstream actions
+              until the Location Bible is approved. The full pipeline UI will be wired
+              from the Figma handoff. */}
+          <div style={{
+            display: "flex", flexDirection: "column", gap: spacing.md,
+            paddingTop: spacing.lg,
+            borderTop: `1px solid ${color.border}`,
+          }}>
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between", gap: spacing.md,
+            }}>
+              <span style={{ fontSize: font.sizeSm, color: color.textSecondary }}>
+                Location Bible status
+              </span>
+              <GateBadge status={bibleStatus} showBlocker />
+            </div>
+
+            <div style={{ display: "flex", gap: spacing.sm, flexWrap: "wrap" }}>
+              {(["draft", "pending_review", "approved", "rejected"] as GateStatus[]).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setBibleStatus(s)}
+                  style={{
+                    padding: "6px 12px", minHeight: 32, minWidth: 44,
+                    borderRadius: radius.sm,
+                    border: `1px solid ${bibleStatus === s ? color.accentBlueBorder : color.border}`,
+                    backgroundColor: bibleStatus === s ? color.accentBlue : "transparent",
+                    color: bibleStatus === s ? "#fafafa" : color.textPrimary,
+                    fontFamily: font.family, fontSize: font.sizeXs, fontWeight: font.weightMedium,
+                    cursor: "pointer",
+                    transition: `all ${motion.durationFast} ${motion.easing}`,
+                  }}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              disabled={isAnchorBlocked}
+              aria-disabled={isAnchorBlocked}
+              title={isAnchorBlocked ? "Bible First rule: approve the Location Bible before generating an anchor." : ""}
+              style={{
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                padding: "9px 17px", minHeight: 36, borderRadius: radius.md,
+                border: `1px solid ${isAnchorBlocked ? color.accentRed : color.accentBlueBorder}`,
+                backgroundColor: isAnchorBlocked ? color.tagRedBg : color.accentBlue,
+                color: isAnchorBlocked ? color.accentRed : "#fafafa",
+                fontFamily: font.family, fontSize: font.sizeSm, fontWeight: font.weightMedium,
+                cursor: isAnchorBlocked ? "not-allowed" : "pointer",
+                opacity: isAnchorBlocked ? 0.7 : 1,
+                transition: `all ${motion.durationFast} ${motion.easing}`,
+                minWidth: 44,
+              }}
+            >
+              {isAnchorBlocked ? "● Generate Anchor (blocked)" : "Generate Anchor"}
+            </button>
+
+            {isAnchorBlocked && (
+              <span style={{ fontSize: font.sizeXs, color: color.textSecondary, lineHeight: "1.5" }}>
+                Bible First rule: anchor generation is blocked until the Location Bible
+                is approved. Backend enforces this with <code>requireApprovedBible</code>.
+              </span>
+            )}
+          </div>
 
           {error && (
             <div style={{
