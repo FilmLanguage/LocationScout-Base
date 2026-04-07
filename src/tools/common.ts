@@ -1,6 +1,18 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getTask, updateTask, deleteTask } from "../lib/storage.js";
+import { getTask, updateTask, deleteTask, loadArtifact, saveArtifact } from "../lib/storage.js";
+
+/**
+ * Parse an artifact URI like `agent://location-scout/bible/loc_001` into
+ * `{ type, id }` so the artifact can be loaded/mutated by the storage layer.
+ * Falls back gracefully on shapes that don't match the expected pattern.
+ */
+function parseArtifactUri(uri: string): { type: string; id: string } | null {
+  // agent://<agent>/<type>/<id>
+  const match = uri.match(/^agent:\/\/[^/]+\/([^/]+)\/(.+)$/);
+  if (!match) return null;
+  return { type: match[1], id: match[2] };
+}
 
 export function registerCommonTools(server: McpServer) {
 
@@ -130,15 +142,27 @@ export function registerCommonTools(server: McpServer) {
   // 6. approve_artifact
   server.tool(
     "approve_artifact",
-    "Mark an artifact as approved at its gate. Called by orchestrator after reviewer approves.",
+    "Mark an artifact as approved at its gate. Mutates the artifact's `approval_status` field to 'approved' so downstream Bible First gates unblock.",
     {
       artifact_uri: z.string().describe("MCP resource URI of the artifact, e.g. agent://location-scout/bible/loc_001"),
       notes: z.string().optional().describe("Reviewer notes"),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    async ({ artifact_uri, notes }) => ({
-      content: [{ type: "text" as const, text: JSON.stringify({ artifact_uri, verdict: "approved", notes }) }],
-    }),
+    async ({ artifact_uri, notes }) => {
+      const parsed = parseArtifactUri(artifact_uri);
+      if (parsed) {
+        const artifact = await loadArtifact<Record<string, unknown>>(parsed.type, parsed.id);
+        if (artifact) {
+          artifact.approval_status = "approved";
+          if (notes) artifact.approval_notes = notes;
+          artifact.approved_at = new Date().toISOString();
+          await saveArtifact(parsed.type, parsed.id, artifact);
+        }
+      }
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ artifact_uri, verdict: "approved", notes }) }],
+      };
+    },
   );
 
   // 7. reject_artifact
