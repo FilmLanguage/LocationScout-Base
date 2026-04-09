@@ -402,7 +402,7 @@ export function registerLocationTools(server: McpServer) {
   // Floorplan (hard-gated, Python-rendered)
   server.tool(
     "create_floorplan",
-    "Generate a top-down floorplan PNG from an approved Location Bible. Hard-gated: requires Bible with approval_status='approved'. Renders deterministically via scripts/floorplan.py (Pillow). Returns task_id for async tracking.",
+    "Generate a top-down floorplan PNG from an approved Location Bible. Hard-gated: requires Bible with approval_status='approved'. Renders via scripts/floorplan.py (matplotlib, 1920×1080). Also emits a JSON setup-positions map in task metadata. Returns task_id for async tracking.",
     {
       bible_uri: z.string().describe("MCP resource URI of the approved Location Bible"),
     },
@@ -416,23 +416,24 @@ export function registerLocationTools(server: McpServer) {
           const bible = await requireApprovedBible(bible_uri);
           const bibleId = bible_uri.includes("/") ? (bible_uri.split("/").pop() ?? "") : bible_uri;
 
-          updateTask(task_id, { progress: 0.4, current_step: "Spawning Python floorplan renderer" });
+          updateTask(task_id, { progress: 0.4, current_step: "Spawning Python floorplan renderer (matplotlib)" });
 
           const pyBin = process.env.PYTHON_BIN ?? "python";
           // scripts/floorplan.py lives at repo root; from src/tools/ that is ../../scripts
           const scriptPath = pathResolve(__dirname, "..", "..", "scripts", "floorplan.py");
 
           // Omit `encoding` so spawnSync returns Buffers (default behaviour).
+          // The script writes PNG to stdout and setup JSON map to stderr.
           const result = spawnSync(pyBin, [scriptPath], {
             input: JSON.stringify(bible),
-            timeout: 30_000,
-            maxBuffer: 50 * 1024 * 1024,
+            timeout: 60_000,
+            maxBuffer: 100 * 1024 * 1024,
           });
 
           if (result.error) {
             throw flError(FL_ERRORS.GENERATION_ERROR, `Failed to spawn Python: ${result.error.message}`, {
               retryable: false,
-              suggestion: "Ensure PYTHON_BIN points to a Python 3 interpreter with Pillow installed.",
+              suggestion: "Ensure PYTHON_BIN points to a Python 3 interpreter with matplotlib installed.",
             });
           }
           if (result.status !== 0) {
@@ -451,6 +452,16 @@ export function registerLocationTools(server: McpServer) {
             });
           }
 
+          // Parse setup map from stderr (emitted as JSON by floorplan.py)
+          let setupMap: Record<string, unknown> | null = null;
+          const stderrStr = result.stderr ? Buffer.from(result.stderr).toString("utf8").trim() : "";
+          if (stderrStr) {
+            const lastLine = stderrStr.split("\n").reverse().find(l => l.trimStart().startsWith("{"));
+            if (lastLine) {
+              try { setupMap = JSON.parse(lastLine); } catch { /* ignore parse errors */ }
+            }
+          }
+
           updateTask(task_id, { progress: 0.85, current_step: "Saving floorplan PNG" });
           const saveResult = await saveImage("floorplan", bibleId, pngBuffer);
 
@@ -466,6 +477,7 @@ export function registerLocationTools(server: McpServer) {
                 ...(saveResult.local_path ? { local_path: saveResult.local_path } : {}),
               },
             ],
+            ...(setupMap ? { setup_map: setupMap } : {}),
           });
         } catch (err) {
           updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) });

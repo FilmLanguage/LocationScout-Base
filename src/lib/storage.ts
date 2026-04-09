@@ -189,6 +189,7 @@ interface TaskEntry {
   current_step: string;
   artifacts: Array<{ uri: string; mime_type: string; created_at: string; local_path?: string }>;
   error?: string;
+  setup_map?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
@@ -212,7 +213,7 @@ export function createTask(task_id: string, step: string): TaskEntry {
 
 export function updateTask(
   task_id: string,
-  update: Partial<Pick<TaskEntry, "status" | "progress" | "current_step" | "artifacts" | "error">>,
+  update: Partial<Pick<TaskEntry, "status" | "progress" | "current_step" | "artifacts" | "error" | "setup_map">>,
 ): TaskEntry | null {
   const entry = taskStore.get(task_id);
   if (!entry) return null;
