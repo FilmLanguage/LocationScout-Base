@@ -46,6 +46,31 @@ app.post("/mcp", async (req, res) => {
   await transport.handleRequest(req, res, req.body);
 });
 
+// Serve stored artifacts (images, JSON) via HTTP so the UI can display them.
+// GET /artifacts/:type/:id.ext → loads from storage layer (memory → disk → GCS).
+app.get("/artifacts/:type/:file", async (req, res) => {
+  const { type, file } = req.params;
+  const ext = file.split(".").pop() ?? "";
+  const id = file.replace(/\.[^.]+$/, "");
+  try {
+    if (["png", "jpg", "jpeg"].includes(ext)) {
+      const { loadImage } = await import("./lib/storage.js");
+      const img = await loadImage(type, id, ext === "jpeg" ? "jpg" : ext);
+      if (!img) { res.status(404).json({ error: "not_found" }); return; }
+      res.setHeader("Content-Type", img.contentType);
+      res.setHeader("Cache-Control", "no-cache");
+      res.send(img.data);
+    } else {
+      const { loadArtifact } = await import("./lib/storage.js");
+      const data = await loadArtifact(type, id);
+      if (!data) { res.status(404).json({ error: "not_found" }); return; }
+      res.json(data);
+    }
+  } catch {
+    res.status(500).json({ error: "internal" });
+  }
+});
+
 mountSwagger(app);
 
 app.get("/health", (_req, res) => {

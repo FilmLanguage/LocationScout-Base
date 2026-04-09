@@ -105,9 +105,9 @@ export function registerLocationTools(server: McpServer) {
 
           // Step 2: Write Bible
           const bible = await llmComplete(
-            "You are a film location Bible writer. Write a detailed Location Bible JSON matching the LocationBible v2 schema. The JSON MUST include: \"$schema\": \"location-bible-v2\", bible_id, passport (type, time_of_day, era, recurring, scenes), space_description (min 400 words of precise physical detail), atmosphere, light_base_state (primary_source, direction, color_temp_kelvin, shadow_hardness, fill_to_key_ratio, practical_sources), key_details (5-8 items), negative_list (3+ anachronistic items that must never appear), approval_status: \"draft\".\n\nOPTIONAL: include a `rationale` object { primary_reason, references, confidence } explaining your single most important creative choice. Only include it if your reasoning is genuinely tied to the research/vision sources — do NOT fabricate post-hoc justification.\n\nReturn ONLY the JSON object, no markdown fences.",
+            "You are a film location Bible writer. Write a detailed Location Bible JSON matching the LocationBible v2 schema. The JSON MUST include: \"$schema\": \"location-bible-v2\", bible_id, passport (type, time_of_day, era, recurring, scenes), space_description (max 200 words — concise, precise physical detail), atmosphere, light_base_state (primary_source, direction, color_temp_kelvin, shadow_hardness, fill_to_key_ratio, practical_sources), key_details (5-8 items), negative_list (array of SHORT strings — 2-4 word labels of anachronistic items, e.g. [\"LED lighting\", \"Flat screen TV\"] — no descriptions, no \"NO\" prefix), approval_status: \"draft\".\n\nOPTIONAL: include a `rationale` object { primary_reason, references, confidence } explaining your single most important creative choice. Only include it if your reasoning is genuinely tied to the research/vision sources — do NOT fabricate post-hoc justification.\n\nReturn ONLY the JSON object, no markdown fences.",
             [{ role: "user", content: `Location: ${JSON.stringify(location_brief)}\nDirector vision: ${JSON.stringify(director_vision)}\nResearch: ${research.content}` }],
-            { maxTokens: 8192 },
+            { maxTokens: 4096 },
           );
           const bibleId = location_brief.location_id;
           await saveArtifact("bible", bibleId, JSON.parse(stripCodeFence(bible.content)));
@@ -199,9 +199,9 @@ export function registerLocationTools(server: McpServer) {
 
           updateTask(task_id, { progress: 0.3, current_step: "Generating Bible with LLM" });
           const result = await llmComplete(
-            "You are a film Location Bible writer. Write a Location Bible as JSON conforming to LocationBible v2 schema. Include: $schema, bible_id, passport (type, time_of_day, era, recurring, scenes), space_description (min 400 words), atmosphere, light_base_state (primary_source, direction, color_temp_kelvin, shadow_hardness, fill_to_key_ratio, practical_sources), key_details (5-8 items), negative_list (3+ must-never-appear items), approval_status: \"draft\".\n\nAlso include an optional `rationale` object with:\n- `primary_reason`: 1–2 sentences explaining your single most important creative choice (e.g. why this light direction, why these key_details). Reference the research-pack or director-vision when relevant.\n- `references`: array of source identifiers you actually relied on (research_id, vision_id, or factual sources).\n- `confidence`: 0.0–1.0 self-reported confidence.\nIf your reasoning was not driven by a clear source, OMIT the rationale field — do NOT fabricate post-hoc justification.",
+            "You are a film Location Bible writer. Write a Location Bible as JSON conforming to LocationBible v2 schema. Include: $schema, bible_id, passport (type, time_of_day, era, recurring, scenes), space_description (max 200 words — be concise and precise), atmosphere, light_base_state (primary_source, direction, color_temp_kelvin, shadow_hardness, fill_to_key_ratio, practical_sources), key_details (5-8 items), negative_list (array of SHORT strings — 2-4 word labels, e.g. [\"LED lighting\", \"Smartphones\"] — no descriptions, no \"NO\" prefix), approval_status: \"draft\".\n\nAlso include an optional `rationale` object with:\n- `primary_reason`: 1–2 sentences explaining your single most important creative choice (e.g. why this light direction, why these key_details). Reference the research-pack or director-vision when relevant.\n- `references`: array of source identifiers you actually relied on (research_id, vision_id, or factual sources).\n- `confidence`: 0.0–1.0 self-reported confidence.\nIf your reasoning was not driven by a clear source, OMIT the rationale field — do NOT fabricate post-hoc justification.",
             [{ role: "user", content: `Brief: ${JSON.stringify(location_brief)}\nVision: ${JSON.stringify(director_vision)}\nResearch: ${JSON.stringify(research)}` }],
-            { maxTokens: 8192 },
+            { maxTokens: 4096 },
           );
           const bibleId = location_brief.location_id;
           await saveArtifact("bible", bibleId, JSON.parse(stripCodeFence(result.content)));
@@ -268,6 +268,17 @@ export function registerLocationTools(server: McpServer) {
             : "";
           const basePrompt = `Cinematic film location photograph. ${(bible.space_description as string | undefined) ?? ""}`.slice(0, 2000);
 
+          // Hard gate: require isometric reference (Floorplan → Isometric → Anchor pipeline)
+          updateTask(task_id, { progress: 0.08, current_step: "Loading isometric reference for img2img" });
+          const isometricImage = await loadImage("isometric", bibleId);
+          if (!isometricImage) {
+            throw flError(FL_ERRORS.MISSING_DEPENDENCY, `Isometric reference not found for ${bibleId}. Generate floorplan and isometric first.`, {
+              retryable: false,
+              suggestion: "Run create_floorplan then generate_isometric_reference before generating the anchor.",
+            });
+          }
+          const isometricDataUrl = `data:image/png;base64,${isometricImage.data.toString("base64")}`;
+
           let lastImageUrl: string | null = null;
           let lastReport: import("@filmlanguage/schemas").ValidationReport | null = null;
           let lastSaveResult: Awaited<ReturnType<typeof saveImage>> | null = null;
@@ -279,7 +290,7 @@ export function registerLocationTools(server: McpServer) {
             const progressStep = 0.1 + 0.7 * ((attempt - 1) / maxAttempts);
             updateTask(task_id, {
               progress: progressStep,
-              current_step: `Generation attempt ${attempt}/${validationEnabled ? maxAttempts : 1}`,
+              current_step: `Generation attempt ${attempt}/${validationEnabled ? maxAttempts : 1} (img2img from isometric)`,
             });
 
             const promptForAttempt = (basePrompt + correctionHint).slice(0, 2000);
@@ -289,6 +300,7 @@ export function registerLocationTools(server: McpServer) {
               negative_prompt: negativePrompt || undefined,
               seed: generation_params?.seed != null ? generation_params.seed + (attempt - 1) : undefined,
               model: resolvedModel,
+              image_urls: [isometricDataUrl],
             });
 
             if (result.images.length === 0) {
@@ -642,6 +654,71 @@ export function registerLocationTools(server: McpServer) {
           }
           updateTask(task_id, { status: "completed", progress: 1.0, current_step: `${setups.length} setups extracted`, artifacts });
         } catch (err) { updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) }); }
+      })();
+      return { content: [{ type: "text" as const, text: JSON.stringify({ task_id, status: "accepted" }) }] };
+    },
+  );
+
+  // Setup image generation (FAL-based, one image per setup)
+  server.tool(
+    "generate_setup_images",
+    "Generate camera setup reference images via FAL.ai. Hard-gated: requires approved Bible. Takes an array of setup objects (scene, mood, camera info) and generates one image per setup. Returns task_id for async tracking.",
+    {
+      bible_uri: z.string().describe("MCP resource URI of the approved Location Bible"),
+      setups: z.array(z.object({
+        id: z.string(),
+        scene: z.string(),
+        mood: z.string(),
+        camera: z.string().optional(),
+      })).describe("Setup tiles to generate images for"),
+    },
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    async ({ bible_uri, setups }) => {
+      const task_id = crypto.randomUUID();
+      createTask(task_id, "Generating setup images");
+      (async () => {
+        try {
+          updateTask(task_id, { status: "processing", progress: 0.05, current_step: "Checking Bible approval gate" });
+          const bible = await requireApprovedBible(bible_uri);
+          const bibleId = bible_uri.includes("/") ? (bible_uri.split("/").pop() ?? "") : bible_uri;
+          const spaceDesc = ((bible.space_description as string) ?? "").slice(0, 300);
+          const artifacts: Array<{ uri: string; mime_type: string; created_at: string; local_path?: string }> = [];
+
+          for (let i = 0; i < setups.length; i++) {
+            const setup = setups[i];
+            const progress = 0.1 + 0.8 * (i / setups.length);
+            updateTask(task_id, { progress, current_step: `Generating image for ${setup.id} (${i + 1}/${setups.length})` });
+
+            const prompt = `Cinematic film still, ${spaceDesc}. Scene ${setup.scene}, ${setup.mood} mood. ${setup.camera ?? ""}. Photorealistic interior photography.`.slice(0, 2000);
+            const resolvedModel = resolveModel("ANCHOR", undefined);
+            const result = await generateImage({
+              prompt,
+              model: resolvedModel,
+            });
+
+            if (result.images.length > 0) {
+              const imgRes = await fetch(result.images[0].url);
+              const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+              const setupId = setup.id.replace(/\//g, "_");
+              const saveResult = await saveImage("setup", setupId, imgBuf);
+              artifacts.push({
+                uri: saveResult.uri,
+                mime_type: "image/png",
+                created_at: new Date().toISOString(),
+                ...(saveResult.local_path ? { local_path: saveResult.local_path } : {}),
+              });
+            }
+          }
+
+          updateTask(task_id, {
+            status: "completed",
+            progress: 1.0,
+            current_step: `${artifacts.length} setup images generated`,
+            artifacts,
+          });
+        } catch (err) {
+          updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) });
+        }
       })();
       return { content: [{ type: "text" as const, text: JSON.stringify({ task_id, status: "accepted" }) }] };
     },

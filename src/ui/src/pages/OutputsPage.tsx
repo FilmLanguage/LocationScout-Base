@@ -5,7 +5,11 @@
  * NOTE: request_revision and submit_feedback are intentionally dropped for v1.
  */
 
+import { useEffect, useState } from "react";
+import { callTool } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
+
+const LOCATION_ID = "loc_001";
 
 interface Consumer {
   title: string;
@@ -81,10 +85,41 @@ const summary: Array<{ name: string; status: string; tone?: "success" | "info" }
 export function OutputsPage() {
   const { state, dispatch } = usePipeline();
   const outputsStatus = state.statuses.outputs;
+  const [outputs, setOutputs] = useState<unknown>(null);
 
-  const handleSend = () => {
+  // Fetch outputs from backend on mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await callTool("get_outputs", { location_id: LOCATION_ID });
+        if (!cancelled) {
+          setOutputs(r.data);
+          console.log("[get_outputs] →", r.data);
+        }
+      } catch (err) {
+        console.error("[get_outputs] failed:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleSend = async () => {
     dispatch({ type: "APPROVE_STAGE", stage: "outputs" });
+    try {
+      const r = await callTool("approve_artifact", {
+        artifact_uri: `agent://location-scout/outputs/${LOCATION_ID}`,
+        notes: "All outputs sent to downstream pipeline",
+      });
+      console.log("[approve_artifact outputs] →", r.data);
+    } catch (err) {
+      console.error("[approve_artifact outputs] failed:", err);
+    }
   };
+  // Reference to silence unused-var when console.log gets stripped:
+  void outputs;
 
   return (
     <div className="input-page" data-figma-node="445:47">

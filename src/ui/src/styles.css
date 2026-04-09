@@ -1625,3 +1625,115 @@ button.btn[aria-disabled="true"] {
   font-size: 12px;
   color: var(--text-muted);
 }
+
+/* ──────────────── Color-temperature range slider ────────────────
+ *
+ * Used in Light State Variations > Mood Configuration > Color Temp.
+ * Gradient track maps the slider position to the actual perceived
+ * color temperature:
+ *   left  (1800K, warm tungsten) → --accent  (#f0c040 amber)
+ *   mid   (~4150K, neutral)      → --text    (#e8e6e3 off-white)
+ *   right (6500K, cool daylight) → --blue    (#5b9bd5 sky blue)
+ *
+ * All three colors come from the design-system palette in tokens.css
+ * so the slider reads as part of the UI, not a drop-in widget.
+ * Cross-browser: we style -webkit-slider-runnable-track and
+ * -moz-range-track separately because the two engines don't share
+ * pseudo-elements.
+ */
+.color-temp-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 16px;
+  background: transparent;
+  cursor: pointer;
+  /* padding isolates the thumb from being clipped */
+  padding: 0;
+  margin: 0;
+}
+
+.color-temp-slider:focus {
+  outline: none;
+}
+
+/* Track — WebKit (Chrome, Edge, Safari) */
+.color-temp-slider::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%,
+    var(--text) 50%,
+    var(--blue) 100%
+  );
+  border: 1px solid var(--border);
+}
+
+/* Track — Firefox */
+.color-temp-slider::-moz-range-track {
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%,
+    var(--text) 50%,
+    var(--blue) 100%
+  );
+  border: 1px solid var(--border);
+}
+
+/* Thumb — WebKit */
+.color-temp-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  border: 2px solid var(--text);
+  box-shadow: 0 0 0 1px var(--bg), 0 1px 4px rgba(0, 0, 0, 0.5);
+  /* Offset so the thumb sits centered over the 8px track */
+  margin-top: -5px;
+  cursor: grab;
+  transition: transform var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.color-temp-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  border-color: var(--accent);
+}
+
+.color-temp-slider:active::-webkit-slider-thumb {
+  cursor: grabbing;
+  transform: scale(1.2);
+}
+
+.color-temp-slider:focus-visible::-webkit-slider-thumb {
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 1px var(--bg), 0 0 0 3px rgba(161, 166, 170, 0.4);
+}
+
+/* Thumb — Firefox */
+.color-temp-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  border: 2px solid var(--text);
+  box-shadow: 0 0 0 1px var(--bg), 0 1px 4px rgba(0, 0, 0, 0.5);
+  cursor: grab;
+  transition: transform var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.color-temp-slider::-moz-range-thumb:hover {
+  transform: scale(1.15);
+  border-color: var(--accent);
+}
+
+.color-temp-slider:active::-moz-range-thumb {
+  cursor: grabbing;
+  transform: scale(1.2);
+}

@@ -12,8 +12,14 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { callTool, pollTask, type TaskStatus } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
 import type { DirectorVision, LocationBrief } from "../state/pipeline";
+
+// Stable IDs for the demo session — Phase 5 wiring uses fixed values so the
+// backend can be exercised without persistent project state.
+const PROJECT_ID = "demo-project";
+const LOCATION_ID = "loc_001";
 
 type BriefListField = "scenes" | "props" | "entryExit" | "generationFlags";
 
@@ -28,6 +34,11 @@ export function InputPage() {
   const passportRef = useRef<HTMLDivElement | null>(null);
   const [flashSelections, setFlashSelections] = useState(false);
 
+  // Async progress state for the Start Research pipeline call.
+  const [taskStatus, setTaskStatus] = useState<TaskStatus | null>(null);
+  const [taskError, setTaskError] = useState<string | null>(null);
+  const isRunning = taskStatus !== null && taskStatus.status !== "completed" && taskStatus.status !== "failed";
+
   // ──────────── Location Brief edit state ────────────
   const [editingBrief, setEditingBrief] = useState(false);
   const [briefSnapshot, setBriefSnapshot] = useState<LocationBrief | null>(null);
@@ -40,7 +51,7 @@ export function InputPage() {
 
   const isStartReady = !!brief.selectedType && !!brief.selectedTimeOfDay;
 
-  const handleStart = () => {
+  const handleStart = async () => {
     if (!isStartReady) {
       // Bring the Type/TOD row into view and flash all chips for 1s
       passportRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -48,8 +59,73 @@ export function InputPage() {
       window.setTimeout(() => setFlashSelections(false), 1000);
       return;
     }
-    dispatch({ type: "APPROVE_STAGE", stage: "input" });
-    navigate("/research");
+
+    // Phase 5: fire scout_location → poll get_task_status until the backend
+    // pipeline reaches a terminal state. Only navigate on successful completion.
+    setTaskError(null);
+    setTaskStatus({
+      task_id: "",
+      status: "accepted",
+      progress: 0,
+      current_step: "Submitting to Location Scout…",
+    });
+
+    try {
+      const result = await callTool<{ task_id: string; location_id: string }>(
+        "scout_location",
+        {
+          project_id: PROJECT_ID,
+          location_brief: {
+            location_id: LOCATION_ID,
+            location_name: brief.locationName,
+            location_type: brief.selectedType as "INT" | "EXT" | "INT/EXT",
+            time_of_day: [brief.selectedTimeOfDay],
+            era: vision.eraStyle,
+            scenes: brief.scenes,
+            recurring: brief.scenes.length > 1,
+            props_mentioned: brief.props,
+            explicit_details: brief.entryExit,
+            required_practicals: brief.generationFlags,
+          },
+          director_vision: {
+            era_style: vision.eraStyle,
+            palette: vision.colorPalette.description,
+            spatial_philosophy: vision.spatialPhilosophy,
+            atmosphere: vision.atmosphere,
+            light_vision: vision.lightVision,
+            reference_films: vision.referenceFilms,
+          },
+          priority: "normal",
+        },
+      );
+
+      const taskId = result.data?.task_id;
+      console.log("[scout_location] task_id=", taskId);
+      if (!taskId) {
+        throw new Error("scout_location returned no task_id");
+      }
+
+      const final = await pollTask(taskId, (s) => setTaskStatus(s), 800, 180000);
+      console.log("[scout_location] final status=", final);
+
+      if (final.status === "failed") {
+        setTaskError(final.error || "Pipeline failed without an error message");
+        return; // do not navigate
+      }
+
+      // Success — unlock the next stage and navigate.
+      dispatch({ type: "APPROVE_STAGE", stage: "input" });
+      navigate("/research");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[scout_location] failed:", err);
+      setTaskError(msg);
+    }
+  };
+
+  const handleRetry = () => {
+    setTaskError(null);
+    setTaskStatus(null);
   };
 
   const enterBriefEdit = () => {
@@ -653,18 +729,80 @@ export function InputPage() {
       </div>
 
       <div className="input-page__footer">
-        <button
-          type="button"
-          className="btn btn--primary"
-          onClick={handleStart}
-          aria-disabled={!isStartReady}
-          title={
-            !isStartReady ? "Select a Type and a Time of day to continue" : undefined
-          }
-        >
-          Start Research
-          <span className="btn__arrow" aria-hidden>→</span>
-        </button>
+        {/* Progress / error feedback while the backend pipeline runs */}
+        {(taskStatus || taskError) && (
+          <div
+            role="status"
+            aria-live="polite"
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+              padding: "10px 14px",
+              borderRadius: 8,
+              background: taskError ? "rgba(220, 60, 60, 0.08)" : "rgba(255,255,255,0.04)",
+              border: `1px solid ${taskError ? "rgba(220,60,60,0.4)" : "rgba(255,255,255,0.1)"}`,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <span aria-hidden>{taskError ? "✗" : isRunning ? "⏳" : "✓"}</span>
+              <span>
+                {taskError
+                  ? `Failed: ${taskError}`
+                  : taskStatus?.current_step || "Working…"}
+              </span>
+              {!taskError && taskStatus && (
+                <span style={{ marginLeft: "auto", opacity: 0.7 }}>
+                  {Math.round((taskStatus.progress ?? 0) * 100)}%
+                </span>
+              )}
+            </div>
+            {!taskError && taskStatus && (
+              <div
+                style={{
+                  height: 4,
+                  borderRadius: 2,
+                  background: "rgba(255,255,255,0.08)",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    width: `${Math.round((taskStatus.progress ?? 0) * 100)}%`,
+                    height: "100%",
+                    background: "var(--accent)",
+                    transition: "width 200ms ease",
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {taskError ? (
+          <button type="button" className="btn btn--ghost" onClick={handleRetry}>
+            Try again
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={handleStart}
+            disabled={isRunning}
+            aria-disabled={!isStartReady || isRunning}
+            title={
+              !isStartReady
+                ? "Select a Type and a Time of day to continue"
+                : isRunning
+                ? "Pipeline is running — please wait"
+                : undefined
+            }
+          >
+            {isRunning ? "Researching…" : "Start Research"}
+            {!isRunning && <span className="btn__arrow" aria-hidden>→</span>}
+          </button>
+        )}
       </div>
     </div>
   );

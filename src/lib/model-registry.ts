@@ -28,7 +28,7 @@ export type LogicalModel = keyof typeof FAL_MODELS;
 
 export type Slot = "ANCHOR" | "MOOD_VARIANT" | "ISOMETRIC";
 
-const BUILTIN_DEFAULT: LogicalModel = "nano-banana/edit";
+const BUILTIN_DEFAULT: LogicalModel = "flux-schnell";
 
 /**
  * Resolve a slot to a concrete FAL endpoint path (e.g. "fal-ai/nano-banana/edit").
@@ -36,9 +36,9 @@ const BUILTIN_DEFAULT: LogicalModel = "nano-banana/edit";
  */
 export function resolveModel(slot: Slot, override?: string): string {
   const raw =
-    override ??
-    process.env[`FAL_MODEL_${slot}`] ??
-    process.env.FAL_MODEL_DEFAULT ??
+    override ||
+    process.env[`FAL_MODEL_${slot}`] ||
+    process.env.FAL_MODEL_DEFAULT ||
     BUILTIN_DEFAULT;
 
   // If the caller passed a full endpoint path (contains a slash and is not a

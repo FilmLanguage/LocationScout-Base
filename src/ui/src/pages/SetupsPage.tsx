@@ -1,10 +1,54 @@
 /**
  * Stage 5 — Setups Generation.
  * Mirrors Figma frame "Setups Generation" (node 436:33).
+ *
+ * On mount, checks whether each setup tile already has an image at
+ * /artifacts/setup/<id>.png. If any are missing, fires the backend
+ * generate_setup_images tool (runs all missing setups in parallel via
+ * FAL.ai) and polls until complete. Each tile shows its own image,
+ * the detail panel shows a full-resolution preview of the selected
+ * setup, and the "PROMPT (click to expand)" link loads the exact
+ * prompt used for the selected setup from get_setup_prompt.
  */
 
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { callTool, pollTask, type TaskStatus } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
+import type { SetupTile } from "../state/pipeline";
+
+const LOCATION_ID = "loc_001";
+const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
+const ANCHOR_URI = `agent://location-scout/anchor/${LOCATION_ID}`;
+const setupUri = (id: string) => `agent://location-scout/setup/${id}`;
+const setupImgPath = (id: string) => `/artifacts/setup/${id}.png`;
+
+/** Default camera descriptions per setup, pulled from the Figma mock-up. */
+const SETUP_CAMERA: Record<string, string> = {
+  "S1-A": "35mm, angle 45°, medium wide, couch centered",
+  "S1-B": "35mm, angle 45°, medium wide, daylight key",
+  "S1-C": "35mm, angle 45°, dusk warm fill",
+  "S2-A": "50mm, angle 180°, close-up, TV reflection in eyes",
+  "S2-B": "50mm, angle 180°, close-up, night practical only",
+  "S2-C": "50mm, angle 180°, dusk side light",
+  "S3-A": "24mm, angle 90°, wide, kitchen archway frame, late-night moonlight",
+  "S3-B": "24mm, angle 90°, wide, flat daylight",
+  "S3-C": "24mm, angle 90°, wide, overhead practicals at night",
+};
+
+type BatchState =
+  | { kind: "checking" }
+  | { kind: "generating"; status: TaskStatus | null }
+  | { kind: "ready" }
+  | { kind: "error"; message: string };
+
+interface SetupPrompt {
+  prompt: string;
+  negative_prompt: string | null;
+  scene: string;
+  mood: string;
+  camera: string | null;
+}
 
 export function SetupsPage() {
   const { state, dispatch } = usePipeline();
@@ -14,13 +58,336 @@ export function SetupsPage() {
   const approvedCount = tiles.filter((t) => t.status === "approved").length;
   const draftCount = tiles.filter((t) => t.status === "draft").length;
 
+  const [batch, setBatch] = useState<BatchState>({ kind: "checking" });
+  /** Per-tile cache-bust number that refreshes the <img src> after regeneration. */
+  const [tileCacheBust, setTileCacheBust] = useState<Record<string, number>>({});
+  /** Set of tile IDs currently generating (for the single-tile regenerate flow). */
+  const [regenerating, setRegenerating] = useState<Set<string>>(new Set());
+  /** Loaded prompt for the selected tile, if any. */
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [promptData, setPromptData] = useState<SetupPrompt | null>(null);
+  const [promptLoading, setPromptLoading] = useState(false);
+
+  const setupsArg = useMemo(
+    () =>
+      tiles.map((t) => ({
+        id: t.id,
+        scene: t.scene,
+        mood: t.mood,
+        camera: SETUP_CAMERA[t.id] ?? undefined,
+      })),
+    [tiles],
+  );
+
+  /** HEAD /artifacts/setup/<id>.png for each tile, return IDs that are missing. */
+  const findMissing = async (ts: SetupTile[]): Promise<string[]> => {
+    const missing: string[] = [];
+    await Promise.all(
+      ts.map(async (t) => {
+        try {
+          const res = await fetch(setupImgPath(t.id), { method: "HEAD", cache: "no-store" });
+          if (!res.ok) missing.push(t.id);
+        } catch {
+          missing.push(t.id);
+        }
+      }),
+    );
+    return missing;
+  };
+
+  const runBatch = async (
+    targetTiles: Array<{ id: string; scene: string; mood: string; camera?: string }>,
+  ) => {
+    if (targetTiles.length === 0) {
+      setBatch({ kind: "ready" });
+      return;
+    }
+    setBatch({ kind: "generating", status: null });
+    try {
+      const result = await callTool<{ task_id: string }>("generate_setup_images", {
+        bible_uri: BIBLE_URI,
+        setups: targetTiles,
+      });
+      const taskId = result.data?.task_id;
+      if (!taskId) {
+        setBatch({ kind: "error", message: "generate_setup_images returned no task_id" });
+        return;
+      }
+      const final = await pollTask(
+        taskId,
+        (s) => setBatch({ kind: "generating", status: s }),
+        1500,
+        240000,
+      );
+      if (final.status === "failed") {
+        setBatch({ kind: "error", message: final.error || "Generation failed" });
+        return;
+      }
+      // Bust the cache on each generated tile so the <img> re-requests it.
+      const now = Date.now();
+      setTileCacheBust((prev) => {
+        const next = { ...prev };
+        for (const t of targetTiles) next[t.id] = now;
+        return next;
+      });
+      setBatch({ kind: "ready" });
+    } catch (err) {
+      setBatch({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
+  // On mount: see what's missing, generate if needed.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const missing = await findMissing(tiles);
+      if (cancelled) return;
+      if (missing.length === 0) {
+        // Mark everything as freshly-cached so the browser actually renders.
+        const now = Date.now();
+        const map: Record<string, number> = {};
+        for (const t of tiles) map[t.id] = now;
+        setTileCacheBust(map);
+        setBatch({ kind: "ready" });
+        return;
+      }
+      const targets = setupsArg.filter((s) => missing.includes(s.id));
+      await runBatch(targets);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Reset prompt panel whenever the selected tile changes.
+  useEffect(() => {
+    setPromptOpen(false);
+    setPromptData(null);
+  }, [selectedId]);
+
+  const togglePrompt = async () => {
+    if (promptOpen) {
+      setPromptOpen(false);
+      return;
+    }
+    setPromptOpen(true);
+    if (promptData) return;
+    setPromptLoading(true);
+    try {
+      const r = await callTool<SetupPrompt | { error: string }>("get_setup_prompt", {
+        setup_id: selected.id,
+      });
+      if (r.data && "prompt" in r.data) {
+        setPromptData(r.data);
+      } else {
+        setPromptData(null);
+      }
+    } catch (err) {
+      console.error("[get_setup_prompt] failed:", err);
+      setPromptData(null);
+    } finally {
+      setPromptLoading(false);
+    }
+  };
+
+  const approveSetup = async (id: string) => {
+    dispatch({ type: "SET_SETUP_STATUS", id, status: "approved" });
+    try {
+      await callTool("approve_artifact", {
+        artifact_uri: setupUri(id),
+        notes: `Setup ${id} approved`,
+      });
+    } catch (err) {
+      console.error(`[approve_artifact setup ${id}] failed:`, err);
+    }
+  };
+
+  const rejectSetup = async (id: string) => {
+    dispatch({ type: "SET_SETUP_STATUS", id, status: "rejected" });
+    try {
+      await callTool("reject_artifact", {
+        artifact_uri: setupUri(id),
+        issues: [{ severity: "blocker", description: `Setup ${id} rejected from UI` }],
+      });
+    } catch (err) {
+      console.error(`[reject_artifact setup ${id}] failed:`, err);
+    }
+  };
+
+  const handleApproveAll = async () => {
+    const drafts = tiles.filter((t) => t.status === "draft").map((t) => t.id);
+    dispatch({ type: "APPROVE_ALL_SETUPS" });
+    for (const id of drafts) {
+      try {
+        await callTool("approve_artifact", {
+          artifact_uri: setupUri(id),
+          notes: "Bulk approve",
+        });
+      } catch (err) {
+        console.error(`[approve_artifact bulk ${id}] failed:`, err);
+      }
+    }
+  };
+
+  const handleCompare = async () => {
+    if (!selected) return;
+    try {
+      const r = await callTool("compare_with_anchor", {
+        setup_uri: setupUri(selected.id),
+        anchor_uri: ANCHOR_URI,
+      });
+      console.log("[compare_with_anchor] →", r.data);
+    } catch (err) {
+      console.error("[compare_with_anchor] failed:", err);
+    }
+  };
+
+  const handleRegenerateSelected = async () => {
+    if (!selected) return;
+    const tile = setupsArg.find((s) => s.id === selected.id);
+    if (!tile) return;
+    setRegenerating((prev) => new Set(prev).add(selected.id));
+    try {
+      const result = await callTool<{ task_id: string }>("generate_setup_images", {
+        bible_uri: BIBLE_URI,
+        setups: [tile],
+      });
+      const taskId = result.data?.task_id;
+      if (!taskId) throw new Error("no task_id");
+      const final = await pollTask(taskId, undefined, 1500, 120000);
+      if (final.status === "failed") {
+        throw new Error(final.error || "Regeneration failed");
+      }
+      setTileCacheBust((prev) => ({ ...prev, [selected.id]: Date.now() }));
+      // Invalidate prompt cache so the next open re-fetches it.
+      setPromptData(null);
+    } catch (err) {
+      console.error("[regenerate] failed:", err);
+    } finally {
+      setRegenerating((prev) => {
+        const next = new Set(prev);
+        next.delete(selected.id);
+        return next;
+      });
+    }
+  };
+
   const handleAdvance = () => {
     dispatch({ type: "APPROVE_STAGE", stage: "setups" });
     navigate("/light-states");
   };
 
+  const isBatchBusy = batch.kind === "checking" || batch.kind === "generating";
+
+  const renderTileImage = (t: SetupTile) => {
+    const isRegen = regenerating.has(t.id);
+    const bust = tileCacheBust[t.id];
+    if (isBatchBusy || isRegen || bust === undefined) {
+      return (
+        <div
+          className="setup-tile__image"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 11,
+            opacity: 0.7,
+          }}
+        >
+          {isRegen ? "↻ regenerating…" : batch.kind === "generating" ? "⏳ generating…" : "…"}
+        </div>
+      );
+    }
+    return (
+      <img
+        src={`${setupImgPath(t.id)}?v=${bust}`}
+        alt={`Setup ${t.id}`}
+        className="setup-tile__image"
+        style={{ objectFit: "cover", width: "100%", display: "block" }}
+      />
+    );
+  };
+
+  const renderDetailPreview = () => {
+    const isRegen = regenerating.has(selected.id);
+    const bust = tileCacheBust[selected.id];
+    if (isBatchBusy || isRegen || bust === undefined) {
+      return (
+        <div
+          className="placeholder-box"
+          style={{
+            minHeight: 140,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+          }}
+        >
+          <span aria-hidden>⏳</span>
+          <span>
+            {isRegen
+              ? "Regenerating this setup…"
+              : batch.kind === "generating"
+              ? batch.status?.current_step || "Generating all setups…"
+              : "Checking storage…"}
+          </span>
+        </div>
+      );
+    }
+    return (
+      <img
+        src={`${setupImgPath(selected.id)}?v=${bust}`}
+        alt={`Full preview of ${selected.id}`}
+        style={{ width: "100%", borderRadius: 8, background: "#000", display: "block" }}
+      />
+    );
+  };
+
   return (
     <div className="input-page" data-figma-node="436:33">
+      {/* Batch-level progress / error banner */}
+      {batch.kind === "generating" && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            padding: "10px 14px",
+            borderRadius: 8,
+            fontSize: 13,
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: "var(--s-3)",
+          }}
+        >
+          <span aria-hidden>⏳</span>
+          <span>{batch.status?.current_step || "Generating setup images…"}</span>
+          <span style={{ marginLeft: "auto", opacity: 0.7 }}>
+            {Math.round((batch.status?.progress ?? 0) * 100)}%
+          </span>
+        </div>
+      )}
+      {batch.kind === "error" && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            padding: "10px 14px",
+            borderRadius: 8,
+            fontSize: 13,
+            background: "rgba(220,60,60,0.08)",
+            border: "1px solid rgba(220,60,60,0.4)",
+            marginBottom: "var(--s-3)",
+            color: "#ff9a9a",
+          }}
+        >
+          ✗ Setup generation failed: {batch.message}
+        </div>
+      )}
+
       <div className="columns-2">
         {/* ───── Generated Setups grid ───── */}
         <div className="input-page__column">
@@ -41,7 +408,7 @@ export function SetupsPage() {
                     <span className="setup-tile__id">{t.id}</span>
                     <span className={`status-badge status-badge--${t.status}`}>{t.status}</span>
                   </div>
-                  <div className="setup-tile__image" />
+                  {renderTileImage(t)}
                   <div className="setup-tile__footer">
                     <span className="mini-chip mini-chip--scene">{t.scene}</span>
                     <span className="mini-chip mini-chip--mood">{t.mood}</span>
@@ -52,7 +419,7 @@ export function SetupsPage() {
                       aria-label="Approve"
                       onClick={(e) => {
                         e.stopPropagation();
-                        dispatch({ type: "SET_SETUP_STATUS", id: t.id, status: "approved" });
+                        approveSetup(t.id);
                       }}
                     >
                       ✓
@@ -63,7 +430,7 @@ export function SetupsPage() {
                       aria-label="Reject"
                       onClick={(e) => {
                         e.stopPropagation();
-                        dispatch({ type: "SET_SETUP_STATUS", id: t.id, status: "rejected" });
+                        rejectSetup(t.id);
                       }}
                     >
                       ✗
@@ -84,9 +451,7 @@ export function SetupsPage() {
           </div>
           <article className="card">
             <div className="card__body" style={{ gap: "var(--s-3)" }}>
-              <div className="placeholder-box" style={{ minHeight: 140 }}>
-                Full Resolution Preview
-              </div>
+              {renderDetailPreview()}
               <div className="detail-field">
                 <span className="detail-field__label">Scene / Mood</span>
                 <span className="detail-field__value">
@@ -101,12 +466,57 @@ export function SetupsPage() {
                 <span className="detail-field__label">Anchor Ref</span>
                 <span className="detail-field__value">anchor_loc_001 (matched)</span>
               </div>
-              <button type="button" className="add-link">▸ PROMPT (click to expand)</button>
-              <button type="button" className="btn btn--ghost btn--block">
+              <button type="button" className="add-link" onClick={togglePrompt}>
+                {promptOpen ? "▾ PROMPT (click to collapse)" : "▸ PROMPT (click to expand)"}
+              </button>
+              {promptOpen && (
+                <div
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: 6,
+                    background: "rgba(255,255,255,0.04)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    fontSize: 12,
+                    fontFamily: "ui-monospace, Menlo, monospace",
+                    lineHeight: 1.45,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    maxHeight: 220,
+                    overflowY: "auto",
+                  }}
+                >
+                  {promptLoading ? (
+                    <span style={{ opacity: 0.6 }}>Loading prompt…</span>
+                  ) : promptData ? (
+                    <>
+                      <div style={{ opacity: 0.6, marginBottom: 6 }}>prompt</div>
+                      <div>{promptData.prompt}</div>
+                      {promptData.negative_prompt && (
+                        <>
+                          <div style={{ opacity: 0.6, marginTop: 10, marginBottom: 6 }}>
+                            negative_prompt
+                          </div>
+                          <div>{promptData.negative_prompt}</div>
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <span style={{ opacity: 0.6 }}>
+                      No prompt saved yet — regenerate this setup to create one.
+                    </span>
+                  )}
+                </div>
+              )}
+              <button type="button" className="btn btn--ghost btn--block" onClick={handleCompare}>
                 ⇄ Compare with Anchor
               </button>
-              <button type="button" className="btn btn--ghost btn--block">
-                ↻ Regenerate This Setup
+              <button
+                type="button"
+                className="btn btn--ghost btn--block"
+                onClick={handleRegenerateSelected}
+                disabled={regenerating.has(selected.id) || isBatchBusy}
+              >
+                {regenerating.has(selected.id) ? "↻ Regenerating…" : "↻ Regenerate This Setup"}
               </button>
             </div>
           </article>
@@ -117,7 +527,7 @@ export function SetupsPage() {
         <button
           type="button"
           className="btn btn--success"
-          onClick={() => dispatch({ type: "APPROVE_ALL_SETUPS" })}
+          onClick={handleApproveAll}
           disabled={draftCount === 0}
         >
           Approve All ({draftCount})

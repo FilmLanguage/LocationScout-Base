@@ -5,7 +5,11 @@
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { callTool } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
+
+const LOCATION_ID = "loc_001";
+const RESEARCH_PACK_URI = `agent://location-scout/research/research_${LOCATION_ID}`;
 
 export function ResearchPage() {
   const { state, dispatch } = usePipeline();
@@ -15,20 +19,69 @@ export function ResearchPage() {
   const [newFact, setNewFact] = useState("");
   const [newAnachronism, setNewAnachronism] = useState("");
 
-  const handleAddFact = () => {
+  const handleAddFact = async () => {
     if (!newFact.trim()) return;
-    dispatch({ type: "ADD_FACT", title: newFact.trim(), subtitle: "Added manually" });
+    const fact = newFact.trim();
+    dispatch({ type: "ADD_FACT", title: fact, subtitle: "Added manually" });
     setNewFact("");
+    try {
+      const r = await callTool("add_fact", {
+        research_pack_uri: RESEARCH_PACK_URI,
+        fact,
+      });
+      console.log("[add_fact] →", r.data);
+    } catch (err) {
+      console.error("[add_fact] failed:", err);
+    }
   };
 
-  const handleAddAnachronism = () => {
+  const handleAddAnachronism = async () => {
     if (!newAnachronism.trim()) return;
-    dispatch({ type: "ADD_ANACHRONISM", text: newAnachronism.trim() });
+    const item = newAnachronism.trim();
+    dispatch({ type: "ADD_ANACHRONISM", text: item });
     setNewAnachronism("");
+    try {
+      const r = await callTool("add_anachronism", {
+        target_uri: RESEARCH_PACK_URI,
+        item,
+      });
+      console.log("[add_anachronism] →", r.data);
+    } catch (err) {
+      console.error("[add_anachronism] failed:", err);
+    }
   };
 
-  const handleApprove = () => {
+  const handleDeeperResearch = async () => {
+    try {
+      const r = await callTool("research_era", {
+        location_brief: {
+          location_id: LOCATION_ID,
+          location_name: state.brief.locationName,
+          location_type: (state.brief.selectedType || "INT") as "INT" | "EXT" | "INT/EXT",
+          time_of_day: [state.brief.selectedTimeOfDay || "DAY"],
+          era: state.vision.eraStyle,
+          scenes: state.brief.scenes,
+          recurring: state.brief.scenes.length > 1,
+        },
+        director_vision: { era_style: state.vision.eraStyle },
+      });
+      console.log("[research_era] →", r.data);
+    } catch (err) {
+      console.error("[research_era] failed:", err);
+    }
+  };
+
+  const handleApprove = async () => {
     dispatch({ type: "APPROVE_STAGE", stage: "research" });
+    try {
+      const r = await callTool("approve_artifact", {
+        artifact_uri: RESEARCH_PACK_URI,
+        notes: "Approved from Research Cycle UI",
+      });
+      console.log("[approve_artifact research] →", r.data);
+    } catch (err) {
+      console.error("[approve_artifact research] failed:", err);
+    }
     navigate("/analysis");
   };
 
@@ -134,7 +187,7 @@ export function ResearchPage() {
       </div>
 
       <div className="page-footer">
-        <button type="button" className="btn btn--ghost">Deeper Research</button>
+        <button type="button" className="btn btn--ghost" onClick={handleDeeperResearch}>Deeper Research</button>
         <span className="page-footer__spacer" />
         <button type="button" className="btn btn--primary" onClick={handleApprove}>
           Approve Research

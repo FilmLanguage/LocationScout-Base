@@ -89,11 +89,25 @@ export interface Variation {
   temp: string;
 }
 
+export type ShadowHardness = "hard" | "soft" | "mixed";
+export type ClutterLevel = "clean" | "slight" | "messy" | "destroyed";
+export type WindowState = "open" | "closed" | "curtains_drawn" | "boarded_up";
+
+export interface MoodConfig {
+  directionOverride: string;  // e.g. "OVERHEAD"
+  timeOfDay: string;          // e.g. "NIGHT"
+  colorTempK: number;         // e.g. 2700
+  shadowHardness: ShadowHardness;
+  clutterLevel: ClutterLevel;
+  windowState: WindowState;
+}
+
 export interface LightStatesState {
   sources: Array<{ id: string; meta: string; variations: number }>;
   activeSourceId: string;
   variations: Variation[];
   aiSuggestionDismissed: boolean;
+  moodConfig: MoodConfig;
 }
 
 export interface PipelineState {
@@ -219,7 +233,7 @@ export const INITIAL_STATE: PipelineState = {
     atmosphere:
       "Stale air-conditioning hum undercut by the distant drone of lawnmowers. The faint chemical tang of carpet cleaner. A heaviness in the air that makes every conversation feel like an interrogation. The silence between family members has texture — dense, oppressive, loaded with unspoken accusations.",
     wordCount: 438,
-    wordBudget: 400,
+    wordBudget: 200,
     keyDetails: [
       "CRT TV (bulky, 90s model)",
       "Frayed beige Berber carpet",
@@ -280,6 +294,14 @@ export const INITIAL_STATE: PipelineState = {
       { id: "S3 / LATE_NIGHT", status: "generating", temp: "1800K" },
     ],
     aiSuggestionDismissed: false,
+    moodConfig: {
+      directionOverride: "OVERHEAD",
+      timeOfDay: "NIGHT",
+      colorTempK: 2700,
+      shadowHardness: "hard",
+      clutterLevel: "messy",
+      windowState: "closed",
+    },
   },
 };
 
@@ -301,7 +323,9 @@ export type PipelineAction =
   | { type: "CANCEL_VARIATION"; id: string }
   | { type: "APPROVE_ALL_VARIATIONS" }
   | { type: "DISMISS_MOOD_SUGGESTION" }
-  | { type: "APPLY_MOOD_SUGGESTION" };
+  | { type: "APPLY_MOOD_SUGGESTION" }
+  | { type: "SET_MOOD_CONFIG"; patch: Partial<MoodConfig> }
+  | { type: "SET_ANALYSIS"; patch: Partial<AnalysisState> };
 
 /**
  * The 7-stage pipeline order. Used by APPROVE_STAGE to unlock the next stage.
@@ -446,10 +470,37 @@ export function pipelineReducer(
       };
 
     case "APPLY_MOOD_SUGGESTION":
-      // No-op visual — in Phase 5 this will call apply_mood_suggestion on the backend.
+      // The AI suggestion shown in the UI is
+      // "Use 2700K + hard shadows for sc_003 NIGHT (TV-lit scene)".
+      // Applying it writes those concrete values into the mood config so the
+      // user can see the delta rows update and then hit Generate Variation.
       return {
         ...state,
-        lightStates: { ...state.lightStates, aiSuggestionDismissed: true },
+        lightStates: {
+          ...state.lightStates,
+          aiSuggestionDismissed: true,
+          moodConfig: {
+            ...state.lightStates.moodConfig,
+            colorTempK: 2700,
+            shadowHardness: "hard",
+            timeOfDay: "NIGHT",
+          },
+        },
+      };
+
+    case "SET_MOOD_CONFIG":
+      return {
+        ...state,
+        lightStates: {
+          ...state.lightStates,
+          moodConfig: { ...state.lightStates.moodConfig, ...action.patch },
+        },
+      };
+
+    case "SET_ANALYSIS":
+      return {
+        ...state,
+        analysis: { ...state.analysis, ...action.patch },
       };
 
     default:
