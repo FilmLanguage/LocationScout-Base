@@ -13,17 +13,14 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "clean": "rm -rf dist",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "zod": "^3.23.0",
     "zod-to-json-schema": "^3.23.0"
   },
   "devDependencies": {
-    "typescript": "^5.5.0",
-    "vitest": "^3.1.0"
+    "typescript": "^5.5.0"
   },
   "files": [
     "dist",
