@@ -16,6 +16,7 @@ import { ARTIFACT_TYPE as WARDROBE_BIBLE, URI_PATTERN as WARDROBE_BIBLE_URI, PRO
 import { ARTIFACT_TYPE as APPEARANCE_STATES, URI_PATTERN as APPEARANCE_STATES_URI, PRODUCED_BY as APPEARANCE_STATES_PRODUCER, MIME_TYPE as APPEARANCE_STATES_MIME } from "./appearance-state-v1.js";
 import { ARTIFACT_TYPE as MODEL_SHEET, URI_PATTERN as MODEL_SHEET_URI, PRODUCED_BY as MODEL_SHEET_PRODUCER, MIME_TYPE as MODEL_SHEET_MIME } from "./model-sheet-v1.js";
 import { ARTIFACT_TYPE as VALIDATION_REPORT, URI_PATTERN as VALIDATION_REPORT_URI, PRODUCED_BY as VALIDATION_REPORT_PRODUCER, MIME_TYPE as VALIDATION_REPORT_MIME } from "./validation-report-v1.js";
+import { ARTIFACT_TYPE as SCENE_STYLE, URI_PATTERN as SCENE_STYLE_URI, PRODUCED_BY as SCENE_STYLE_PRODUCER, MIME_TYPE as SCENE_STYLE_MIME } from "./scene-style-v1.js";
 
 export const ARTIFACT_REGISTRY = {
   [FILM_IR]: { uriPattern: FILM_IR_URI, producedBy: FILM_IR_PRODUCER, mimeType: FILM_IR_MIME },
@@ -39,8 +40,8 @@ export const ARTIFACT_REGISTRY = {
   shot_list:           { uriPattern: "agent://cinematographer/shot-list/{id}" as const,       producedBy: "cinematographer-base" as const,      mimeType: "application/json" as const },
   lighting_plan:       { uriPattern: "agent://cinematographer/lighting-plan/{id}" as const,   producedBy: "cinematographer-base" as const,      mimeType: "application/json" as const },
   camera_movement_map: { uriPattern: "agent://cinematographer/camera-map/{id}" as const,      producedBy: "cinematographer-base" as const,      mimeType: "application/json" as const },
-  set_design_bible:    { uriPattern: "agent://production-designer/set-design/{id}" as const,  producedBy: "production-designer-base" as const,  mimeType: "application/json" as const },
-  props_list:          { uriPattern: "agent://production-designer/props/{id}" as const,       producedBy: "production-designer-base" as const,  mimeType: "application/json" as const },
+  [SCENE_STYLE]:       { uriPattern: SCENE_STYLE_URI, producedBy: SCENE_STYLE_PRODUCER, mimeType: SCENE_STYLE_MIME },
+  style_reference:     { uriPattern: "agent://art-director/style-reference/{id}" as const,    producedBy: "art-director-base" as const,          mimeType: "image/png" as const },
   [CHARACTER_BIBLE]:   { uriPattern: CHARACTER_BIBLE_URI, producedBy: CHARACTER_BIBLE_PRODUCER, mimeType: CHARACTER_BIBLE_MIME },
   [CHARACTER_RESEARCH]: { uriPattern: CHARACTER_RESEARCH_URI, producedBy: CHARACTER_RESEARCH_PRODUCER, mimeType: CHARACTER_RESEARCH_MIME },
   [WARDROBE_BIBLE]:    { uriPattern: WARDROBE_BIBLE_URI, producedBy: WARDROBE_BIBLE_PRODUCER, mimeType: WARDROBE_BIBLE_MIME },

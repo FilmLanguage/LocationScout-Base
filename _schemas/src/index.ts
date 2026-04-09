@@ -22,6 +22,7 @@ export { CharacterResearchPackSchema, type CharacterResearchPack, CharacterResea
 export { WardrobeBibleSchema, type WardrobeBible, WardrobeEntrySchema, type WardrobeEntry, WardrobeBibleJsonSchema } from "./artifacts/wardrobe-bible-v1.js";
 export { AppearanceStatesSchema, type AppearanceStates, AppearanceEntrySchema, type AppearanceEntry, AppearanceStatesJsonSchema } from "./artifacts/appearance-state-v1.js";
 export { ModelSheetSchema, type ModelSheet, ModelSheetJsonSchema } from "./artifacts/model-sheet-v1.js";
+export { SceneStyleSchema, type SceneStyle, StyleReferenceSchema, type StyleReference, SceneStyleJsonSchema } from "./artifacts/scene-style-v1.js";
 
 // --- Registry ---
 export { ARTIFACT_REGISTRY, type ArtifactType } from "./artifacts/registry.js";
