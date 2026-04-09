@@ -91,7 +91,7 @@ const spec = {
                     params: {
                       name: "scout_location",
                       arguments: {
-                        project_id: "my-project-uuid",
+                        project_id: "my-project-guid",
                         location_brief: {
                           location_id: "loc_001",
                           location_name: "Jesse Apartment - Living Room",

@@ -55,7 +55,7 @@ export function registerCommonTools(server: McpServer) {
   server.tool(
     "get_task_status",
     "Get current status of an async task. Returns state (accepted/processing/completed/failed), progress (0.0-1.0), and current_step description.",
-    { task_id: z.string().describe("UUID of the task to check") },
+    { task_id: z.string().describe("GUID of the task to check") },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     async ({ task_id }) => {
       const task = getTask(task_id);
@@ -86,7 +86,7 @@ export function registerCommonTools(server: McpServer) {
   server.tool(
     "get_task_result",
     "Get the result of a completed async task, including artifact references.",
-    { task_id: z.string().describe("UUID of the completed task") },
+    { task_id: z.string().describe("GUID of the completed task") },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     async ({ task_id }) => {
       const task = getTask(task_id);
@@ -114,7 +114,7 @@ export function registerCommonTools(server: McpServer) {
   server.tool(
     "cancel_task",
     "Cancel a running or queued task. Idempotent — cancelling an already-cancelled task is a no-op.",
-    { task_id: z.string().describe("UUID of the task to cancel") },
+    { task_id: z.string().describe("GUID of the task to cancel") },
     { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     async ({ task_id }) => {
       const task = getTask(task_id);

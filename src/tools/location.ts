@@ -24,6 +24,7 @@ const DirectorVisionInputSchema = z.object({
   reference_films: z.array(z.string()).optional().describe("Reference films"),
   atmosphere: z.string().optional().describe("Atmospheric direction"),
   light_vision: z.string().optional().describe("Lighting philosophy"),
+  location_notes: z.record(z.string(), z.string()).optional().describe("Per-location director notes keyed by location_id, e.g. { loc_001: 'sterile, no warmth' }"),
 });
 
 /** Strip markdown code fences that LLMs sometimes wrap around JSON. */
@@ -40,7 +41,7 @@ export function registerLocationTools(server: McpServer) {
     "scout_location",
     "Run full location scouting pipeline: research era, write Bible, generate anchor image, create floorplan. Returns task_id for async tracking. Requires location_brief (from 1AD) and director_vision (from Director agent) as inputs.",
     {
-      project_id: z.string().describe("Project UUID"),
+      project_id: z.string().describe("Project GUID"),
       location_brief: LocationBriefSchema,
       director_vision: DirectorVisionInputSchema,
       priority: z.enum(["low", "normal", "high", "critical"]).default("normal"),
