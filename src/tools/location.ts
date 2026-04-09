@@ -5,6 +5,7 @@ import { llmComplete, generateImage } from "../lib/api-client.js";
 import { flError, FL_ERRORS } from "../lib/errors.js";
 import { validateAnchorAgainstBible, issuesToCorrectionHint, type ValidatorBibleSpec } from "../lib/anchor-validator.js";
 import { resolveModel } from "../lib/model-registry.js";
+import { analyzeWithGeminiVision, stripJsonFence } from "../lib/gemini-vision.js";
 import { spawnSync } from "node:child_process";
 import { resolve as pathResolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -588,11 +589,49 @@ export function registerLocationTools(server: McpServer) {
       mood_state_uris: z.array(z.string()).describe("MCP resource URIs of mood states"),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
-    async () => {
+    async ({ floorplan_uri, mood_state_uris }) => {
       const task_id = crypto.randomUUID();
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({ task_id, status: "accepted" }) }],
-      };
+      createTask(task_id, "Extracting camera setups");
+      (async () => {
+        try {
+          updateTask(task_id, { status: "processing", progress: 0.1, current_step: "Loading bible and mood states" });
+          // Floorplan stored as saveImage("floorplan", bibleId, ...) — floorplan ID IS the bible ID
+          const bibleId = floorplan_uri.split("/").pop() ?? "";
+          const bible = await loadArtifact<Record<string, unknown>>("bible", bibleId);
+          if (!bible) { updateTask(task_id, { status: "failed", error: `Bible not found for floorplan: ${bibleId}` }); return; }
+
+          const moodStates: unknown[] = [];
+          if (mood_state_uris.length > 0) {
+            const loaded = await Promise.all(mood_state_uris.map((u) => loadArtifact("mood", u.split("/").pop() ?? "")));
+            for (const ms of loaded) { if (ms) moodStates.push(ms); }
+          }
+
+          updateTask(task_id, { progress: 0.3, current_step: "Generating setup plan via LLM" });
+          const passport = (bible.passport as Record<string, unknown> | undefined) ?? {};
+          const llmResult = await llmComplete(
+            "You are a film location setup planner. Generate camera setups from spatial layout and mood states. Return a JSON array only — no prose, no fences.",
+            [{ role: "user", content: `Location Bible:\n${JSON.stringify({ bible_id: bible.bible_id, spaces: bible.spaces, space_description: (bible.space_description as string | undefined)?.slice(0, 600), scenes: passport.scenes, light_base_state: bible.light_base_state })}\n\nMood States:\n${JSON.stringify(moodStates)}\n\nFor each scene produce one or more setup objects. Each must have: setup_id (unique string, e.g. "setup_S1_A"), scene_id, camera_x (meters), camera_y (meters), angle_deg (0-360), lens_mm, composition (string), characters (string[]), notes (string).` }],
+            { maxTokens: 4096, temperature: 0.6 },
+          );
+
+          let setups: Array<Record<string, unknown>>;
+          try {
+            setups = JSON.parse(stripCodeFence(llmResult.content));
+            if (!Array.isArray(setups)) throw new Error("LLM did not return array");
+          } catch (err) { updateTask(task_id, { status: "failed", error: `Parse error: ${err instanceof Error ? err.message : String(err)}` }); return; }
+
+          updateTask(task_id, { progress: 0.7, current_step: `Saving ${setups.length} setups` });
+          const artifacts: Array<{ uri: string; mime_type: string; created_at: string }> = [];
+          for (const setup of setups) {
+            const sid = (setup.setup_id as string | undefined) ?? `setup_${bibleId}_${crypto.randomUUID().slice(0, 8)}`;
+            setup.setup_id = sid;
+            await saveArtifact("setup", sid, setup);
+            artifacts.push({ uri: `agent://location-scout/setup/${sid}`, mime_type: "application/json", created_at: new Date().toISOString() });
+          }
+          updateTask(task_id, { status: "completed", progress: 1.0, current_step: `${setups.length} setups extracted`, artifacts });
+        } catch (err) { updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) }); }
+      })();
+      return { content: [{ type: "text" as const, text: JSON.stringify({ task_id, status: "accepted" }) }] };
     },
   );
 
@@ -722,9 +761,26 @@ export function registerLocationTools(server: McpServer) {
       research_pack_uri: z.string().describe("MCP resource URI of the research pack"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    async () => ({
-      content: [{ type: "text" as const, text: JSON.stringify({ issues: [], passed: true }) }],
-    }),
+    async ({ bible_uri, research_pack_uri }) => {
+      const bibleId = bible_uri.split("/").pop() ?? "";
+      const researchId = research_pack_uri.split("/").pop() ?? "";
+      const [bible, research] = await Promise.all([
+        loadArtifact<Record<string, unknown>>("bible", bibleId),
+        loadArtifact<Record<string, unknown>>("research", researchId),
+      ]);
+      if (!bible) return { content: [{ type: "text" as const, text: JSON.stringify({ error: "not_found", missing: "bible" }) }] };
+      if (!research) return { content: [{ type: "text" as const, text: JSON.stringify({ error: "not_found", missing: "research" }) }] };
+
+      const llmResult = await llmComplete(
+        "You are a film production period accuracy expert. Check a Location Bible for anachronisms against a research pack. Return strict JSON only — no prose, no fences: {\"issues\": [{\"severity\": \"critical\"|\"warning\"|\"info\", \"field\": string, \"issue\": string, \"suggestion\": string}], \"passed\": boolean}",
+        [{ role: "user", content: `Bible:\n${JSON.stringify({ bible_id: bible.bible_id, era: (bible.passport as Record<string, unknown> | undefined)?.era, space_description: (bible.space_description as string | undefined)?.slice(0, 600), key_details: bible.key_details, negative_list: bible.negative_list, light_base_state: bible.light_base_state })}\n\nResearch Pack:\n${JSON.stringify({ period_facts: research.period_facts, anachronism_list: research.anachronism_list, typical_elements: research.typical_elements })}` }],
+        { maxTokens: 2048, temperature: 0.1 },
+      );
+      let parsed: { issues: unknown[]; passed: boolean };
+      try { parsed = JSON.parse(stripCodeFence(llmResult.content)); }
+      catch { parsed = { issues: [{ severity: "info", field: "parse", issue: "LLM response not valid JSON", suggestion: "Re-run" }], passed: false }; }
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ...parsed, checked_at: new Date().toISOString() }) }] };
+    },
   );
 
   server.tool(
@@ -736,9 +792,43 @@ export function registerLocationTools(server: McpServer) {
       mood_state_uris: z.array(z.string()).optional().describe("MCP resource URIs of mood states to check"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
-    async () => ({
-      content: [{ type: "text" as const, text: JSON.stringify({ consistency_score: 1.0, issues: [] }) }],
-    }),
+    async ({ bible_uri, anchor_uri, mood_state_uris }) => {
+      const bibleId = bible_uri.split("/").pop() ?? "";
+      const bible = await loadArtifact<Record<string, unknown>>("bible", bibleId);
+      if (!bible) return { content: [{ type: "text" as const, text: JSON.stringify({ error: "not_found", bible_uri }) }] };
+
+      const moodStates: unknown[] = [];
+      if (mood_state_uris?.length) {
+        const loaded = await Promise.all(mood_state_uris.map((u) => loadArtifact("mood", u.split("/").pop() ?? "")));
+        for (const ms of loaded) { if (ms) moodStates.push(ms); }
+      }
+
+      const llmResult = await llmComplete(
+        "You are a film production consistency analyst. Check mood state deltas are internally consistent with the Location Bible's base state. Return strict JSON only: {\"consistency_score\": number, \"issues\": [{\"severity\": string, \"field\": string, \"issue\": string, \"suggestion\": string}], \"all_mood_states_aligned\": boolean}",
+        [{ role: "user", content: `Bible:\n${JSON.stringify({ bible_id: bible.bible_id, light_base_state: bible.light_base_state, atmosphere: bible.atmosphere, negative_list: bible.negative_list, passport: bible.passport })}\n\nMood States:\n${JSON.stringify(moodStates)}` }],
+        { maxTokens: 2048, temperature: 0.1 },
+      );
+      let parsed: { consistency_score: number; issues: unknown[]; all_mood_states_aligned: boolean };
+      try { parsed = JSON.parse(stripCodeFence(llmResult.content)); }
+      catch { parsed = { consistency_score: 0, issues: [{ severity: "info", field: "parse", issue: "LLM response not parseable", suggestion: "Re-run" }], all_mood_states_aligned: false }; }
+
+      if (anchor_uri) {
+        const anchorImg = await loadImage("anchor", anchor_uri.split("/").pop() ?? "");
+        if (anchorImg) {
+          try {
+            const vr = await analyzeWithGeminiVision({
+              image_urls: [anchorImg.data.toString("base64")],
+              system_prompt: "You are a film production visual consistency analyst. Check if this anchor image is visually consistent with the Location Bible. Return JSON: {\"visual_issues\": [{\"severity\": string, \"field\": string, \"issue\": string}], \"visual_score\": number}",
+              user_prompt: `Bible context:\n${JSON.stringify({ space_description: (bible.space_description as string | undefined)?.slice(0, 400), light_base_state: bible.light_base_state, key_details: bible.key_details, negative_list: bible.negative_list })}`,
+            });
+            const vp = JSON.parse(stripJsonFence(vr.content)) as { visual_issues?: unknown[]; visual_score?: number };
+            if (Array.isArray(vp.visual_issues)) (parsed.issues as unknown[]).push(...vp.visual_issues);
+            if (typeof vp.visual_score === "number") parsed.consistency_score = (parsed.consistency_score + vp.visual_score) / 2;
+          } catch { /* visual check is optional — swallow */ }
+        }
+      }
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ...parsed, checked_at: new Date().toISOString() }) }] };
+    },
   );
 
   // ─── W2: Research Cycle ────────────────────────────────────────────
@@ -752,16 +842,20 @@ export function registerLocationTools(server: McpServer) {
       detail: z.string().optional().describe("Supporting detail or source note"),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
-    async ({ research_pack_uri, fact, detail }) => ({
-      content: [{
-        type: "text" as const,
-        text: JSON.stringify({
-          status: "added",
-          research_pack_uri,
-          fact: { text: fact, detail: detail ?? null, added_by: "manual" },
-        }),
-      }],
-    }),
+    async ({ research_pack_uri, fact, detail }) => {
+      const researchId = research_pack_uri.split("/").pop() ?? "";
+      const research = await loadArtifact<Record<string, unknown>>("research", researchId);
+      if (!research) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ error: "not_found", research_pack_uri }) }] };
+      }
+      if (!Array.isArray(research.period_facts)) research.period_facts = [];
+      const newFact = { text: fact, detail: detail ?? null, added_by: "manual" };
+      (research.period_facts as unknown[]).push(newFact);
+      await saveArtifact("research", researchId, research);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ status: "added", research_pack_uri, fact: newFact, count: (research.period_facts as unknown[]).length }) }],
+      };
+    },
   );
 
   server.tool(
@@ -773,16 +867,29 @@ export function registerLocationTools(server: McpServer) {
       severity: z.enum(["hard_ban", "soft_warn"]).default("hard_ban").describe("hard_ban = must never appear; soft_warn = flag for review"),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
-    async ({ target_uri, item, severity }) => ({
-      content: [{
-        type: "text" as const,
-        text: JSON.stringify({
-          status: "added",
-          target_uri,
-          anachronism: { item, severity, added_by: "manual" },
-        }),
-      }],
-    }),
+    async ({ target_uri, item, severity }) => {
+      const isBible = target_uri.includes("/bible/");
+      const artifactType = isBible ? "bible" : "research";
+      const id = target_uri.split("/").pop() ?? "";
+      const artifact = await loadArtifact<Record<string, unknown>>(artifactType, id);
+      if (!artifact) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ error: "not_found", target_uri }) }] };
+      }
+      let count: number;
+      if (isBible) {
+        if (!Array.isArray(artifact.negative_list)) artifact.negative_list = [];
+        (artifact.negative_list as unknown[]).push(item);
+        count = (artifact.negative_list as unknown[]).length;
+      } else {
+        if (!Array.isArray(artifact.anachronism_list)) artifact.anachronism_list = [];
+        (artifact.anachronism_list as unknown[]).push({ item, severity, added_by: "manual" });
+        count = (artifact.anachronism_list as unknown[]).length;
+      }
+      await saveArtifact(artifactType, id, artifact);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ status: "added", target_uri, anachronism: { item, severity }, count }) }],
+      };
+    },
   );
 
   // ─── W4: Reference Generation ─────────────────────────────────────
@@ -824,14 +931,49 @@ export function registerLocationTools(server: McpServer) {
       anchor_uri: z.string().describe("MCP resource URI of the anchor image"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    async () => {
+    async ({ setup_uri, anchor_uri }) => {
       const task_id = crypto.randomUUID();
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({ task_id, status: "accepted" }),
-        }],
-      };
+      createTask(task_id, "Comparing setup against anchor");
+      (async () => {
+        try {
+          updateTask(task_id, { status: "processing", progress: 0.1, current_step: "Loading images" });
+          const setupId = setup_uri.split("/").pop() ?? "";
+          const anchorId = anchor_uri.split("/").pop() ?? "";
+          const setupType = setup_uri.includes("/setup/") ? "setup" : "anchor";
+          const [setupImg, anchorImg] = await Promise.all([
+            loadImage(setupType, setupId),
+            loadImage("anchor", anchorId),
+          ]);
+          if (!setupImg) { updateTask(task_id, { status: "failed", error: `Setup image not found: ${setup_uri}` }); return; }
+          if (!anchorImg) { updateTask(task_id, { status: "failed", error: `Anchor image not found: ${anchor_uri}` }); return; }
+
+          updateTask(task_id, { progress: 0.4, current_step: "Sending to Gemini Vision for comparison" });
+          const vr = await analyzeWithGeminiVision({
+            image_urls: [setupImg.data.toString("base64"), anchorImg.data.toString("base64")],
+            system_prompt: "You are a cinematography quality analyst. Compare setup image (first) against anchor reference (second). Return strict JSON only: {\"similarity_score\": number, \"composition_match\": boolean, \"color_consistency\": boolean, \"issues\": [{\"severity\": string, \"field\": string, \"issue\": string}], \"passed\": boolean}. Score 1.0=identical, 0.5=significant drift. passed=true if score >= 0.7.",
+            user_prompt: "Compare these two film production reference images and return the JSON analysis.",
+          });
+
+          let report: Record<string, unknown>;
+          try { report = JSON.parse(stripJsonFence(vr.content)); }
+          catch { report = { similarity_score: 0, composition_match: false, color_consistency: false, issues: [{ severity: "info", field: "parse", issue: "Vision response not valid JSON" }], passed: false }; }
+
+          const reportId = `cmp_${setupId}_${anchorId}_${Date.now().toString(36)}`;
+          report.report_id = reportId;
+          report.setup_uri = setup_uri;
+          report.anchor_uri = anchor_uri;
+          report.compared_at = new Date().toISOString();
+          await saveArtifact("comparison", reportId, report);
+
+          updateTask(task_id, {
+            status: "completed",
+            progress: 1.0,
+            current_step: `Comparison complete — score: ${report.similarity_score}`,
+            artifacts: [{ uri: `agent://location-scout/comparison/${reportId}`, mime_type: "application/json", created_at: report.compared_at as string }],
+          });
+        } catch (err) { updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) }); }
+      })();
+      return { content: [{ type: "text" as const, text: JSON.stringify({ task_id, status: "accepted" }) }] };
     },
   );
 

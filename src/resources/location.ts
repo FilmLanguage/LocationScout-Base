@@ -184,6 +184,28 @@ export function registerResources(server: McpServer) {
     },
   );
 
+  // ─── Comparison Report ──────────────────────────────────────────
+
+  server.resource(
+    "comparison",
+    "agent://location-scout/comparison/{report_id}",
+    {
+      description: "Setup vs anchor comparison report produced by compare_with_anchor. Returns JSON.",
+      mimeType: "application/json",
+    },
+    async (uri) => {
+      const id = extractId(uri);
+      const report = await loadArtifact("comparison", id);
+      return {
+        contents: [{
+          uri: uri.href,
+          mimeType: "application/json",
+          text: report ? JSON.stringify(report) : JSON.stringify({ error: "not_found", report_id: id }),
+        }],
+      };
+    },
+  );
+
   // ─── Setup Extraction ───────────────────────────────────────────
 
   server.resource(
