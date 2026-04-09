@@ -1,0 +1,55 @@
+name: CI
+
+# Canonical CI workflow for all Film Language agents.
+# Source of truth: ai-stanislavsky-workspace/repo-setup/templates/ci.yaml
+# Distributed via: repo-setup/sync-ci.sh
+#
+# Deploy model: Variant 2+CI
+#   - This workflow runs TESTS ONLY. No deploy, no secrets.
+#   - Deploys happen locally via the /deploy-agent Claude skill
+#     using `gcloud run deploy --source .` from the owner's machine.
+#   - See docs/deploy-model.md for the full spec and the future
+#     migration path to Variant 1 (WIF + GitHub Actions deploy).
+
+on:
+  push:
+    branches:
+      - main
+      - release
+  pull_request:
+    branches:
+      - main
+      - release
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Build _schemas
+        working-directory: _schemas
+        run: |
+          if [ -f package.json ]; then
+            npm ci
+            npm run build
+          else
+            echo "No _schemas/package.json — skipping schemas build"
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test --if-present
