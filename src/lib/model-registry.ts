@@ -26,7 +26,7 @@ export const FAL_MODELS = {
 
 export type LogicalModel = keyof typeof FAL_MODELS;
 
-export type Slot = "ANCHOR" | "MOOD_VARIANT";
+export type Slot = "ANCHOR" | "MOOD_VARIANT" | "ISOMETRIC";
 
 const BUILTIN_DEFAULT: LogicalModel = "nano-banana/edit";
 
@@ -50,4 +50,4 @@ export function resolveModel(slot: Slot, override?: string): string {
 }
 
 /** List of all known slots — useful for diagnostics / UI dropdowns. */
-export const SLOTS: Slot[] = ["ANCHOR", "MOOD_VARIANT"];
+export const SLOTS: Slot[] = ["ANCHOR", "MOOD_VARIANT", "ISOMETRIC"];

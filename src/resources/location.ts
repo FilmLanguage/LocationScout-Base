@@ -151,6 +151,39 @@ export function registerResources(server: McpServer) {
     },
   );
 
+  // ─── Isometric Reference ────────────────────────────────────────
+
+  server.resource(
+    "isometric",
+    "agent://location-scout/isometric/{iso_id}",
+    {
+      description: "Isometric 3D reference image for a location. Returns PNG binary as base64.",
+      mimeType: "image/png",
+    },
+    async (uri) => {
+      const id = extractId(uri);
+      const image = await loadImage("isometric", id);
+
+      if (!image) {
+        return {
+          contents: [{
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify({ error: "not_found", iso_id: id }),
+          }],
+        };
+      }
+
+      return {
+        contents: [{
+          uri: uri.href,
+          mimeType: image.contentType,
+          blob: image.data.toString("base64"),
+        }],
+      };
+    },
+  );
+
   // ─── Setup Extraction ───────────────────────────────────────────
 
   server.resource(

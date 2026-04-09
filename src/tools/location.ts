@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { createTask, updateTask, saveArtifact, loadArtifact, saveImage } from "../lib/storage.js";
+import { createTask, updateTask, saveArtifact, loadArtifact, saveImage, loadImage } from "../lib/storage.js";
 import { llmComplete, generateImage } from "../lib/api-client.js";
 import { flError, FL_ERRORS } from "../lib/errors.js";
 import { validateAnchorAgainstBible, issuesToCorrectionHint, type ValidatorBibleSpec } from "../lib/anchor-validator.js";
@@ -470,6 +470,109 @@ export function registerLocationTools(server: McpServer) {
           updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) });
         }
       })();
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ task_id, status: "accepted" }) }],
+      };
+    },
+  );
+
+  // Isometric reference (floorplan-based, NanoBanana img2img)
+  server.tool(
+    "generate_isometric_reference",
+    "Generate an isometric 3D reference image using the floorplan as a visual base (img2img via NanoBanana). The floorplan PNG is passed as image_urls[0] to FAL so the spatial layout is preserved in 3D. Optionally enriches the prompt with Location Bible context. Returns task_id for async tracking.",
+    {
+      floorplan_uri: z.string().describe("MCP resource URI of the floorplan PNG (agent://location-scout/floorplan/{id})"),
+      bible_uri: z.string().optional().describe("MCP resource URI of the Location Bible — used for prompt context (era, description). Optional but recommended."),
+      generation_params: z.object({
+        model: z.string().optional().describe("Image generation model override"),
+        seed: z.number().int().optional().describe("Random seed for reproducibility"),
+      }).optional(),
+    },
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    async ({ floorplan_uri, bible_uri, generation_params }) => {
+      const task_id = crypto.randomUUID();
+      createTask(task_id, "Generating isometric reference");
+
+      (async () => {
+        try {
+          updateTask(task_id, { status: "processing", progress: 0.05, current_step: "Loading floorplan" });
+
+          // Resolve floorplan ID and load PNG
+          const floorplanId = floorplan_uri.includes("/") ? (floorplan_uri.split("/").pop() ?? "") : floorplan_uri;
+          const floorplanImage = await loadImage("floorplan", floorplanId);
+          if (!floorplanImage) {
+            throw flError(FL_ERRORS.MISSING_DEPENDENCY, `Floorplan not found: ${floorplan_uri}`, {
+              retryable: false,
+              suggestion: "Generate the floorplan first with create_floorplan.",
+            });
+          }
+
+          // Encode as data URL for FAL img2img
+          const floorplanDataUrl = `data:image/png;base64,${floorplanImage.data.toString("base64")}`;
+
+          // Optional: load Bible for richer prompt
+          let locationName = floorplanId;
+          let era = "";
+          let spaceDesc = "";
+          if (bible_uri) {
+            const bible = await loadArtifact<Record<string, unknown>>("bible", bible_uri.includes("/") ? (bible_uri.split("/").pop() ?? "") : bible_uri);
+            if (bible) {
+              const passport = bible.passport as Record<string, unknown> | undefined;
+              locationName = (passport?.location_name as string | undefined) ?? floorplanId;
+              era = (passport?.era as string | undefined) ?? "";
+              spaceDesc = (bible.space_description as string | undefined) ?? "";
+            }
+          }
+
+          const prompt = [
+            "Isometric architectural illustration. Convert this top-down floorplan into a clean 3D isometric view.",
+            locationName,
+            era ? `Era: ${era}.` : "",
+            spaceDesc,
+            "Show walls, doors, windows, furniture in correct isometric projection. Cinematic film production reference. High detail.",
+          ].filter(Boolean).join(" ").slice(0, 2000);
+
+          updateTask(task_id, { progress: 0.3, current_step: "Sending floorplan to FAL for isometric rendering" });
+
+          const resolvedModel = resolveModel("ISOMETRIC", generation_params?.model);
+          const result = await generateImage({
+            prompt,
+            seed: generation_params?.seed,
+            model: resolvedModel,
+            image_urls: [floorplanDataUrl],
+          });
+
+          if (result.images.length === 0) {
+            throw flError(FL_ERRORS.GENERATION_ERROR, "Image generator returned no images", {
+              retryable: true,
+              suggestion: "Retry, or check FAL.ai service health.",
+            });
+          }
+
+          updateTask(task_id, { progress: 0.75, current_step: "Downloading and saving isometric PNG" });
+
+          const imgRes = await fetch(result.images[0].url);
+          const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+          const saveResult = await saveImage("isometric", floorplanId, imgBuf);
+
+          updateTask(task_id, {
+            status: "completed",
+            progress: 1.0,
+            current_step: `Isometric reference ready (${imgBuf.length} bytes)`,
+            artifacts: [
+              {
+                uri: saveResult.uri,
+                mime_type: "image/png",
+                created_at: new Date().toISOString(),
+                ...(saveResult.local_path ? { local_path: saveResult.local_path } : {}),
+              },
+            ],
+          });
+        } catch (err) {
+          updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) });
+        }
+      })();
+
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ task_id, status: "accepted" }) }],
       };
