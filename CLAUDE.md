@@ -40,10 +40,25 @@ All 20 domain tools + 9 common tools (29 total) + 8 resources are implemented.
 4. **Error handling**: `src/lib/errors.ts` — Film Language error codes
 5. **Swagger/OpenAPI**: `src/swagger.ts` — auto-generated docs
 
+<!-- WORKSPACE-DOCS-START -->
 ## Workspace docs
 
-All in `../ai-stanislavsky-workspace/docs/`: `architecture.md`, `glossary.md`, `design-system.md`, `ui-architecture.md`, `design-links.md`
+All shared documentation lives in `../ai-stanislavsky-workspace/docs/`:
 
+| Document | Content |
+|----------|---------|
+| `architecture.md` | System diagram, agent registry, data flow, tech stack |
+| `glossary.md` | All terms: Bible, Anchor, Gate, Film IR, MCP, etc. |
+| `design-system.md` | Color tokens, typography, spacing, components, interactive states |
+| `ui-architecture.md` | Narrativity Editor layout, zones, agent panels |
+| `agent-ui-setup.md` | **Canonical** Vite/TS/package.json setup for every agent's UI layer |
+| `agent-capabilities.md` | Opt-in capabilities: Rationale, VLM Validation, Hard Gates — when to enable |
+| `branch-strategy.md` | `main` (integration) / `release` (production) / `experiment/*` — merge rules |
+| `deploy-model.md` | Current: Variant 2+CI (local gcloud). Future: Variant 1 (WIF+Actions) |
+| `design-links.md` | Figma file URLs, local design references |
+| `skills.md` | All Claude Code skills: commands, descriptions, workflows |
+| `guides/` | Long-form guides: developer (RU), skills reference, UI designer |
+<!-- WORKSPACE-DOCS-END -->
 ## Development
 
 ```bash
