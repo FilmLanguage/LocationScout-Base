@@ -1,7 +1,44 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { createTask, updateTask, saveArtifact, loadArtifact } from "../lib/storage.js";
+import { createTask, updateTask, saveArtifact, loadArtifact, saveImage } from "../lib/storage.js";
 import { llmComplete, generateImage } from "../lib/api-client.js";
+import { flError, FL_ERRORS } from "../lib/errors.js";
+import { validateAnchorAgainstBible, issuesToCorrectionHint, type ValidatorBibleSpec } from "../lib/anchor-validator.js";
+import { resolveModel } from "../lib/model-registry.js";
+import { spawnSync } from "node:child_process";
+import { resolve as pathResolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// ─── Gate helpers ───────────────────────────────────────────────────
+
+/**
+ * Bible First Rule: load a Location Bible and ensure approval_status === "approved".
+ * Throws GATE_REJECTED if the bible is missing or not approved.
+ *
+ * Accepts either a full URI (`agent://location-scout/bible/loc_001`) or a bare bible_id.
+ */
+async function requireApprovedBible(bible_uri: string): Promise<Record<string, unknown>> {
+  const bibleId = bible_uri.includes("/") ? (bible_uri.split("/").pop() ?? "") : bible_uri;
+  const bible = await loadArtifact<Record<string, unknown>>("bible", bibleId);
+  if (!bible) {
+    throw flError(FL_ERRORS.MISSING_DEPENDENCY, `Location Bible not found: ${bible_uri}`, {
+      retryable: false,
+      suggestion: "Provide a valid bible URI. Create one with write_bible first.",
+    });
+  }
+  if (bible.approval_status !== "approved") {
+    throw flError(FL_ERRORS.GATE_REJECTED, `Location Bible not approved (status: ${bible.approval_status ?? "draft"}). Generation blocked by Bible First rule.`, {
+      retryable: false,
+      suggestion: "Approve the Location Bible with approve_artifact before generating anchors, mood states, or floorplans.",
+      bible_uri,
+      current_status: (bible.approval_status as string) ?? "draft",
+    });
+  }
+  return bible;
+}
 
 const LocationBriefSchema = z.object({
   location_id: z.string().describe("Unique location ID, e.g. loc_001"),
@@ -30,7 +67,8 @@ const DirectorVisionInputSchema = z.object({
 /** Strip markdown code fences that LLMs sometimes wrap around JSON. */
 function stripCodeFence(text: string): string {
   const trimmed = text.trim();
-  const match = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
+  // Match fenced block — closing fence may be missing if response was truncated
+  const match = trimmed.match(/```(?:json)?\s*\n([\s\S]*?)(?:\n\s*```|$)/);
   return match ? match[1].trim() : trimmed;
 }
 
@@ -66,8 +104,9 @@ export function registerLocationTools(server: McpServer) {
 
           // Step 2: Write Bible
           const bible = await llmComplete(
-            "You are a film location Bible writer. Write a detailed Location Bible JSON matching the LocationBible v2 schema. Include: passport, space_description (400+ words), atmosphere, light_base_state, key_details (5-8 items), negative_list (3+ items).",
+            "You are a film location Bible writer. Write a detailed Location Bible JSON matching the LocationBible v2 schema. The JSON MUST include: \"$schema\": \"location-bible-v2\", bible_id, passport (type, time_of_day, era, recurring, scenes), space_description (min 400 words of precise physical detail), atmosphere, light_base_state (primary_source, direction, color_temp_kelvin, shadow_hardness, fill_to_key_ratio, practical_sources), key_details (5-8 items), negative_list (3+ anachronistic items that must never appear), approval_status: \"draft\".\n\nOPTIONAL: include a `rationale` object { primary_reason, references, confidence } explaining your single most important creative choice. Only include it if your reasoning is genuinely tied to the research/vision sources — do NOT fabricate post-hoc justification.\n\nReturn ONLY the JSON object, no markdown fences.",
             [{ role: "user", content: `Location: ${JSON.stringify(location_brief)}\nDirector vision: ${JSON.stringify(director_vision)}\nResearch: ${research.content}` }],
+            { maxTokens: 8192 },
           );
           const bibleId = location_brief.location_id;
           await saveArtifact("bible", bibleId, JSON.parse(stripCodeFence(bible.content)));
@@ -159,7 +198,7 @@ export function registerLocationTools(server: McpServer) {
 
           updateTask(task_id, { progress: 0.3, current_step: "Generating Bible with LLM" });
           const result = await llmComplete(
-            "You are a film Location Bible writer. Write a Location Bible as JSON conforming to LocationBible v2 schema. Include: $schema, bible_id, passport (type, time_of_day, era, recurring, scenes), space_description (min 400 words), atmosphere, light_base_state (primary_source, direction, color_temp_kelvin, shadow_hardness, fill_to_key_ratio, practical_sources), key_details (5-8 items), negative_list (3+ must-never-appear items), approval_status: \"draft\".",
+            "You are a film Location Bible writer. Write a Location Bible as JSON conforming to LocationBible v2 schema. Include: $schema, bible_id, passport (type, time_of_day, era, recurring, scenes), space_description (min 400 words), atmosphere, light_base_state (primary_source, direction, color_temp_kelvin, shadow_hardness, fill_to_key_ratio, practical_sources), key_details (5-8 items), negative_list (3+ must-never-appear items), approval_status: \"draft\".\n\nAlso include an optional `rationale` object with:\n- `primary_reason`: 1–2 sentences explaining your single most important creative choice (e.g. why this light direction, why these key_details). Reference the research-pack or director-vision when relevant.\n- `references`: array of source identifiers you actually relied on (research_id, vision_id, or factual sources).\n- `confidence`: 0.0–1.0 self-reported confidence.\nIf your reasoning was not driven by a clear source, OMIT the rationale field — do NOT fabricate post-hoc justification.",
             [{ role: "user", content: `Brief: ${JSON.stringify(location_brief)}\nVision: ${JSON.stringify(director_vision)}\nResearch: ${JSON.stringify(research)}` }],
             { maxTokens: 8192 },
           );
@@ -183,52 +222,138 @@ export function registerLocationTools(server: McpServer) {
   // Anchor image generation
   server.tool(
     "generate_anchor",
-    "Generate anchor image for an approved Location Bible. Returns task_id for async tracking. Requires bible_uri pointing to an approved Bible.",
+    "Generate anchor image for an approved Location Bible. Hard-gated: requires Bible with approval_status='approved'. Runs Gemini Vision validation against the Bible spec; on failure retries up to max_attempts with corrective prompt. Returns task_id for async tracking.",
     {
       bible_uri: z.string().describe("MCP resource URI of the approved Location Bible"),
       generation_params: z.object({
         model: z.string().optional().describe("Image generation model"),
         seed: z.number().int().optional().describe("Random seed"),
       }).optional(),
+      validation: z.object({
+        enabled: z.boolean().default(true).describe("Run VLM validation after each generation"),
+        max_attempts: z.number().int().min(1).max(5).default(3).describe("Max generation+validation attempts"),
+        threshold: z.number().min(0).max(1).default(0.75).describe("Score threshold to pass validation"),
+      }).optional(),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async ({ bible_uri, generation_params }) => {
+    async ({ bible_uri, generation_params, validation }) => {
       const task_id = crypto.randomUUID();
       createTask(task_id, "Generating anchor image");
 
+      const validationEnabled = validation?.enabled ?? true;
+      const maxAttempts = validation?.max_attempts ?? 3;
+      const threshold = validation?.threshold ?? 0.75;
+
       (async () => {
         try {
-          updateTask(task_id, { status: "processing", progress: 0.1, current_step: "Loading Bible" });
-          const bibleId = bible_uri.split("/").pop() || "";
-          const bible = await loadArtifact<{ space_description?: string; negative_list?: Array<{ item: string }> }>("bible", bibleId);
+          updateTask(task_id, { status: "processing", progress: 0.05, current_step: "Checking Bible approval gate" });
 
-          if (!bible) {
-            updateTask(task_id, { status: "failed", error: "Bible not found" });
-            return;
-          }
+          // ─── Hard gate: Bible First rule ────────────────────────────
+          const bible = await requireApprovedBible(bible_uri);
+          const bibleId = bible_uri.includes("/") ? (bible_uri.split("/").pop() ?? "") : bible_uri;
 
-          updateTask(task_id, { progress: 0.3, current_step: "Generating image via FAL.ai" });
-          const negativePrompt = bible.negative_list?.map((n) => n.item).join(", ") || "";
-          const result = await generateImage({
-            prompt: `Cinematic film location photograph. ${bible.space_description ?? ""}`.slice(0, 2000),
-            negative_prompt: negativePrompt || undefined,
-            seed: generation_params?.seed,
-          });
+          // Pre-extract validator spec from bible (handles both v2 and legacy shapes)
+          const negativeListRaw = bible.negative_list as string[] | Array<{ item: string }> | undefined;
+          const validatorSpec: ValidatorBibleSpec = {
+            bible_id: (bible.bible_id as string) ?? bibleId,
+            passport: bible.passport as ValidatorBibleSpec["passport"],
+            light_base_state: bible.light_base_state as ValidatorBibleSpec["light_base_state"],
+            key_details: (bible.key_details as string[]) ?? [],
+            negative_list: negativeListRaw ?? [],
+          };
 
-          if (result.images.length > 0) {
-            // Download and save image
-            const imgRes = await fetch(result.images[0].url);
+          const negativePrompt = Array.isArray(negativeListRaw)
+            ? negativeListRaw.map((n) => (typeof n === "string" ? n : n.item)).join(", ")
+            : "";
+          const basePrompt = `Cinematic film location photograph. ${(bible.space_description as string | undefined) ?? ""}`.slice(0, 2000);
+
+          let lastImageUrl: string | null = null;
+          let lastReport: import("@filmlanguage/schemas").ValidationReport | null = null;
+          let lastSaveResult: Awaited<ReturnType<typeof saveImage>> | null = null;
+          let correctionHint = "";
+          const validationReports: Array<{ uri: string; mime_type: string; created_at: string }> = [];
+
+          // ─── Generate + Validate retry loop ─────────────────────────
+          for (let attempt = 1; attempt <= (validationEnabled ? maxAttempts : 1); attempt++) {
+            const progressStep = 0.1 + 0.7 * ((attempt - 1) / maxAttempts);
+            updateTask(task_id, {
+              progress: progressStep,
+              current_step: `Generation attempt ${attempt}/${validationEnabled ? maxAttempts : 1}`,
+            });
+
+            const promptForAttempt = (basePrompt + correctionHint).slice(0, 2000);
+            const resolvedModel = resolveModel("ANCHOR", generation_params?.model);
+            const result = await generateImage({
+              prompt: promptForAttempt,
+              negative_prompt: negativePrompt || undefined,
+              seed: generation_params?.seed != null ? generation_params.seed + (attempt - 1) : undefined,
+              model: resolvedModel,
+            });
+
+            if (result.images.length === 0) {
+              throw flError(FL_ERRORS.GENERATION_ERROR, "Image generator returned no images", {
+                retryable: true,
+                suggestion: "Retry, or check FAL.ai service health.",
+              });
+            }
+            lastImageUrl = result.images[0].url;
+
+            // Download and persist — saveImage returns { uri, local_path, ... }
+            const imgRes = await fetch(lastImageUrl);
             const imgBuf = Buffer.from(await imgRes.arrayBuffer());
-            const { saveImage } = await import("../lib/storage.js");
-            await saveImage("anchor", bibleId, imgBuf);
+            lastSaveResult = await saveImage("anchor", bibleId, imgBuf);
+
+            if (!validationEnabled) break;
+
+            updateTask(task_id, {
+              progress: progressStep + 0.05,
+              current_step: `Validating attempt ${attempt}/${maxAttempts}`,
+            });
+
+            const report = await validateAnchorAgainstBible({
+              bible: validatorSpec,
+              anchor_image_url: lastImageUrl,
+              artifact_uri: `agent://location-scout/anchor/${bibleId}`,
+              attempt,
+              max_attempts: maxAttempts,
+              threshold,
+            });
+            lastReport = report;
+
+            // Persist the validation report so reviewers/UI can inspect retry history.
+            await saveArtifact("validation", report.validation_id, report);
+            validationReports.push({
+              uri: `agent://location-scout/validation/${report.validation_id}`,
+              mime_type: "application/json",
+              created_at: report.validated_at,
+            });
+
+            if (report.passed) break;
+            correctionHint = issuesToCorrectionHint(report);
           }
+
+          const passed = !validationEnabled || (lastReport?.passed ?? false);
 
           updateTask(task_id, {
-            status: "completed", progress: 1.0, current_step: "Anchor generated",
-            artifacts: [{ uri: `agent://location-scout/anchor/${bibleId}`, mime_type: "image/png", created_at: new Date().toISOString() }],
+            status: "completed",
+            progress: 1.0,
+            current_step: passed
+              ? "Anchor generated and validated"
+              : `Anchor generated but failed validation after ${maxAttempts} attempts (score ${lastReport?.score.toFixed(2) ?? "n/a"})`,
+            artifacts: [
+              {
+                uri: lastSaveResult?.uri ?? `agent://location-scout/anchor/${bibleId}`,
+                mime_type: "image/png",
+                created_at: new Date().toISOString(),
+                ...(lastSaveResult?.local_path ? { local_path: lastSaveResult.local_path } : {}),
+              },
+              ...validationReports,
+            ],
           });
         } catch (err) {
-          updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) });
+          // Surface gate rejection clearly so the UI can show the right reason.
+          const message = err instanceof Error ? err.message : String(err);
+          updateTask(task_id, { status: "failed", error: message });
         }
       })();
 
@@ -238,12 +363,12 @@ export function registerLocationTools(server: McpServer) {
     },
   );
 
-  // Mood states
+  // Mood states (hard-gated: requires approved Bible)
   server.tool(
     "create_mood_states",
-    "Generate mood state deltas for each scene group from a Location Bible. Returns array of mood-state-v1 objects.",
+    "Generate mood state deltas for each scene group from an approved Location Bible. Hard-gated: requires Bible with approval_status='approved'. Returns array of mood-state-v1 objects.",
     {
-      bible_uri: z.string().describe("MCP resource URI of the Location Bible"),
+      bible_uri: z.string().describe("MCP resource URI of the approved Location Bible"),
       scene_groups: z.array(z.object({
         scene_ids: z.array(z.string()),
         act: z.number().int(),
@@ -252,31 +377,106 @@ export function registerLocationTools(server: McpServer) {
       })).describe("Scene groups to generate mood states for"),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async ({ scene_groups }) => {
+    async ({ bible_uri, scene_groups }) => {
       const task_id = crypto.randomUUID();
+      createTask(task_id, "Creating mood states");
+      (async () => {
+        try {
+          await requireApprovedBible(bible_uri);
+          updateTask(task_id, {
+            status: "completed",
+            progress: 1.0,
+            current_step: `Mood states created for ${scene_groups.length} scene groups`,
+          });
+        } catch (err) {
+          updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) });
+        }
+      })();
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ task_id, status: "accepted", count: scene_groups.length }) }],
       };
     },
   );
 
-  // Floorplan
+  // Floorplan (hard-gated, Python-rendered)
   server.tool(
     "create_floorplan",
-    "Generate a floorplan layout from a Location Bible. Returns task_id for async tracking.",
+    "Generate a top-down floorplan PNG from an approved Location Bible. Hard-gated: requires Bible with approval_status='approved'. Renders deterministically via scripts/floorplan.py (Pillow). Returns task_id for async tracking.",
     {
-      bible_uri: z.string().describe("MCP resource URI of the Location Bible"),
+      bible_uri: z.string().describe("MCP resource URI of the approved Location Bible"),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async () => {
+    async ({ bible_uri }) => {
       const task_id = crypto.randomUUID();
+      createTask(task_id, "Creating floorplan");
+      (async () => {
+        try {
+          updateTask(task_id, { status: "processing", progress: 0.1, current_step: "Checking Bible approval gate" });
+          const bible = await requireApprovedBible(bible_uri);
+          const bibleId = bible_uri.includes("/") ? (bible_uri.split("/").pop() ?? "") : bible_uri;
+
+          updateTask(task_id, { progress: 0.4, current_step: "Spawning Python floorplan renderer" });
+
+          const pyBin = process.env.PYTHON_BIN ?? "python";
+          // scripts/floorplan.py lives at repo root; from src/tools/ that is ../../scripts
+          const scriptPath = pathResolve(__dirname, "..", "..", "scripts", "floorplan.py");
+
+          // Omit `encoding` so spawnSync returns Buffers (default behaviour).
+          const result = spawnSync(pyBin, [scriptPath], {
+            input: JSON.stringify(bible),
+            timeout: 30_000,
+            maxBuffer: 50 * 1024 * 1024,
+          });
+
+          if (result.error) {
+            throw flError(FL_ERRORS.GENERATION_ERROR, `Failed to spawn Python: ${result.error.message}`, {
+              retryable: false,
+              suggestion: "Ensure PYTHON_BIN points to a Python 3 interpreter with Pillow installed.",
+            });
+          }
+          if (result.status !== 0) {
+            const stderr = result.stderr ? Buffer.from(result.stderr).toString("utf8") : "";
+            throw flError(FL_ERRORS.GENERATION_ERROR, `Python floorplan exited ${result.status}: ${stderr}`, {
+              retryable: false,
+              suggestion: "Inspect scripts/floorplan.py output. Bible structure may be missing required fields.",
+            });
+          }
+
+          const pngBuffer = Buffer.from(result.stdout);
+          if (pngBuffer.length === 0) {
+            throw flError(FL_ERRORS.GENERATION_ERROR, "Python floorplan returned empty stdout", {
+              retryable: true,
+              suggestion: "Re-run; check stderr in agent logs.",
+            });
+          }
+
+          updateTask(task_id, { progress: 0.85, current_step: "Saving floorplan PNG" });
+          const saveResult = await saveImage("floorplan", bibleId, pngBuffer);
+
+          updateTask(task_id, {
+            status: "completed",
+            progress: 1.0,
+            current_step: `Floorplan ready (${pngBuffer.length} bytes)`,
+            artifacts: [
+              {
+                uri: saveResult.uri,
+                mime_type: "image/png",
+                created_at: new Date().toISOString(),
+                ...(saveResult.local_path ? { local_path: saveResult.local_path } : {}),
+              },
+            ],
+          });
+        } catch (err) {
+          updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) });
+        }
+      })();
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ task_id, status: "accepted" }) }],
       };
     },
   );
 
-  // Setup extraction
+  // Setup extraction (hard-gated via floorplan dependency)
   server.tool(
     "extract_setups",
     "Extract per-scene camera setups by combining floorplan coordinates with mood states. Returns array of setup objects.",
@@ -287,6 +487,90 @@ export function registerLocationTools(server: McpServer) {
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     async () => {
       const task_id = crypto.randomUUID();
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ task_id, status: "accepted" }) }],
+      };
+    },
+  );
+
+  // Research depth scoring (parity with Casting Director)
+  server.tool(
+    "evaluate_research_depth",
+    "Score the depth and sufficiency of a research pack against the location's importance. Returns { score 0..1, gaps[] } so the orchestrator can decide whether to dig deeper before writing the Bible.",
+    {
+      research_pack_uri: z.string().describe("MCP resource URI of the research pack to evaluate"),
+      location_importance: z.enum(["recurring", "single_scene", "background"]).default("single_scene").describe("How prominent the location is in the film"),
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    async ({ research_pack_uri, location_importance }) => {
+      const task_id = crypto.randomUUID();
+      createTask(task_id, "Evaluating research depth");
+
+      (async () => {
+        try {
+          const researchId = research_pack_uri.split("/").pop() || "";
+          const research = await loadArtifact<{
+            period_facts?: unknown[];
+            typical_elements?: unknown[];
+            anachronism_list?: unknown[];
+            visual_references?: unknown[];
+          }>("research", researchId);
+
+          if (!research) {
+            updateTask(task_id, { status: "failed", error: `Research pack not found: ${research_pack_uri}` });
+            return;
+          }
+
+          // Heuristic scoring — keep simple, can be replaced with LLM later.
+          const periodFactsCount = research.period_facts?.length ?? 0;
+          const typicalElementsCount = research.typical_elements?.length ?? 0;
+          const anachronismCount = research.anachronism_list?.length ?? 0;
+          const referencesCount = research.visual_references?.length ?? 0;
+
+          // Required minimums scale with importance
+          const required = {
+            recurring:     { facts: 8, elements: 8, anach: 6, refs: 4 },
+            single_scene:  { facts: 4, elements: 4, anach: 3, refs: 2 },
+            background:    { facts: 2, elements: 2, anach: 1, refs: 0 },
+          }[location_importance];
+
+          const ratios = [
+            Math.min(1, periodFactsCount / required.facts),
+            Math.min(1, typicalElementsCount / required.elements),
+            Math.min(1, anachronismCount / required.anach),
+            required.refs > 0 ? Math.min(1, referencesCount / required.refs) : 1,
+          ];
+          const score = Number((ratios.reduce((a, b) => a + b, 0) / ratios.length).toFixed(2));
+
+          const gaps: string[] = [];
+          if (periodFactsCount < required.facts) gaps.push(`period_facts: ${periodFactsCount}/${required.facts}`);
+          if (typicalElementsCount < required.elements) gaps.push(`typical_elements: ${typicalElementsCount}/${required.elements}`);
+          if (anachronismCount < required.anach) gaps.push(`anachronism_list: ${anachronismCount}/${required.anach}`);
+          if (required.refs > 0 && referencesCount < required.refs) gaps.push(`visual_references: ${referencesCount}/${required.refs}`);
+
+          const reportId = `depth_${researchId}_${Date.now().toString(36)}`;
+          const report = {
+            research_pack_uri,
+            location_importance,
+            score,
+            passed: score >= 0.75,
+            gaps,
+            counts: { periodFactsCount, typicalElementsCount, anachronismCount, referencesCount },
+            evaluated_at: new Date().toISOString(),
+          };
+          await saveArtifact("research-depth", reportId, report);
+
+          updateTask(task_id, {
+            status: "completed",
+            progress: 1.0,
+            current_step: `Research depth: ${score} (${score >= 0.75 ? "sufficient" : "needs more"})`,
+            artifacts: [{ uri: `agent://location-scout/research-depth/${reportId}`, mime_type: "application/json", created_at: report.evaluated_at }],
+          });
+        } catch (err) {
+          updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) });
+        }
+      })();
+
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ task_id, status: "accepted" }) }],
       };

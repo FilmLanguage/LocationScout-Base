@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { RationaleSchema } from "../common/rationale.js";
 
 export const ARTIFACT_TYPE = "location_bible" as const;
 export const ARTIFACT_VERSION = "v2" as const;
@@ -37,6 +38,7 @@ export const LocationBibleSchema = z.object({
   light_base_state: LightBaseStateSchema,
   key_details: z.array(z.string()).min(1).describe("5-8 specific visual details that define the space"),
   negative_list: z.array(z.string()).min(1).describe("Items that must NEVER appear (3+ items, goes to negative_prompt)"),
+  rationale: RationaleSchema.optional().describe("Optional explainability: why these creative choices were made (light direction, key details, atmosphere). Filled by LLM during write_bible when explainability is enabled."),
   approval_status: z.enum(["draft", "pending_review", "approved", "rejected"]).default("draft"),
 });
 

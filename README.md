@@ -61,7 +61,16 @@ Location research, Bible writing, anchor image generation, mood state creation, 
 - `agent://location-scout/floorplan/{id}` — Floorplan (PNG)
 - `agent://location-scout/setup/{id}` — Setup extraction (JSON)
 - `agent://location-scout/task/{id}` — Task status (JSON)
+- `agent://location-scout/research/{id}` — Research pack with period facts and anachronisms (JSON)
 - `agent://location-scout/schema/{type}` — JSON Schema
+
+## Environment variables
+
+| Var | Default | Description |
+|-----|---------|-------------|
+| `PORT` | `8080` | HTTP port the MCP server listens on |
+| `GCS_BUCKET` | — | Google Cloud Storage bucket for artifact persistence |
+| `LLM_MODEL` | — | Model identifier for generation tools |
 
 ## Development
 

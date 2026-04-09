@@ -97,3 +97,12 @@ Build the React UI component from the Figma handoff. Deploy to Narrativity Edito
 - All interactive elements: declare which of 8 states apply (use state matrix template)
 - Touch targets: 44x44px minimum
 - Color contrast: 4.5:1 text, 3:1 UI components
+
+## Figma
+
+| Resource | URL |
+|----------|-----|
+| **Design System** (all agents) | [https://www.figma.com/design/PnAhZwUJJmtTBRJWZh08ed/narrativity-UI?node-id=326-2](https://www.figma.com/design/PnAhZwUJJmtTBRJWZh08ed/narrativity-UI?node-id=326-2) |
+| **Location Scout [Claude]** (this agent) | [https://www.figma.com/design/PnAhZwUJJmtTBRJWZh08ed/narrativity-UI?node-id=264-800](https://www.figma.com/design/PnAhZwUJJmtTBRJWZh08ed/narrativity-UI?node-id=264-800) |
+
+Design tokens come from the Design System page via `@filmlanguage/tokens` (in `_tokens/`). Never hardcode color/font values — import from `tokens.ts`.

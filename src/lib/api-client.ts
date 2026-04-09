@@ -87,11 +87,22 @@ interface ImageGenParams {
   height?: number;
   seed?: number;
   num_images?: number;
+  /**
+   * FAL endpoint path — either a logical alias ("nano-banana/edit") or a
+   * full FAL path ("fal-ai/flux-pro/v1.1"). Defaults to nano-banana/edit.
+   * Callers should usually resolve via `resolveModel(slot, override)` from
+   * model-registry.ts rather than passing a raw string here.
+   */
+  model?: string;
+  /** Reference image URLs (for edit / img2img models like nano-banana/edit) */
+  image_urls?: string[];
 }
 
 interface ImageGenResult {
   images: Array<{ url: string; content_type: string }>;
   seed: number;
+  /** Resolved FAL endpoint that served this request (useful for logging). */
+  model: string;
 }
 
 export async function generateImage(params: ImageGenParams): Promise<ImageGenResult> {
@@ -102,28 +113,48 @@ export async function generateImage(params: ImageGenParams): Promise<ImageGenRes
     });
   }
 
+  // Default to nano-banana/edit if caller didn't pass anything.
+  const modelPath = params.model ?? "fal-ai/nano-banana/edit";
+  const endpoint = modelPath.startsWith("fal-ai/")
+    ? `https://queue.fal.run/${modelPath}`
+    : `https://queue.fal.run/fal-ai/${modelPath}`;
+
+  // Build request body — schemas differ slightly between model families.
+  // nano-banana/edit expects `prompt` + `image_urls`; flux expects `prompt`
+  // + `image_size`. We pass a union and let FAL ignore unknown fields.
+  const body: Record<string, unknown> = {
+    prompt: params.prompt,
+  };
+  if (params.negative_prompt) body.negative_prompt = params.negative_prompt;
+  if (params.seed != null) body.seed = params.seed;
+  if (params.num_images) body.num_images = params.num_images;
+  if (modelPath.includes("nano-banana")) {
+    // nano-banana edit variant expects reference images; if none supplied the
+    // text-to-image variant (`fal-ai/nano-banana`) is the right one, but we
+    // send the field anyway — FAL accepts both.
+    if (params.image_urls && params.image_urls.length > 0) {
+      body.image_urls = params.image_urls;
+    }
+  } else {
+    body.image_size = {
+      width: params.width ?? 1024,
+      height: params.height ?? 768,
+    };
+  }
+
   // Submit to FAL.ai queue
-  const submitRes = await fetch("https://queue.fal.run/fal-ai/flux/dev", {
+  const submitRes = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Key ${FAL_AI_API_KEY}`,
     },
-    body: JSON.stringify({
-      prompt: params.prompt,
-      negative_prompt: params.negative_prompt,
-      image_size: {
-        width: params.width ?? 1024,
-        height: params.height ?? 768,
-      },
-      seed: params.seed,
-      num_images: params.num_images ?? 1,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!submitRes.ok) {
     const body = await submitRes.text();
-    throw flError(FL_ERRORS.GENERATION_ERROR, `FAL.ai submit error: ${submitRes.status}`, {
+    throw flError(FL_ERRORS.GENERATION_ERROR, `FAL.ai submit error: ${submitRes.status} (model=${modelPath})`, {
       retryable: submitRes.status >= 500,
       suggestion: submitRes.status === 401 ? "Check FAL_AI_API_KEY" : "Retry later",
       status: submitRes.status,
@@ -147,8 +178,18 @@ export async function generateImage(params: ImageGenParams): Promise<ImageGenRes
       const resultRes = await fetch(submitData.response_url, {
         headers: { "Authorization": `Key ${FAL_AI_API_KEY}` },
       });
-      const resultData = await resultRes.json() as { images: Array<{ url: string; content_type: string }>; seed: number };
-      return resultData;
+      const resultData = await resultRes.json() as {
+        images?: Array<{ url: string; content_type?: string }>;
+        image?: { url: string; content_type?: string };
+        seed?: number;
+      };
+      // Normalize: some FAL endpoints return `image` (singular), others `images`.
+      const images = resultData.images
+        ? resultData.images.map((i) => ({ url: i.url, content_type: i.content_type ?? "image/png" }))
+        : resultData.image
+          ? [{ url: resultData.image.url, content_type: resultData.image.content_type ?? "image/png" }]
+          : [];
+      return { images, seed: resultData.seed ?? 0, model: modelPath };
     }
 
     if (statusData.status === "FAILED") {
