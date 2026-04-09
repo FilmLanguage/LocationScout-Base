@@ -52,7 +52,7 @@ const consumers: Consumer[] = [
     title: "Prompt Composer",
     fileCount: 4,
     description: "Bible text, mood states, negative_list for downstream agents",
-    consumers: "Production Designer, Sound Designer",
+    consumers: "Art Director, Sound Designer",
     files: [
       "location_bible.txt",
       "mood_states.json",

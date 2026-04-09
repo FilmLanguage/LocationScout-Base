@@ -682,6 +682,17 @@ export function registerLocationTools(server: McpServer) {
           const bible = await requireApprovedBible(bible_uri);
           const bibleId = bible_uri.includes("/") ? (bible_uri.split("/").pop() ?? "") : bible_uri;
           const spaceDesc = ((bible.space_description as string) ?? "").slice(0, 300);
+
+          // Load anchor image for img2img visual consistency (ERD: SETUP_IMAGE ← ANCHOR_IMAGE)
+          updateTask(task_id, { progress: 0.08, current_step: "Loading anchor image for img2img" });
+          const anchorImage = await loadImage("anchor", bibleId);
+          const anchorDataUrl = anchorImage
+            ? `data:image/png;base64,${anchorImage.data.toString("base64")}`
+            : null;
+          if (!anchorImage) {
+            updateTask(task_id, { progress: 0.08, current_step: "No anchor found — text-only generation" });
+          }
+
           const artifacts: Array<{ uri: string; mime_type: string; created_at: string; local_path?: string }> = [];
 
           for (let i = 0; i < setups.length; i++) {
@@ -690,10 +701,11 @@ export function registerLocationTools(server: McpServer) {
             updateTask(task_id, { progress, current_step: `Generating image for ${setup.id} (${i + 1}/${setups.length})` });
 
             const prompt = `Cinematic film still, ${spaceDesc}. Scene ${setup.scene}, ${setup.mood} mood. ${setup.camera ?? ""}. Photorealistic interior photography.`.slice(0, 2000);
-            const resolvedModel = resolveModel("ANCHOR", undefined);
+            const resolvedModel = resolveModel("SETUP", undefined);
             const result = await generateImage({
               prompt,
               model: resolvedModel,
+              ...(anchorDataUrl ? { image_urls: [anchorDataUrl] } : {}),
             });
 
             if (result.images.length > 0) {
