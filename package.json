@@ -5,6 +5,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
+    "predev": "bash check-env.sh",
     "dev": "tsx watch src/index.ts",
     "inspect": "npx @modelcontextprotocol/inspector",
     "test": "vitest run",
