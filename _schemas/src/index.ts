@@ -22,6 +22,7 @@ export { WardrobeBibleSchema, type WardrobeBible, WardrobeEntrySchema, type Ward
 export { AppearanceStatesSchema, type AppearanceStates, AppearanceEntrySchema, type AppearanceEntry, AppearanceStatesJsonSchema } from "./artifacts/appearance-state-v1.js";
 export { ModelSheetSchema, type ModelSheet, ModelSheetJsonSchema } from "./artifacts/model-sheet-v1.js";
 export { SceneStyleSchema, type SceneStyle, StyleReferenceSchema, type StyleReference, SceneStyleJsonSchema } from "./artifacts/scene-style-v1.js";
+export { ValidationReportSchema, type ValidationReport, ValidatorTypeSchema, type ValidatorType, ValidationReportJsonSchema } from "./artifacts/validation-report-v1.js";
 
 // --- Splitter pipeline artifacts (1AD / Director / Cinematographer / Editor) ---
 export { SceneBreakdownSchema, type SceneBreakdown, SceneSchema, type Scene, SceneBreakdownJsonSchema } from "./artifacts/scene-breakdown-v1.js";
