@@ -41,6 +41,7 @@ All 20 domain tools + 9 common tools (29 total) + 8 resources are implemented.
 5. **Swagger/OpenAPI**: `src/swagger.ts` — auto-generated docs
 
 <!-- WORKSPACE-DOCS-START -->
+<!-- WORKSPACE-DOCS-START -->
 ## Workspace docs
 
 All shared documentation lives in `../ai-stanislavsky-workspace/docs/`:
