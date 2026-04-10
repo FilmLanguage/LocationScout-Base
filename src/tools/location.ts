@@ -1194,6 +1194,78 @@ export function registerLocationTools(server: McpServer) {
     async ({ setup_id, mood_config }) => {
       const task_id = crypto.randomUUID();
       const variation_id = `var_${setup_id}_${mood_config.time_of_day ?? "custom"}_${crypto.randomUUID().slice(0, 6)}`;
+      createTask(task_id, "Generating mood variation image");
+      (async () => {
+        try {
+          updateTask(task_id, { status: "processing", progress: 0.05, current_step: "Loading setup data" });
+
+          // Load the setup JSON to find its bible_id
+          const setup = await loadArtifact<Record<string, unknown>>("setup", setup_id);
+          const bibleId = (setup?.bible_id as string) ??
+            (setup?.location_id as string) ??
+            setup_id.replace(/^setup_/, "").split("_")[0];
+
+          // Load Bible for space description
+          const bible = await loadArtifact<Record<string, unknown>>("bible", bibleId);
+          const spaceDesc = ((bible?.space_description as string) ?? "").slice(0, 200);
+
+          // Load anchor for img2img visual consistency
+          updateTask(task_id, { progress: 0.1, current_step: "Loading anchor for img2img" });
+          const anchorImage = await loadImage("anchor", bibleId);
+          const anchorDataUrl = anchorImage
+            ? `data:image/png;base64,${anchorImage.data.toString("base64")}`
+            : null;
+
+          // Build mood-aware prompt from config deltas
+          const moodParts = [
+            `Cinematic film still, ${spaceDesc}.`,
+            mood_config.time_of_day ? `Time: ${mood_config.time_of_day.toLowerCase()}.` : "",
+            mood_config.direction ? `Light from ${mood_config.direction}.` : "",
+            mood_config.color_temp_k ? `Color temperature ${mood_config.color_temp_k}K.` : "",
+            mood_config.shadow_hardness ? `${mood_config.shadow_hardness} shadows.` : "",
+            mood_config.weather ? `Weather: ${mood_config.weather}.` : "",
+            mood_config.clutter_level ? `Room: ${mood_config.clutter_level}.` : "",
+            mood_config.window_state ? `Windows: ${mood_config.window_state.replace(/_/g, " ")}.` : "",
+            mood_config.props_change ?? "",
+            mood_config.atmosphere_shift ?? "",
+            "Photorealistic interior photography.",
+          ].filter(Boolean).join(" ").slice(0, 2000);
+
+          updateTask(task_id, { progress: 0.3, current_step: `Generating variation image${anchorDataUrl ? " (img2img from anchor)" : " (text-only)"}` });
+
+          const resolvedModel = resolveModel("MOOD_VARIANT", undefined);
+          const result = await generateImage({
+            prompt: moodParts,
+            model: resolvedModel,
+            ...(anchorDataUrl ? { image_urls: [anchorDataUrl] } : {}),
+          });
+
+          if (result.images.length === 0) {
+            throw flError(FL_ERRORS.GENERATION_ERROR, "Image generator returned no images", {
+              retryable: true, suggestion: "Retry, or check FAL.ai service health.",
+            });
+          }
+
+          updateTask(task_id, { progress: 0.8, current_step: "Saving variation image" });
+          const imgRes = await fetch(result.images[0].url);
+          const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+          const saveResult = await saveImage("mood_variation", variation_id, imgBuf);
+
+          updateTask(task_id, {
+            status: "completed",
+            progress: 1.0,
+            current_step: `Mood variation ${variation_id} generated`,
+            artifacts: [{
+              uri: saveResult.uri,
+              mime_type: "image/png",
+              created_at: new Date().toISOString(),
+              ...(saveResult.local_path ? { local_path: saveResult.local_path } : {}),
+            }],
+          });
+        } catch (err) {
+          updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) });
+        }
+      })();
       return {
         content: [{
           type: "text" as const,
