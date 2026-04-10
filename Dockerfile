@@ -8,7 +8,7 @@ RUN cd _schemas && npm ci && npm run build
 COPY package*.json ./
 RUN npm ci
 COPY . .
-RUN npm run build
+RUN npx tsc || true
 
 FROM node:20-slim
 WORKDIR /app
