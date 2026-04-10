@@ -33,6 +33,10 @@
   --cyan: #60c0c0;
   --orange: #e0904a;
   --focus-ring: #a1a6aa;
+  --primary: #156bf4;
+  --primary-hover: #2f7ef5;
+  --error-text: #ff9a9a;
+  --img-placeholder: #000000;
 
   /* Typography */
   --sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif;

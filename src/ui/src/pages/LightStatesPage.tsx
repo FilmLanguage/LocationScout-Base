@@ -337,7 +337,7 @@ export function LightStatesPage() {
                           objectFit: "cover",
                           borderRadius: 4,
                           flexShrink: 0,
-                          background: "#000",
+                          background: "var(--img-placeholder)",
                         }}
                         onError={(e) => {
                           (e.currentTarget as HTMLImageElement).style.visibility = "hidden";
@@ -501,7 +501,7 @@ export function LightStatesPage() {
                     style={{
                       width: "100%",
                       borderRadius: 6,
-                      background: "#000",
+                      background: "var(--img-placeholder)",
                       display: "block",
                     }}
                     onError={(e) => {
@@ -516,7 +516,7 @@ export function LightStatesPage() {
                     style={{
                       width: "100%",
                       borderRadius: 6,
-                      background: "#000",
+                      background: "var(--img-placeholder)",
                       display: "block",
                     }}
                     onError={(e) => {
@@ -559,7 +559,7 @@ export function LightStatesPage() {
                       justifyContent: "center",
                       background: "rgba(220,60,60,0.55)",
                       borderRadius: 6,
-                      color: "#ffffff",
+                      color: "var(--text)",
                       fontSize: 12,
                       padding: 16,
                       textAlign: "center",

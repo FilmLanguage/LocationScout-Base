@@ -212,7 +212,7 @@ export function ReferencesPage() {
             width: "100%",
             borderRadius: 8,
             display: "block",
-            background: "#000",
+            background: "var(--img-placeholder)",
           }}
         />
       );
@@ -225,7 +225,7 @@ export function ReferencesPage() {
           style={{
             background: "rgba(220,60,60,0.08)",
             borderColor: "rgba(220,60,60,0.4)",
-            color: "#ff9a9a",
+            color: "var(--error-text)",
             textAlign: "center",
             padding: 16,
           }}

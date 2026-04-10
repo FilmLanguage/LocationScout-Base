@@ -28,7 +28,10 @@ Location research, Bible writing, anchor image generation, mood state creation, 
 - `generate_anchor` — Generate anchor image
 - `create_mood_states` — Generate mood deltas per scene
 - `create_floorplan` — Generate spatial layout + light map
+- `generate_isometric_reference` — Generate isometric 3D reference from floorplan
 - `extract_setups` — Per-scene camera setups
+- `generate_setup_images` — Generate setup visualisation images
+- `evaluate_research_depth` — Score research pack completeness and suggest gaps
 
 ### Domain — Read
 - `get_bible` — Read Location Bible

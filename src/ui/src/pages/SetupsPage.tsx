@@ -339,7 +339,7 @@ export function SetupsPage() {
       <img
         src={`${setupImgPath(selected.id)}?v=${bust}`}
         alt={`Full preview of ${selected.id}`}
-        style={{ width: "100%", borderRadius: 8, background: "#000", display: "block" }}
+        style={{ width: "100%", borderRadius: 8, background: "var(--img-placeholder)", display: "block" }}
       />
     );
   };
@@ -381,7 +381,7 @@ export function SetupsPage() {
             background: "rgba(220,60,60,0.08)",
             border: "1px solid rgba(220,60,60,0.4)",
             marginBottom: "var(--s-3)",
-            color: "#ff9a9a",
+            color: "var(--error-text)",
           }}
         >
           ✗ Setup generation failed: {batch.message}

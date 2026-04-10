@@ -667,14 +667,14 @@ h3 {
 }
 
 .btn--primary {
-  background: #156bf4;
+  background: var(--primary);
   color: var(--text);
-  border-color: #156bf4;
+  border-color: var(--primary);
 }
 
 .btn--primary:hover {
-  background: #2f7ef5;
-  border-color: #2f7ef5;
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
   transform: translateY(-1px);
 }
 

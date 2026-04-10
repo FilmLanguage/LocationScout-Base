@@ -641,7 +641,7 @@ export function registerLocationTools(server: McpServer) {
           let setups: Array<Record<string, unknown>>;
           try {
             setups = JSON.parse(stripCodeFence(llmResult.content));
-            if (!Array.isArray(setups)) throw new Error("LLM did not return array");
+            if (!Array.isArray(setups)) throw flError(FL_ERRORS.LLM_ERROR, "LLM did not return array", { retryable: true, suggestion: "Re-run extract_setups" });
           } catch (err) { updateTask(task_id, { status: "failed", error: `Parse error: ${err instanceof Error ? err.message : String(err)}` }); return; }
 
           updateTask(task_id, { progress: 0.7, current_step: `Saving ${setups.length} setups` });
