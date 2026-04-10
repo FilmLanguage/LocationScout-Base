@@ -5,8 +5,11 @@
  * the source Location Bible. Returns structured JSON with score, issues,
  * and observations.
  *
- * Falls back to a deterministic mock when GEMINI_API_KEY is not set so
+ * Falls back to a deterministic mock when FAL_AI_API_KEY is not set so
  * the retry loop can be exercised in tests and local dev.
+ *
+ * NOTE: Gemini access is provided through FAL (fal.ai) which has a
+ * Gemini binding. The FAL_AI_API_KEY is used with the Gemini API endpoint.
  */
 
 import { FL_ERRORS, flError } from "./errors.js";
@@ -25,7 +28,8 @@ export interface GeminiVisionOutput {
   model: string;
 }
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+// FAL provides a Gemini-compatible API key
+const FAL_AI_API_KEY = process.env.FAL_AI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-pro";
 
 /**
@@ -33,7 +37,7 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-pro";
  * Caller is responsible for parsing JSON from the response.
  */
 export async function analyzeWithGeminiVision(input: GeminiVisionInput): Promise<GeminiVisionOutput> {
-  if (!GEMINI_API_KEY) {
+  if (!FAL_AI_API_KEY) {
     // Mock response: deterministic, lets retry-loop logic be tested without network.
     return {
       content: JSON.stringify({
@@ -44,7 +48,7 @@ export async function analyzeWithGeminiVision(input: GeminiVisionInput): Promise
           era_markers: "consistent with brief",
         },
         issues: [],
-        notes: "Mock validation — GEMINI_API_KEY not set",
+        notes: "Mock validation — FAL_AI_API_KEY not set",
       }),
       model: "mock",
     };
@@ -55,7 +59,7 @@ export async function analyzeWithGeminiVision(input: GeminiVisionInput): Promise
   }));
 
   const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${FAL_AI_API_KEY}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -73,7 +77,7 @@ export async function analyzeWithGeminiVision(input: GeminiVisionInput): Promise
   if (!resp.ok) {
     throw flError(FL_ERRORS.GENERATION_ERROR, `Gemini Vision error ${resp.status}: ${await resp.text()}`, {
       retryable: true,
-      suggestion: "Check GEMINI_API_KEY and retry.",
+      suggestion: "Check FAL_AI_API_KEY (Gemini access via FAL) and retry.",
     });
   }
 

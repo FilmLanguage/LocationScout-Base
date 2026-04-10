@@ -32,8 +32,22 @@ app.use(express.json());
 app.use((_req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, x-agent-token");
   if (_req.method === "OPTIONS") { res.sendStatus(204); return; }
+  next();
+});
+
+// Inter-agent auth: if INTER_AGENT_TOKEN is set, require x-agent-token header.
+// Skip auth when token is empty (dev mode) or for health check.
+const INTER_AGENT_TOKEN = process.env.INTER_AGENT_TOKEN || "";
+app.use((req, res, next) => {
+  if (!INTER_AGENT_TOKEN) { next(); return; }
+  if (req.path === "/health") { next(); return; }
+  const token = req.headers["x-agent-token"];
+  if (token !== INTER_AGENT_TOKEN) {
+    res.status(401).json({ error: "unauthorized", message: "Invalid or missing x-agent-token" });
+    return;
+  }
   next();
 });
 
@@ -47,7 +61,7 @@ app.post("/mcp", async (req, res) => {
 });
 
 // Serve stored artifacts (images, JSON) via HTTP so the UI can display them.
-// GET /artifacts/:type/:id.ext → loads from storage layer (memory → disk → GCS).
+// GET /artifacts/:type/:id.ext → loads from storage layer (memory → disk → S3).
 app.get("/artifacts/:type/:file", async (req, res) => {
   const { type, file } = req.params;
   const ext = file.split(".").pop() ?? "";

@@ -17,6 +17,7 @@
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:ui\""
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1028.0",
     "@filmlanguage/schemas": "file:./_schemas",
     "@filmlanguage/tokens": "file:./_tokens",
     "@modelcontextprotocol/sdk": "^1.12.0",

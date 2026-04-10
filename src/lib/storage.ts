@@ -2,7 +2,7 @@
  * Artifact storage layer for Location Scout.
  *
  * Three backends:
- *   1. Google Cloud Storage — if GCS_BUCKET is set (production)
+ *   1. S3-compatible storage — if S3_BUCKET is set (production; uses GCS S3 interop)
  *   2. Local filesystem — if LOCAL_OUTPUT_DIR is set (local dev; images can
  *      then be read back by humans or by Claude via Read tool)
  *   3. In-memory map — always active as L1 cache / fallback
@@ -14,7 +14,7 @@
 
 import { promises as fs } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { GCS_BUCKET, gcsUpload, gcsDownload, gcsExists } from "./api-client.js";
+import { S3_BUCKET, s3Upload, s3Download, s3Exists } from "./api-client.js";
 
 const LOCAL_OUTPUT_DIR = process.env.LOCAL_OUTPUT_DIR || "";
 const AGENT_NAME = "location-scout";
@@ -61,8 +61,8 @@ export async function saveArtifact(type: string, id: string, data: unknown): Pro
   // Persist to disk if configured
   await writeLocal(path, json);
 
-  if (GCS_BUCKET) {
-    return gcsUpload(path, json, "application/json");
+  if (S3_BUCKET) {
+    return s3Upload(path, json, "application/json");
   }
 
   return `mem://${path}`;
@@ -84,9 +84,9 @@ export async function loadArtifact<T = unknown>(type: string, id: string): Promi
   }
 
   // L3: GCS
-  if (GCS_BUCKET) {
+  if (S3_BUCKET) {
     try {
-      const { data } = await gcsDownload(path);
+      const { data } = await s3Download(path);
       return JSON.parse(data.toString()) as T;
     } catch {
       return null;
@@ -107,7 +107,7 @@ export async function artifactExists(type: string, id: string): Promise<boolean>
       /* fall through */
     }
   }
-  if (GCS_BUCKET) return gcsExists(path);
+  if (S3_BUCKET) return s3Exists(path);
   return false;
 }
 
@@ -119,7 +119,7 @@ export interface SaveImageResult {
   /** Absolute filesystem path — null if LOCAL_OUTPUT_DIR not set */
   local_path: string | null;
   /** GCS path if uploaded, null otherwise */
-  gcs_path: string | null;
+  s3_path: string | null;
   bytes: number;
   content_type: string;
 }
@@ -137,15 +137,15 @@ export async function saveImage(
 
   const local_path = await writeLocal(path, data);
 
-  let gcs_path: string | null = null;
-  if (GCS_BUCKET) {
-    gcs_path = await gcsUpload(path, data, contentType);
+  let s3_path: string | null = null;
+  if (S3_BUCKET) {
+    s3_path = await s3Upload(path, data, contentType);
   }
 
   return {
     uri: `agent://${AGENT_NAME}/${type}/${id}`,
     local_path,
-    gcs_path,
+    s3_path,
     bytes: data.length,
     content_type: contentType,
   };
@@ -169,9 +169,9 @@ export async function loadImage(
   }
 
   // GCS
-  if (GCS_BUCKET) {
+  if (S3_BUCKET) {
     try {
-      return await gcsDownload(path);
+      return await s3Download(path);
     } catch {
       return null;
     }

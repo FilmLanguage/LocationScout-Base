@@ -1,13 +1,18 @@
 /**
- * External API clients for GCS, LLM (Anthropic), and image generation (FAL.ai).
+ * External API clients for S3-compatible storage, LLM (Anthropic), and image generation (FAL.ai).
  * Each agent customizes this for its specific external dependencies.
  */
 
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { flError, FL_ERRORS } from "./errors.js";
 
 // ─── Environment ────────────────────────────────────────────────────
 
-export const GCS_BUCKET = process.env.GCS_BUCKET || "";
+export const S3_BUCKET = process.env.S3_BUCKET || "";
+const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY || "";
+const S3_SECRET_KEY = process.env.S3_SECRET_KEY || "";
+const S3_ENDPOINT = process.env.S3_ENDPOINT || "https://storage.googleapis.com";
+
 export const PROJECT_ID = process.env.PROJECT_ID || "";
 export const LLM_MODEL = process.env.LLM_MODEL || "claude-sonnet-4-6";
 
@@ -206,80 +211,99 @@ export async function generateImage(params: ImageGenParams): Promise<ImageGenRes
   });
 }
 
-// ─── GCS Storage ────────────────────────────────────────────────────
+// ─── S3-Compatible Storage (GCS S3 interop) ────────────────────────
 
-export async function gcsUpload(
+function getS3Client(): S3Client {
+  return new S3Client({
+    endpoint: S3_ENDPOINT,
+    region: "auto",
+    forcePathStyle: true,
+    credentials: {
+      accessKeyId: S3_ACCESS_KEY,
+      secretAccessKey: S3_SECRET_KEY,
+    },
+  });
+}
+
+export async function s3Upload(
   path: string,
   data: Uint8Array | string,
   contentType: string,
 ): Promise<string> {
-  if (!GCS_BUCKET) {
-    throw flError(FL_ERRORS.MISSING_DEPENDENCY, "GCS_BUCKET not configured", {
+  if (!S3_BUCKET) {
+    throw flError(FL_ERRORS.MISSING_DEPENDENCY, "S3_BUCKET not configured", {
       retryable: false,
-      suggestion: "Set GCS_BUCKET in .env",
+      suggestion: "Set S3_BUCKET in .env",
     });
   }
 
-  const url = `https://storage.googleapis.com/upload/storage/v1/b/${GCS_BUCKET}/o?uploadType=media&name=${encodeURIComponent(path)}`;
+  const client = getS3Client();
+  const body = typeof data === "string" ? Buffer.from(data, "utf8") : data;
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": contentType,
-      // Uses Application Default Credentials (ADC) on Cloud Run.
-      // For local dev, run: gcloud auth application-default login
-    },
-    body: typeof data === "string" ? data : new Blob([data as BlobPart], { type: contentType }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw flError(FL_ERRORS.GENERATION_ERROR, `GCS upload failed: ${res.status}`, {
-      retryable: res.status >= 500,
-      suggestion: "Check GCS_BUCKET and credentials",
-      status: res.status,
-      body,
+  try {
+    await client.send(new PutObjectCommand({
+      Bucket: S3_BUCKET,
+      Key: path,
+      Body: body,
+      ContentType: contentType,
+    }));
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw flError(FL_ERRORS.GENERATION_ERROR, `S3 upload failed: ${message}`, {
+      retryable: true,
+      suggestion: "Check S3_BUCKET, S3_ACCESS_KEY, S3_SECRET_KEY, and S3_ENDPOINT",
     });
   }
 
-  return `gs://${GCS_BUCKET}/${path}`;
+  return `s3://${S3_BUCKET}/${path}`;
 }
 
-export async function gcsDownload(path: string): Promise<{ data: Buffer; contentType: string }> {
-  if (!GCS_BUCKET) {
-    throw flError(FL_ERRORS.MISSING_DEPENDENCY, "GCS_BUCKET not configured", {
+export async function s3Download(path: string): Promise<{ data: Buffer; contentType: string }> {
+  if (!S3_BUCKET) {
+    throw flError(FL_ERRORS.MISSING_DEPENDENCY, "S3_BUCKET not configured", {
       retryable: false,
-      suggestion: "Set GCS_BUCKET in .env",
+      suggestion: "Set S3_BUCKET in .env",
     });
   }
 
-  const url = `https://storage.googleapis.com/storage/v1/b/${GCS_BUCKET}/o/${encodeURIComponent(path)}?alt=media`;
+  const client = getS3Client();
 
-  const res = await fetch(url);
+  try {
+    const response = await client.send(new GetObjectCommand({
+      Bucket: S3_BUCKET,
+      Key: path,
+    }));
 
-  if (!res.ok) {
-    if (res.status === 404) {
+    const contentType = response.ContentType || "application/octet-stream";
+    const bodyBytes = await response.Body!.transformToByteArray();
+    return { data: Buffer.from(bodyBytes), contentType };
+  } catch (err: unknown) {
+    const name = (err as { name?: string })?.name;
+    if (name === "NoSuchKey" || name === "NotFound") {
       throw flError(FL_ERRORS.MISSING_DEPENDENCY, `Object not found: ${path}`, {
         retryable: false,
         suggestion: "Check artifact ID",
       });
     }
-    throw flError(FL_ERRORS.GENERATION_ERROR, `GCS download failed: ${res.status}`, {
-      retryable: res.status >= 500,
+    const message = err instanceof Error ? err.message : String(err);
+    throw flError(FL_ERRORS.GENERATION_ERROR, `S3 download failed: ${message}`, {
+      retryable: true,
       suggestion: "Retry later",
-      status: res.status,
     });
   }
-
-  const contentType = res.headers.get("content-type") || "application/octet-stream";
-  const arrayBuffer = await res.arrayBuffer();
-  return { data: Buffer.from(arrayBuffer), contentType };
 }
 
-export async function gcsExists(path: string): Promise<boolean> {
-  if (!GCS_BUCKET) return false;
+export async function s3Exists(path: string): Promise<boolean> {
+  if (!S3_BUCKET) return false;
 
-  const url = `https://storage.googleapis.com/storage/v1/b/${GCS_BUCKET}/o/${encodeURIComponent(path)}`;
-  const res = await fetch(url, { method: "HEAD" });
-  return res.ok;
+  const client = getS3Client();
+  try {
+    await client.send(new HeadObjectCommand({
+      Bucket: S3_BUCKET,
+      Key: path,
+    }));
+    return true;
+  } catch {
+    return false;
+  }
 }
