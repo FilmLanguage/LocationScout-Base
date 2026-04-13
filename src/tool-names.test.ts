@@ -4,20 +4,20 @@
  *
  * Catches the #1 UI↔backend mismatch: calling a tool that doesn't exist.
  *
- * Run: npm test
+ * Run: npm run test:integration
  * Requires: backend running on localhost:9876 (npm run dev)
+ *
+ * Skipped automatically when backend is not reachable.
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { globSync } from "glob";
 
-// ─── 1. Extract tool names from backend ─────────────────────────────
+// ─── 1. Check backend availability ─────────────────────────────────
 
-let backendTools: string[] = [];
-
-beforeAll(async () => {
+async function fetchBackendTools(): Promise<string[]> {
   try {
     const res = await fetch("http://localhost:9876/mcp", {
       method: "POST",
@@ -42,11 +42,14 @@ beforeAll(async () => {
       json = JSON.parse(text);
     }
 
-    backendTools = json?.result?.tools?.map((t: any) => t.name) ?? [];
+    return json?.result?.tools?.map((t: any) => t.name) ?? [];
   } catch {
-    // Backend not running — skip gracefully
+    return [];
   }
-});
+}
+
+const backendTools = await fetchBackendTools();
+const backendAvailable = backendTools.length > 0;
 
 // ─── 2. Extract tool names from UI source code ──────────────────────
 
@@ -83,19 +86,10 @@ function extractToolNamesFromUI(): { tool: string; file: string; line: number }[
   return results;
 }
 
-// ─── 3. Tests ───────────────────────────────────────────────────────
+// ─── 3. Tests (skipped when backend is not running) ─────────────────
 
-describe("UI ↔ Backend tool name consistency", () => {
-  it("backend should be reachable", () => {
-    expect(
-      backendTools.length,
-      "Backend not running on :9876. Start with: npm run dev",
-    ).toBeGreaterThan(0);
-  });
-
+describe.skipIf(!backendAvailable)("UI ↔ Backend tool name consistency", () => {
   it("all tool names used in UI must exist in backend", () => {
-    if (backendTools.length === 0) return; // skip if backend not running
-
     const uiToolCalls = extractToolNamesFromUI();
     const uniqueTools = [...new Set(uiToolCalls.map((t) => t.tool))];
     const missing = uniqueTools.filter((t) => !backendTools.includes(t));
