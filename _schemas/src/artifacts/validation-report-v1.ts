@@ -4,7 +4,7 @@
  * Lightweight, machine-generated validation record produced by VLM/rule-based
  * checkers (e.g. Gemini Vision validating a generated anchor against its Bible).
  *
- * Distinct from ReviewReport (which carries authoritative human/Critic verdicts):
+ * Distinct from ReviewReport (which carries authoritative human verdicts):
  * - Multiple validation reports may exist per artifact (one per retry attempt).
  * - No gate context, no recommendation — just score, pass/fail, and observed issues.
  * - Designed for tight retry loops: agent runs validator, reads `passed`, retries if false.

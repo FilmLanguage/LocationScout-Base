@@ -17,7 +17,7 @@
  * Guidance for agents:
  *   - Keep `primary_reason` concise (1–2 sentences).
  *   - Reference upstream artifacts in `references` (research-pack URIs,
- *     director-vision URIs) — this lets a Critic argue against the source,
+ *     director-vision URIs) — this lets a reviewer argue against the source,
  *     not just the value.
  *   - `confidence` is optional; use it when the LLM signals uncertainty.
  *   - DO NOT post-hoc rationalize — only fill rationale when it reflects

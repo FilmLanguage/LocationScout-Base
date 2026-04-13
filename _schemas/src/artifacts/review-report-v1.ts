@@ -4,9 +4,9 @@ import { IssueSchema } from "../common/issue.js";
 
 export const ARTIFACT_TYPE = "review_report" as const;
 export const ARTIFACT_VERSION = "v1" as const;
-export const PRODUCED_BY = "critic-base" as const;
+export const PRODUCED_BY = "unassigned" as const;
 export const MIME_TYPE = "application/json" as const;
-export const URI_PATTERN = "agent://critic/report/{id}" as const;
+export const URI_PATTERN = "agent://pipeline/review-report/{id}" as const;
 
 export const ReviewReportSchema = z.object({
   $schema: z.literal("review-report-v1"),
