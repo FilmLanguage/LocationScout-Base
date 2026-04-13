@@ -20,6 +20,7 @@ import { ARTIFACT_TYPE as DOP_FILM_VISION, URI_PATTERN as DOP_FILM_VISION_URI, P
 import { ARTIFACT_TYPE as DIRECTOR_SCENE_VISION, URI_PATTERN as DIRECTOR_SCENE_VISION_URI, PRODUCED_BY as DIRECTOR_SCENE_VISION_PRODUCER, MIME_TYPE as DIRECTOR_SCENE_VISION_MIME } from "./director-scene-vision-v1.js";
 import { ARTIFACT_TYPE as DOP_SCENE_VISION, URI_PATTERN as DOP_SCENE_VISION_URI, PRODUCED_BY as DOP_SCENE_VISION_PRODUCER, MIME_TYPE as DOP_SCENE_VISION_MIME } from "./dop-scene-vision-v1.js";
 import { ARTIFACT_TYPE as EDL, URI_PATTERN as EDL_URI, PRODUCED_BY as EDL_PRODUCER, MIME_TYPE as EDL_MIME } from "./edl-v1.js";
+import { ARTIFACT_TYPE as SHOT_RECIPE, URI_PATTERN as SHOT_RECIPE_URI, PRODUCED_BY as SHOT_RECIPE_PRODUCER, MIME_TYPE as SHOT_RECIPE_MIME } from "./shot-recipe-v1.js";
 
 export const ARTIFACT_REGISTRY = {
   [FILM_IR]: { uriPattern: FILM_IR_URI, producedBy: FILM_IR_PRODUCER, mimeType: FILM_IR_MIME },
@@ -51,6 +52,7 @@ export const ARTIFACT_REGISTRY = {
   [WARDROBE_BIBLE]:    { uriPattern: WARDROBE_BIBLE_URI, producedBy: WARDROBE_BIBLE_PRODUCER, mimeType: WARDROBE_BIBLE_MIME },
   [APPEARANCE_STATES]: { uriPattern: APPEARANCE_STATES_URI, producedBy: APPEARANCE_STATES_PRODUCER, mimeType: APPEARANCE_STATES_MIME },
   [MODEL_SHEET]:       { uriPattern: MODEL_SHEET_URI, producedBy: MODEL_SHEET_PRODUCER, mimeType: MODEL_SHEET_MIME },
+  [SHOT_RECIPE]:       { uriPattern: SHOT_RECIPE_URI, producedBy: SHOT_RECIPE_PRODUCER, mimeType: SHOT_RECIPE_MIME },
   shot_image:          { uriPattern: "agent://shot-generation/shot/{id}" as const,            producedBy: "shot-generation-base" as const,      mimeType: "image/png" as const },
   sound_map:           { uriPattern: "agent://sound-designer/sound-map/{id}" as const,        producedBy: "sound-designer-base" as const,       mimeType: "application/json" as const },
   sfx_bible:           { uriPattern: "agent://sound-designer/sfx-bible/{id}" as const,        producedBy: "sound-designer-base" as const,       mimeType: "application/json" as const },
