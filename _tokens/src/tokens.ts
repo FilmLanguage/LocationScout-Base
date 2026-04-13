@@ -12,35 +12,38 @@
 
 export const colors = {
   // Backgrounds
-  bg:         "#0c0c0f",    // Page BG
-  surface:    "#16161b",    // Card BG
-  "surface-2": "#1e1e25",   // Nested containers
+  bg:         "#111111",    // Page BG
+  surface:    "#131416",    // Card BG
+  "surface-2": "#1e2024",   // Nested containers, image placeholders
   "surface-3": "#26262f",   // Tertiary depth
 
   // Borders
-  border:       "#2a2a35",  // Page Border
-  "border-accent": "#3a3a48", // Card / Chip Border
+  border:       "#2b2e31",  // Page Border
+  "border-accent": "#43474c", // Card / Chip Border
+  "blue-border": "#4186f6", // CTA Border
 
   // Text
-  text:      "#e8e6e3",     // Primary Text
-  "text-muted": "#9a9890",  // Secondary Text
+  text:      "#eaebec",     // Primary Text
+  "text-muted": "#a1a6aa",  // Secondary Text
   "text-dim":   "#6b6960",  // Tertiary text
 
   // Accent & semantic
-  accent:    "#f0c040",     // Gold / Active
+  accent:    "#f7e27e",     // Gold / Active
   "accent-dim": "#c09a20",  // Muted accent
-  blue:      "#5b9bd5",     // Blue / CTA
-  green:     "#7bc47f",     // Green / Status
-  red:       "#d97070",     // Error, gates, negative list
+  blue:      "#156bf4",     // Blue / CTA
+  green:     "#a6f77e",     // Green / Status
+  red:       "#f7927e",     // Red / Warning, negative list
   pink:      "#d08ab4",     // Gate badges, keywords
   cyan:      "#60c0c0",     // Technical tags
   orange:    "#e0904a",     // Warnings
 
   // Chip/Tag fills
-  "chip-fill": "rgba(255,255,255,0.1)",   // 10% white
-  "flag-fill": "rgba(240,192,64,0.25)",   // 25% gold
-  "tag-green": "rgba(123,196,127,0.2)",   // 20% green
-  "tag-red":   "rgba(217,112,112,0.2)",   // 20% red
+  "chip-fill":    "rgba(255,255,255,0.1)",   // 10% white
+  "flag-fill":    "rgba(247,226,126,0.25)",  // 25% gold
+  "tag-green":    "rgba(166,247,126,0.15)",  // 15% green
+  "tag-red":      "rgba(247,146,126,0.1)",   // 10% red — Warning/Error fill
+  "tag-blue":     "rgba(21,107,244,0.15)",   // 15% blue
+  "tag-default":  "rgba(255,255,255,0.1)",   // 10% white (alias)
 
   // Focus
   "focus-ring": "#7f8081",
