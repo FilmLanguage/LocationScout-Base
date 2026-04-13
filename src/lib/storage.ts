@@ -12,8 +12,10 @@
  * it in tool responses.
  */
 
+import { copyFileSync, existsSync } from "node:fs";
 import { promises as fs } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { readFileSync } from "node:fs";
 import { S3_BUCKET, s3Upload, s3Download, s3Exists } from "./api-client.js";
 
 const LOCAL_OUTPUT_DIR = process.env.LOCAL_OUTPUT_DIR || "";
@@ -53,6 +55,21 @@ async function readLocal(path: string): Promise<Buffer | null> {
 
 export async function saveArtifact(type: string, id: string, data: unknown): Promise<string> {
   const path = `${type}/${id}.json`;
+
+  // Save previous version for diff (one backup only)
+  const abs = resolveLocalPath(path);
+  if (abs && existsSync(abs)) {
+    const prevPath = resolveLocalPath(`${type}/${id}.prev.json`);
+    if (prevPath) {
+      copyFileSync(abs, prevPath);
+    }
+  }
+
+  // Stamp _updated_at
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    (data as Record<string, unknown>)._updated_at = new Date().toISOString();
+  }
+
   const json = JSON.stringify(data, null, 2);
 
   // Always keep in memory for fast read-back within the same process
@@ -236,4 +253,64 @@ export function listLocalArtifacts(type: string): string[] {
   return Array.from(memoryStore.keys())
     .filter((k) => k.startsWith(prefix))
     .map((k) => k.slice(prefix.length).replace(/\.json$/, ""));
+}
+
+// ─── Diff & Staleness helpers ──────────────────────────────────────
+
+/**
+ * Get diff between current and previous version of an artifact.
+ * Returns changed field names + old/new values, or null if no prev exists.
+ */
+export async function getArtifactDiff(
+  type: string,
+  id: string,
+): Promise<{ field: string; old: unknown; new: unknown }[] | null> {
+  const currExists = await artifactExists(type, id);
+  const prevExists = await artifactExists(type, `${id}.prev`);
+  if (!currExists || !prevExists) return null;
+
+  const curr = await loadArtifact<Record<string, unknown>>(type, id);
+  const prev = await loadArtifact<Record<string, unknown>>(type, `${id}.prev`);
+  if (!curr || !prev) return null;
+
+  const changes: { field: string; old: unknown; new: unknown }[] = [];
+  const skipFields = new Set(["_updated_at", "_meta", "$schema", "project_id"]);
+
+  for (const field of new Set([...Object.keys(prev), ...Object.keys(curr)])) {
+    if (skipFields.has(field)) continue;
+    const oldVal = JSON.stringify(prev[field]);
+    const newVal = JSON.stringify(curr[field]);
+    if (oldVal !== newVal) {
+      changes.push({ field, old: prev[field], new: curr[field] });
+    }
+  }
+  return changes.length > 0 ? changes : null;
+}
+
+/**
+ * Check if a source artifact is newer than a dependent artifact.
+ * Used for "check for updates" — e.g. is DFV newer than location bible?
+ * Compares _updated_at timestamps from local disk files.
+ */
+export async function isArtifactStale(
+  dependentType: string,
+  dependentId: string,
+  sourceDataRoot: string,
+  sourceKey: string,
+): Promise<boolean> {
+  const depPath = resolveLocalPath(`${dependentType}/${dependentId}.json`);
+  if (!depPath || !existsSync(depPath)) return false;
+
+  const srcPath = resolve(sourceDataRoot, sourceKey);
+  if (!existsSync(srcPath)) return false;
+
+  try {
+    const dep = JSON.parse(readFileSync(depPath, "utf8"));
+    const src = JSON.parse(readFileSync(srcPath, "utf8"));
+    const depTime = dep._updated_at ? new Date(dep._updated_at).getTime() : 0;
+    const srcTime = src._updated_at ? new Date(src._updated_at).getTime() : 0;
+    return srcTime > depTime;
+  } catch {
+    return false;
+  }
 }
