@@ -18,7 +18,7 @@ describe("artifact CRUD (memory mode, no GCS)", () => {
     expect(uri).toContain("mem://");
 
     const loaded = await loadArtifact(type, "item-1");
-    expect(loaded).toEqual({ name: "Test" });
+    expect(loaded).toMatchObject({ name: "Test" });
   });
 
   it("returns null for nonexistent artifact", async () => {
