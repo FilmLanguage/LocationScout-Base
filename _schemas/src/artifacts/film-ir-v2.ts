@@ -47,7 +47,7 @@ const CharacterEntrySchema = z.object({
 
 const ShotRecipeEntrySchema = z.object({
   scene_id: z.string().describe("Scene ID"),
-  recipe_uri: z.string().describe("MCP resource URI: agent://storyboard/recipe/{id}"),
+  recipe_uri: z.string().describe("MCP resource URI for shot recipe"),
 });
 
 export const FilmIrSchema = z.object({

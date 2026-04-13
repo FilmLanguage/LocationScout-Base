@@ -3,9 +3,9 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 
 export const ARTIFACT_TYPE = "shot_recipe" as const;
 export const ARTIFACT_VERSION = "v1" as const;
-export const PRODUCED_BY = "storyboard-base" as const;
+export const PRODUCED_BY = "unassigned" as const;
 export const MIME_TYPE = "application/json" as const;
-export const URI_PATTERN = "agent://storyboard/recipe/{id}" as const;
+export const URI_PATTERN = "agent://pipeline/shot-recipe/{id}" as const;
 
 const LocationRefSchema = z.object({
   bible_id: z.string().describe("Location Bible ID"),

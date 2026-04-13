@@ -36,10 +36,10 @@ const consumers: Consumer[] = [
     extra: 1,
   },
   {
-    title: "DP + Storyboard",
+    title: "DP",
     fileCount: 6,
     description: "Floorplan, setup positions, anchor image for cinematographer",
-    consumers: "Cinematographer, Storyboard Artist",
+    consumers: "Cinematographer",
     files: [
       "floorplan_with_lights.png",
       "setup_positions.json",

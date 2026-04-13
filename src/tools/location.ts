@@ -1095,7 +1095,7 @@ export function registerLocationTools(server: McpServer) {
 
   server.tool(
     "get_outputs",
-    "Get all output artifacts for a location, grouped by consumer (Gallery, DP+Storyboard, Prompt Composer, Shot Generation). Corresponds to W7 Outputs dashboard.",
+    "Get all output artifacts for a location, grouped by consumer (Gallery, DP, Prompt Composer, Shot Generation). Corresponds to W7 Outputs dashboard.",
     {
       location_id: z.string().optional().describe("Location ID, e.g. loc_001"),
       project_id: z.string().optional().describe("Project ID — returns outputs for all locations in project"),
@@ -1119,7 +1119,7 @@ export function registerLocationTools(server: McpServer) {
             project_id: project_id ?? null,
             groups: {
               gallery: { files: [], count: 0 },
-              dp_storyboard: { files: [], count: 0 },
+              dp: { files: [], count: 0 },
               prompt_composer: { files: [], count: 0 },
               shot_generation: { files: [], count: 0 },
             },
