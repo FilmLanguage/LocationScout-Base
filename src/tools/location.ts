@@ -1,13 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { createTask, updateTask, saveArtifact, loadArtifact, saveImage, loadImage } from "../lib/storage.js";
+import { createTask, updateTask, saveArtifact, loadArtifact, saveImage, loadImage, getArtifactDiff, isArtifactStale, listLocalArtifacts } from "../lib/storage.js";
 import { llmComplete, generateImage } from "../lib/api-client.js";
 import { flError, FL_ERRORS } from "../lib/errors.js";
 import { validateAnchorAgainstBible, issuesToCorrectionHint, type ValidatorBibleSpec } from "../lib/anchor-validator.js";
 import { resolveModel } from "../lib/model-registry.js";
 import { analyzeWithGeminiVision, stripJsonFence } from "../lib/gemini-vision.js";
 import { spawnSync } from "node:child_process";
-import { resolve as pathResolve, dirname } from "node:path";
+import { resolve as pathResolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1272,6 +1272,133 @@ export function registerLocationTools(server: McpServer) {
           text: JSON.stringify({ task_id, variation_id, status: "accepted", setup_id }),
         }],
       };
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // check_updates — see if 1AD's location_briefs or Director's location vision changed
+  // -------------------------------------------------------------------------
+
+  const REPO_ROOT = pathResolve(__dirname, "..", "..");
+  const ONEAD_DATA_ROOT = process.env.ONEAD_DATA_ROOT
+    ?? pathResolve(REPO_ROOT, "..", "1AD-Base", "data", "projects");
+  const DIRECTOR_DATA_ROOT = process.env.DIRECTOR_DATA_ROOT
+    ?? pathResolve(REPO_ROOT, "..", "Director-Base", "data", "projects");
+
+  server.tool(
+    "check_updates",
+    "Check if upstream artifacts (1AD's location_briefs or Director's director_location_vision) have been updated since local bible artifacts were generated. " +
+    "Returns which artifacts are stale.",
+    {
+      project_id: z.string().describe("Project GUID"),
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    async ({ project_id }) => {
+      try {
+        const stale: Array<{ artifact: string; source: string }> = [];
+
+        // Get all local bible IDs
+        const bibleIds = listLocalArtifacts("bible");
+        const sampleBibleId = bibleIds[0]; // use first bible as reference for staleness
+
+        if (sampleBibleId) {
+          // Check 1AD location_briefs vs local bibles
+          const locationBriefsStale = await isArtifactStale(
+            "bible",
+            sampleBibleId,
+            join(ONEAD_DATA_ROOT, project_id),
+            "location_briefs.json",
+          );
+          if (locationBriefsStale) {
+            stale.push({ artifact: "bible/*", source: "1AD location_briefs updated" });
+          }
+
+          // Check Director location vision vs local bibles
+          const dirVisionStale = await isArtifactStale(
+            "bible",
+            sampleBibleId,
+            join(DIRECTOR_DATA_ROOT, project_id),
+            "director_location_vision.json",
+          );
+          if (dirVisionStale) {
+            stale.push({ artifact: "bible/*", source: "Director director_location_vision updated" });
+          }
+        }
+
+        if (stale.length === 0) {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({
+              status: "up_to_date",
+              message: "All artifacts are current. No upstream changes detected.",
+            }) }],
+          };
+        }
+
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({
+            status: "updates_available",
+            stale_count: stale.length,
+            stale,
+            message: "Upstream artifacts have changed. Consider regenerating.",
+          }) }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({
+            error: "check_updates_failed",
+            message: err instanceof Error ? err.message : String(err),
+          }) }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // get_diff — show what changed in an artifact since last save
+  // -------------------------------------------------------------------------
+
+  server.tool(
+    "get_diff",
+    "Show what fields changed in an artifact compared to its previous version. " +
+    "Works for any artifact this agent owns (bible, research, mood, etc.).",
+    {
+      artifact_type: z.string().describe("Artifact type, e.g. 'bible', 'research', 'mood'"),
+      artifact_id: z.string().describe("Artifact ID, e.g. 'loc_001'"),
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    async ({ artifact_type, artifact_id }) => {
+      try {
+        const diff = await getArtifactDiff(artifact_type, artifact_id);
+        if (!diff) {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({
+              status: "no_previous_version",
+              message: "No previous version found — cannot show diff.",
+            }) }],
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({
+            status: "diff_available",
+            artifact: `${artifact_type}/${artifact_id}`,
+            changes_count: diff.length,
+            changes: diff.map(c => ({
+              field: c.field,
+              old: typeof c.old === "string" ? c.old.slice(0, 100) : c.old,
+              new: typeof c.new === "string" ? (c.new as string).slice(0, 100) : c.new,
+            })),
+          }) }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({
+            error: "get_diff_failed",
+            message: err instanceof Error ? err.message : String(err),
+          }) }],
+          isError: true,
+        };
+      }
     },
   );
 }
