@@ -31,7 +31,10 @@ export { DirectorFilmVisionSchema, type DirectorFilmVision, CharacterEnergySchem
 export { DoPFilmVisionSchema, type DoPFilmVision, DoPFilmVisionJsonSchema } from "./artifacts/dop-film-vision-v1.js";
 export { DirectorSceneVisionSchema, type DirectorSceneVision, DirectorSceneVisionJsonSchema } from "./artifacts/director-scene-vision-v1.js";
 export { DoPSceneVisionSchema, type DoPSceneVision, DoPSceneVisionJsonSchema } from "./artifacts/dop-scene-vision-v1.js";
-export { ShotSchema, type Shot, ShotSizeEnum, AudioTransitionEnum, ShotJsonSchema } from "./artifacts/shot-v1.js";
+export {
+  ShotSchema, type Shot, ShotSizeEnum, AudioTransitionEnum, ShotJsonSchema,
+  CameraAngleEnum, CameraMovementEnum, CameraRigEnum, CompositionEnum, FrameBalanceEnum,
+} from "./artifacts/shot-v1.js";
 export { EdlSchema, type Edl, EdlRowSchema, type EdlRow, EdlJsonSchema, PacingMapSchema, type PacingMap, PacingMapJsonSchema } from "./artifacts/edl-v1.js";
 
 // --- Input schemas (inter-agent contracts) ---

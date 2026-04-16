@@ -29,6 +29,15 @@ export const DirectorFilmVisionSchema = z.object({
   recurring_visual_motifs: z.array(z.string()).default([]),
   world_feeling: z.string().default(""),
   genre_approach: z.string().default(""),
+  /**
+   * Free-text guidance for downstream agents on whose emotional truth drives the scene's tone.
+   * Consumed by Composer (mood priority for score), DP (lighting affect), Editor (cut rhythm).
+   * Examples:
+   *   "character emotion drives tone — trust the inner state over scene surface (postirony, dramedy)"
+   *   "scene tone drives — characters serve the genre's emotional contract (thriller, horror)"
+   *   "balance — score reflects scene first, characters as undertone (ensemble drama)"
+   */
+  tonal_guidance: z.string().default(""),
   character_energies: z.array(CharacterEnergySchema).default([]),
   _meta: ArtifactMetaSchema.optional().describe("Set by update_* tools when a user manually edits"),
 });
