@@ -45,7 +45,8 @@ describe("Location Scout MCP Server", () => {
     const body = await res.json() as { status: string; version: string };
     expect(res.status).toBe(200);
     expect(body.status).toBe("ok");
-    expect(body.version).toBe("1.0.0");
+    expect(typeof body.version).toBe("string");
+    expect(body.version).not.toBe("");
   });
 
   // ─── MCP Initialize ────────────────────────────────────────────

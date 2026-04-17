@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getTask, updateTask, deleteTask, loadArtifact, saveArtifact } from "../lib/storage.js";
+import { VERSION } from "../lib/version.js";
 
 /**
  * Parse an artifact URI like `agent://location-scout/bible/loc_001` into
@@ -27,7 +28,7 @@ export function registerCommonTools(server: McpServer) {
         type: "text" as const,
         text: JSON.stringify({
           status: "ok",
-          version: "1.0.0",
+          version: VERSION,
           uptime_seconds: Math.floor(process.uptime()),
         }),
       }],

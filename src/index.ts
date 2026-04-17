@@ -2,36 +2,12 @@ import "./env.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
+import { VERSION } from "./lib/version.js";
 
 import { registerCommonTools } from "./tools/common.js";
 import { registerLocationTools } from "./tools/location.js";
 import { registerResources } from "./resources/location.js";
 import { mountSwagger } from "./swagger.js";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-
-
-// ---------------------------------------------------------------------------
-// VERSION — read from package.json at startup, allow env override.
-// Replaces hardcoded "1.0.0" so /health and MCP server init reflect the real
-// semver after each `gcloud run deploy --source` (Dockerfile copies package.json).
-// ---------------------------------------------------------------------------
-function __dirnameFromMetaUrl(metaUrl: string): string {
-  const p = new URL(metaUrl).pathname;
-  // Windows: strip leading "/" from "/C:/path"
-  const normalized = /^\/[A-Za-z]:\//.test(p) ? p.slice(1) : p;
-  return normalized.substring(0, normalized.lastIndexOf("/"));
-}
-
-const __pkgVersion: string = (() => {
-  try {
-    const __dir = __dirnameFromMetaUrl(import.meta.url);
-    return JSON.parse(readFileSync(join(__dir, "..", "package.json"), "utf8")).version;
-  } catch {
-    return "dev";
-  }
-})();
-const VERSION: string = process.env.VERSION ?? __pkgVersion;
 
 
 // PERF: McpServer is created per-request to avoid the SDK's
