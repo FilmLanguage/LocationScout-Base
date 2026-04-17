@@ -1,0 +1,26 @@
+{
+  "project_id": "smoke-test-001",
+  "scene_context": {
+    "scene_id": "sc_smoke_01",
+    "location": "Motel Room — Route 66",
+    "time_of_day": "NIGHT",
+    "int_ext": "INT",
+    "characters": ["Ray Dalton"],
+    "emotional_function": "Quiet dread before confrontation",
+    "description": "Ray waits alone in the motel room, pacing, watching the parking lot through the gap in the curtains."
+  },
+  "director_vision": {
+    "era_style": "Early 2000s American Southwest — gritty, sun-bleached, analog",
+    "color_palette_mood": "Sodium-orange exterior neon vs. cold blue-green fluorescent interior",
+    "light_vision": "Hard practicals, deep shadows, neon bleed",
+    "reference_films": ["No Country for Old Men", "Paris, Texas"],
+    "atmosphere": "Isolated, anxious, liminal"
+  },
+  "location_bible": {
+    "space_description": "Low-ceilinged motel room with dated carpet and stained walls",
+    "atmosphere": "Claustrophobic and transient — nowhere feels like home",
+    "light_base_state": "Single bedside lamp, neon sign bleed through curtains",
+    "key_details": ["thin walls", "parking lot visible through gap in curtains", "bedside lamp"],
+    "negative_list": ["natural daylight", "clean modern furniture", "bright overhead lights"]
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "$fixture": "handoff",
+  "pair": "LocationScout -> ShotGeneration",
+  "description": "Pre-computed LocationScout output artifacts for ShotGeneration downstream validation. Anchor and mood are the formal contracts; bible is companion context required by prompt-compiler.",
+  "upstream": "location-scout-base",
+  "downstream": "shot-generation-base",
+
+  "artifacts": {
+    "anchor": {
+      "artifact_type": "location_anchor",
+      "uri": "agent://location-scout/anchor/loc_smoke_001",
+      "mime_type": "image/png",
+      "bible_id": "loc_smoke_001",
+      "note": "1x1 transparent PNG stub — sufficient for schema/transport validation, not for visual quality",
+      "image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    },
+
+    "mood": {
+      "artifact_type": "mood_states",
+      "uri": "agent://location-scout/mood/loc_smoke_001",
+      "mime_type": "application/json",
+      "data": {
+        "$schema": "mood-state-v1",
+        "state_id": "mood_loc_smoke_001_01",
+        "bible_id": "loc_smoke_001",
+        "scene_ids": ["sc_smoke_01"],
+        "act": 1,
+        "time_of_day": "NIGHT",
+        "light_direction": "OVERHEAD",
+        "weather": null,
+        "color_temp_kelvin": 2700,
+        "shadow_hardness": "hard",
+        "light_change": "Sodium neon bleed from exterior parking-lot sign, cold fluorescent spill from bathroom",
+        "props_change": "Bedside lamp switched on, curtains partially drawn",
+        "atmosphere_shift": "Isolation deepens as exterior activity dies down",
+        "clutter_level": "slight",
+        "window_state": "curtains_drawn"
+      }
+    },
+
+    "bible": {
+      "artifact_type": "location_bible",
+      "uri": "agent://location-scout/bible/loc_smoke_001",
+      "mime_type": "application/json",
+      "note": "Companion context — ShotGeneration calls loadLocationBible() for prompt compilation even though bible is not a formal contract edge",
+      "data": {
+        "$schema": "location-bible-v2",
+        "bible_id": "loc_smoke_001",
+        "brief_id": "brief_smoke_001",
+        "vision_id": "vision_smoke_001",
+        "research_id": "research_smoke_001",
+        "passport": {
+          "type": "INT",
+          "time_of_day": ["NIGHT"],
+          "era": "2004 rural New Mexico",
+          "recurring": false,
+          "scenes": ["sc_smoke_01"]
+        },
+        "space_description": "A budget motel room off Route 66, circa 2004. Queen bed with thin polyester spread in faded teal. Nightstand with chipped laminate top, rotary-style telephone, Gideon Bible. CRT television on a wall bracket angled toward the bed. Bathroom door ajar, cold fluorescent light spilling a hard blue-white stripe across worn rust-brown carpet. The exterior sodium-orange neon from the motel sign bleeds through a two-inch gap in heavy blackout curtains, painting a warm wedge across the far wall. Air conditioning unit under the window hums at a low rattle. Ice bucket on the dresser, a duffel bag on the luggage rack, cell phone face-down on the nightstand.",
+        "atmosphere": "Isolated, transient, anxious — a place where nobody stays by choice",
+        "light_base_state": {
+          "primary_source": "Bedside lamp with yellowed fabric shade",
+          "direction": "S",
+          "color_temp_kelvin": 2700,
+          "shadow_hardness": "hard",
+          "fill_to_key_ratio": "1:6",
+          "practical_sources": [
+            "bedside lamp (2700K, yellowed shade)",
+            "bathroom fluorescent off-screen spill (5500K, hard edge on carpet)",
+            "neon sign through curtain gap (1900K sodium-orange wedge on far wall)"
+          ]
+        },
+        "key_details": [
+          "Faded teal polyester bedspread on sagging queen bed",
+          "Chipped laminate nightstand with rotary-style phone and Gideon Bible",
+          "CRT television on angled wall bracket — no flat screen",
+          "Heavy blackout curtains with two-inch gap leaking sodium neon orange",
+          "Worn rust-brown carpet with cigarette burn near door threshold",
+          "Bathroom door ajar — hard fluorescent stripe across carpet",
+          "Rattling window AC unit beneath curtain line",
+          "Duffel bag on collapsible luggage rack"
+        ],
+        "negative_list": [
+          "Flat-screen TV or any post-2005 electronics",
+          "Smartphone or modern charger cables visible",
+          "Clean modern bathroom fixtures or LED lighting",
+          "High-thread-count bedding or boutique-hotel styling"
+        ],
+        "approval_status": "approved"
+      }
+    }
+  }
+}

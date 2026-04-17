@@ -1,0 +1,26 @@
+{
+  "project_id": "smoke-test-001",
+  "character_brief": {
+    "character_name": "Ray Dalton",
+    "importance": "SUPPORTING",
+    "scenes": ["sc_smoke_01", "sc_smoke_05"],
+    "explicit_appearance": ["weathered face", "salt-and-pepper stubble", "work boots"],
+    "age_indicators": ["mid-50s", "bad knee"],
+    "physical_actions": ["limps slightly", "fidgets with lighter", "squints against sun"],
+    "wardrobe_mentions": ["faded denim jacket", "oil-stained jeans"],
+    "props_on_person": ["Zippo lighter", "truck keys"],
+    "relationships": ["estranged from daughter"],
+    "wardrobe_changes": [],
+    "physical_transformations": []
+  },
+  "casting_vision": {
+    "casting_philosophy": "Non-actors preferred for authenticity — faces that carry life, not performances",
+    "era_style_for_characters": "Working-class Southwest — sun damage, practical clothing, no vanity",
+    "visual_contrasts": ["Ray's weathered age vs. daughter's youth"],
+    "reference_actors": ["Harry Dean Stanton", "M. Emmet Walsh"],
+    "color_coding": ["Ray: earth tones, faded blues"],
+    "character_emotional_state": "Quiet regret masked by stoic routine",
+    "character_visual_note": "Hands should tell the story — cracked, calloused, never still"
+  },
+  "priority": "normal"
+}

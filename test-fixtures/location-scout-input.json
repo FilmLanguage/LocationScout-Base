@@ -1,0 +1,25 @@
+{
+  "project_id": "smoke-test-001",
+  "location_brief": {
+    "location_id": "loc_smoke_001",
+    "location_name": "Motel Room — Route 66",
+    "location_type": "INT",
+    "time_of_day": ["NIGHT"],
+    "era": "2004 rural New Mexico",
+    "scenes": ["sc_smoke_01"],
+    "recurring": false,
+    "character_actions": ["pacing", "sitting on bed", "looking through curtains"],
+    "required_practicals": ["bedside lamp", "neon sign through window"],
+    "props_mentioned": ["duffel bag", "cell phone", "ice bucket"],
+    "explicit_details": ["thin walls", "parking lot visible through gap in curtains"]
+  },
+  "director_vision": {
+    "era_style": "Early 2000s American Southwest — gritty, sun-bleached, analog",
+    "palette": "Sodium-orange exterior neon vs. cold blue-green fluorescent interior",
+    "spatial_philosophy": "Claustrophobic, transient — nowhere feels like home",
+    "reference_films": ["No Country for Old Men", "Paris, Texas"],
+    "atmosphere": "Isolated, anxious, liminal",
+    "light_vision": "Hard practicals, deep shadows, neon bleed"
+  },
+  "priority": "normal"
+}

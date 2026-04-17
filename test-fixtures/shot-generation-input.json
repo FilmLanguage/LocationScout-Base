@@ -1,0 +1,11 @@
+{
+  "shot_id": "smoke_shot_001",
+  "prompt": "Exterior abandoned railway station, golden hour light, overcast sky, dusty concrete platform, single bare bulb hanging from eave, wide establishing shot, desolate atmosphere",
+  "negative_prompt": "people, cars, modern signage, graffiti, color grading artifacts, lens flare",
+  "generation_params": {
+    "seed": 42
+  },
+  "validation": {
+    "enabled": false
+  }
+}
