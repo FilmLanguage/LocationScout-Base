@@ -7,6 +7,32 @@ import { registerCommonTools } from "./tools/common.js";
 import { registerLocationTools } from "./tools/location.js";
 import { registerResources } from "./resources/location.js";
 import { mountSwagger } from "./swagger.js";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+
+// ---------------------------------------------------------------------------
+// VERSION — read from package.json at startup, allow env override.
+// Replaces hardcoded "1.0.0" so /health and MCP server init reflect the real
+// semver after each `gcloud run deploy --source` (Dockerfile copies package.json).
+// ---------------------------------------------------------------------------
+function __dirnameFromMetaUrl(metaUrl: string): string {
+  const p = new URL(metaUrl).pathname;
+  // Windows: strip leading "/" from "/C:/path"
+  const normalized = /^\/[A-Za-z]:\//.test(p) ? p.slice(1) : p;
+  return normalized.substring(0, normalized.lastIndexOf("/"));
+}
+
+const __pkgVersion: string = (() => {
+  try {
+    const __dir = __dirnameFromMetaUrl(import.meta.url);
+    return JSON.parse(readFileSync(join(__dir, "..", "package.json"), "utf8")).version;
+  } catch {
+    return "dev";
+  }
+})();
+const VERSION: string = process.env.VERSION ?? __pkgVersion;
+
 
 // PERF: McpServer is created per-request to avoid the SDK's
 // "Already connected to a transport" crash on concurrent/sequential calls.
@@ -17,7 +43,7 @@ import { mountSwagger } from "./swagger.js";
 function createServer(): McpServer {
   const server = new McpServer({
     name: "location-scout-base",
-    version: "1.0.0",
+    version: VERSION,
   });
   registerCommonTools(server);
   registerLocationTools(server);
@@ -88,7 +114,7 @@ app.get("/artifacts/:type/:file", async (req, res) => {
 mountSwagger(app);
 
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", version: "1.0.0", uptime_seconds: Math.floor(process.uptime()) });
+  res.json({ status: "ok", version: VERSION, uptime_seconds: Math.floor(process.uptime()) });
 });
 
 const PORT = process.env.PORT || 8080;
