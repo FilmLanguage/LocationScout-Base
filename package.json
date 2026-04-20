@@ -1,9 +1,9 @@
 {
   "name": "fl-location-scout-base",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"require('fs').cpSync('src/prompts','dist/prompts',{recursive:true})\"",
     "start": "node dist/index.js",
     "predev": "bash check-env.sh",
     "dev": "tsx watch src/index.ts",
