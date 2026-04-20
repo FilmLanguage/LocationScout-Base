@@ -50,6 +50,21 @@ const GenerationParamsSchema = z.object({
   seed: z.number().int().nullable().optional().describe("Random seed for reproducibility"),
 });
 
+// Audio spec — used only when target model supports audio generation.
+// Per Google DeepMind Veo prompt guide: ambient noise, SFX, and dialogue
+// must be prompted as separate sentences, not mixed into visual description.
+// https://deepmind.google/models/veo/prompt-guide/
+export const AudioSpecSchema = z.object({
+  ambient: z.string().optional().describe("Ambient sound bed, e.g. 'quiet hum of a lab, distant traffic'"),
+  sfx: z.array(z.string()).optional().describe("Discrete sound effects, e.g. ['glass clinking', 'door slam']"),
+  dialogue: z.array(z.object({
+    speaker: z.string().describe("Character name or role"),
+    line: z.string().describe("Spoken line (4-12 words works best per Veo docs)"),
+  })).optional().describe("Spoken dialogue lines"),
+});
+
+export type AudioSpec = z.infer<typeof AudioSpecSchema>;
+
 export const ShotRecipeSchema = z.object({
   $schema: z.literal("shot-recipe-v1"),
   shot_id: z.string().describe("Unique shot ID"),
@@ -60,6 +75,7 @@ export const ShotRecipeSchema = z.object({
   camera: CameraSchema,
   prompt_components: PromptComponentsSchema,
   generation_params: GenerationParamsSchema,
+  audio: AudioSpecSchema.optional().describe("Audio spec for models that support audio (Veo 3)"),
 });
 
 export type ShotRecipe = z.infer<typeof ShotRecipeSchema>;

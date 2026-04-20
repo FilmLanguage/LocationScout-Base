@@ -18,7 +18,8 @@
   "platform": {
     "registry": "Film Language",
     "schema_package": "@filmlanguage/schemas",
-    "orchestrator": "1ad-base"
+    "orchestrator": "1ad-base",
+    "scaffold": false
   },
   "dependencies": [
     "agent://1ad/film-ir/{project_id}",
