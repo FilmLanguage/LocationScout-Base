@@ -643,9 +643,12 @@ export function registerLocationTools(server: McpServer) {
 
           updateTask(task_id, { progress: 0.3, current_step: "Generating setup plan via LLM" });
           const passport = (bible.passport as Record<string, unknown> | undefined) ?? {};
+          // Schema lives in the system prompt (setup-planner-system.md) so prompt
+          // caching can reuse it across requests. User message carries only the
+          // variable Bible + mood state data.
           const llmResult = await llmComplete(
             PROMPT_SETUP_PLANNER,
-            [{ role: "user", content: `Location Bible:\n${JSON.stringify({ bible_id: bible.bible_id, spaces: bible.spaces, space_description: (bible.space_description as string | undefined)?.slice(0, 600), scenes: passport.scenes, light_base_state: bible.light_base_state })}\n\nMood States:\n${JSON.stringify(moodStates)}\n\nFor each scene produce one or more setup objects. Each must have: setup_id (unique string, e.g. "setup_S1_A"), scene_id, camera_x (meters), camera_y (meters), angle_deg (0-360), lens_mm, composition (string), characters (string[]), notes (string).` }],
+            [{ role: "user", content: `Location Bible:\n${JSON.stringify({ bible_id: bible.bible_id, spaces: bible.spaces, space_description: (bible.space_description as string | undefined)?.slice(0, 600), scenes: passport.scenes, light_base_state: bible.light_base_state })}\n\nMood States:\n${JSON.stringify(moodStates)}` }],
             { maxTokens: 4096, temperature: 0.6 },
           );
 
