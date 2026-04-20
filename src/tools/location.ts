@@ -6,12 +6,23 @@ import { flError, FL_ERRORS } from "../lib/errors.js";
 import { validateAnchorAgainstBible, issuesToCorrectionHint, type ValidatorBibleSpec } from "../lib/anchor-validator.js";
 import { resolveModel } from "../lib/model-registry.js";
 import { analyzeWithGeminiVision, stripJsonFence } from "../lib/gemini-vision.js";
+import { loadPrompt } from "../lib/prompt-loader.js";
 import { spawnSync } from "node:child_process";
 import { resolve as pathResolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+const PROMPT_RESEARCH_PIPELINE = loadPrompt(import.meta.url, "research-pipeline-system");
+const PROMPT_RESEARCH_ERA = loadPrompt(import.meta.url, "research-era-system");
+const PROMPT_WRITE_BIBLE_PIPELINE = loadPrompt(import.meta.url, "write-bible-pipeline-system");
+const PROMPT_WRITE_BIBLE = loadPrompt(import.meta.url, "write-bible-system");
+const PROMPT_SETUP_PLANNER = loadPrompt(import.meta.url, "setup-planner-system");
+const PROMPT_CHECK_ANACHRONISMS = loadPrompt(import.meta.url, "check-anachronisms-system");
+const PROMPT_CHECK_CONSISTENCY = loadPrompt(import.meta.url, "check-consistency-system");
+const PROMPT_CHECK_ANCHOR_VISUAL = loadPrompt(import.meta.url, "check-anchor-visual-system");
+const PROMPT_COMPARE_SETUP_ANCHOR = loadPrompt(import.meta.url, "compare-setup-anchor-system");
 
 // ─── Gate helpers ───────────────────────────────────────────────────
 
@@ -96,7 +107,7 @@ export function registerLocationTools(server: McpServer) {
           // Step 1: Research
           updateTask(task_id, { status: "processing", progress: 0.1, current_step: "Researching era" });
           const research = await llmComplete(
-            "You are a film location research specialist. Research the era and location described. Return a JSON object with fields: period_facts (array of strings), typical_elements (array of strings), anachronism_list (array of strings to avoid).",
+            PROMPT_RESEARCH_PIPELINE,
             [{ role: "user", content: `Location: ${location_brief.location_name}\nEra: ${location_brief.era}\nType: ${location_brief.location_type}\nDirector style: ${director_vision.era_style}` }],
           );
           const researchId = `research_${location_brief.location_id}`;
@@ -105,7 +116,7 @@ export function registerLocationTools(server: McpServer) {
 
           // Step 2: Write Bible
           const bible = await llmComplete(
-            "You are a film location Bible writer. Write a detailed Location Bible JSON matching the LocationBible v2 schema. The JSON MUST include: \"$schema\": \"location-bible-v2\", bible_id, passport (type, time_of_day, era, recurring, scenes), space_description (max 200 words — concise, precise physical detail), atmosphere, light_base_state (primary_source, direction, color_temp_kelvin, shadow_hardness, fill_to_key_ratio, practical_sources), key_details (5-8 items), negative_list (array of SHORT strings — 2-4 word labels of anachronistic items, e.g. [\"LED lighting\", \"Flat screen TV\"] — no descriptions, no \"NO\" prefix), approval_status: \"draft\".\n\nOPTIONAL: include a `rationale` object { primary_reason, references, confidence } explaining your single most important creative choice. Only include it if your reasoning is genuinely tied to the research/vision sources — do NOT fabricate post-hoc justification.\n\nReturn ONLY the JSON object, no markdown fences.",
+            PROMPT_WRITE_BIBLE_PIPELINE,
             [{ role: "user", content: `Location: ${JSON.stringify(location_brief)}\nDirector vision: ${JSON.stringify(director_vision)}\nResearch: ${research.content}` }],
             { maxTokens: 4096 },
           );
@@ -155,7 +166,7 @@ export function registerLocationTools(server: McpServer) {
         try {
           updateTask(task_id, { status: "processing", progress: 0.2, current_step: "Querying LLM for era research" });
           const result = await llmComplete(
-            "You are a film location research specialist. Return a JSON object with: period_facts (array of strings about the era), typical_elements (array of period-accurate items), anachronism_list (array of items that must NOT appear).",
+            PROMPT_RESEARCH_ERA,
             [{ role: "user", content: `Location: ${location_brief.location_name}\nEra: ${location_brief.era}\nType: ${location_brief.location_type}\nStyle: ${director_vision.era_style}` }],
           );
           const researchId = `research_${location_brief.location_id}`;
@@ -199,7 +210,7 @@ export function registerLocationTools(server: McpServer) {
 
           updateTask(task_id, { progress: 0.3, current_step: "Generating Bible with LLM" });
           const result = await llmComplete(
-            "You are a film Location Bible writer. Write a Location Bible as JSON conforming to LocationBible v2 schema. Include: $schema, bible_id, passport (type, time_of_day, era, recurring, scenes), space_description (max 200 words — be concise and precise), atmosphere, light_base_state (primary_source, direction, color_temp_kelvin, shadow_hardness, fill_to_key_ratio, practical_sources), key_details (5-8 items), negative_list (array of SHORT strings — 2-4 word labels, e.g. [\"LED lighting\", \"Smartphones\"] — no descriptions, no \"NO\" prefix), approval_status: \"draft\".\n\nAlso include an optional `rationale` object with:\n- `primary_reason`: 1–2 sentences explaining your single most important creative choice (e.g. why this light direction, why these key_details). Reference the research-pack or director-vision when relevant.\n- `references`: array of source identifiers you actually relied on (research_id, vision_id, or factual sources).\n- `confidence`: 0.0–1.0 self-reported confidence.\nIf your reasoning was not driven by a clear source, OMIT the rationale field — do NOT fabricate post-hoc justification.",
+            PROMPT_WRITE_BIBLE,
             [{ role: "user", content: `Brief: ${JSON.stringify(location_brief)}\nVision: ${JSON.stringify(director_vision)}\nResearch: ${JSON.stringify(research)}` }],
             { maxTokens: 4096 },
           );
@@ -633,7 +644,7 @@ export function registerLocationTools(server: McpServer) {
           updateTask(task_id, { progress: 0.3, current_step: "Generating setup plan via LLM" });
           const passport = (bible.passport as Record<string, unknown> | undefined) ?? {};
           const llmResult = await llmComplete(
-            "You are a film location setup planner. Generate camera setups from spatial layout and mood states. Return a JSON array only — no prose, no fences.",
+            PROMPT_SETUP_PLANNER,
             [{ role: "user", content: `Location Bible:\n${JSON.stringify({ bible_id: bible.bible_id, spaces: bible.spaces, space_description: (bible.space_description as string | undefined)?.slice(0, 600), scenes: passport.scenes, light_base_state: bible.light_base_state })}\n\nMood States:\n${JSON.stringify(moodStates)}\n\nFor each scene produce one or more setup objects. Each must have: setup_id (unique string, e.g. "setup_S1_A"), scene_id, camera_x (meters), camera_y (meters), angle_deg (0-360), lens_mm, composition (string), characters (string[]), notes (string).` }],
             { maxTokens: 4096, temperature: 0.6 },
           );
@@ -873,7 +884,7 @@ export function registerLocationTools(server: McpServer) {
       if (!research) return { content: [{ type: "text" as const, text: JSON.stringify({ error: "not_found", missing: "research" }) }] };
 
       const llmResult = await llmComplete(
-        "You are a film production period accuracy expert. Check a Location Bible for anachronisms against a research pack. Return strict JSON only — no prose, no fences: {\"issues\": [{\"severity\": \"critical\"|\"warning\"|\"info\", \"field\": string, \"issue\": string, \"suggestion\": string}], \"passed\": boolean}",
+        PROMPT_CHECK_ANACHRONISMS,
         [{ role: "user", content: `Bible:\n${JSON.stringify({ bible_id: bible.bible_id, era: (bible.passport as Record<string, unknown> | undefined)?.era, space_description: (bible.space_description as string | undefined)?.slice(0, 600), key_details: bible.key_details, negative_list: bible.negative_list, light_base_state: bible.light_base_state })}\n\nResearch Pack:\n${JSON.stringify({ period_facts: research.period_facts, anachronism_list: research.anachronism_list, typical_elements: research.typical_elements })}` }],
         { maxTokens: 2048, temperature: 0.1 },
       );
@@ -905,7 +916,7 @@ export function registerLocationTools(server: McpServer) {
       }
 
       const llmResult = await llmComplete(
-        "You are a film production consistency analyst. Check mood state deltas are internally consistent with the Location Bible's base state. Return strict JSON only: {\"consistency_score\": number, \"issues\": [{\"severity\": string, \"field\": string, \"issue\": string, \"suggestion\": string}], \"all_mood_states_aligned\": boolean}",
+        PROMPT_CHECK_CONSISTENCY,
         [{ role: "user", content: `Bible:\n${JSON.stringify({ bible_id: bible.bible_id, light_base_state: bible.light_base_state, atmosphere: bible.atmosphere, negative_list: bible.negative_list, passport: bible.passport })}\n\nMood States:\n${JSON.stringify(moodStates)}` }],
         { maxTokens: 2048, temperature: 0.1 },
       );
@@ -919,7 +930,7 @@ export function registerLocationTools(server: McpServer) {
           try {
             const vr = await analyzeWithGeminiVision({
               image_urls: [anchorImg.data.toString("base64")],
-              system_prompt: "You are a film production visual consistency analyst. Check if this anchor image is visually consistent with the Location Bible. Return JSON: {\"visual_issues\": [{\"severity\": string, \"field\": string, \"issue\": string}], \"visual_score\": number}",
+              system_prompt: PROMPT_CHECK_ANCHOR_VISUAL,
               user_prompt: `Bible context:\n${JSON.stringify({ space_description: (bible.space_description as string | undefined)?.slice(0, 400), light_base_state: bible.light_base_state, key_details: bible.key_details, negative_list: bible.negative_list })}`,
             });
             const vp = JSON.parse(stripJsonFence(vr.content)) as { visual_issues?: unknown[]; visual_score?: number };
@@ -1051,7 +1062,7 @@ export function registerLocationTools(server: McpServer) {
           updateTask(task_id, { progress: 0.4, current_step: "Sending to Gemini Vision for comparison" });
           const vr = await analyzeWithGeminiVision({
             image_urls: [setupImg.data.toString("base64"), anchorImg.data.toString("base64")],
-            system_prompt: "You are a cinematography quality analyst. Compare setup image (first) against anchor reference (second). Return strict JSON only: {\"similarity_score\": number, \"composition_match\": boolean, \"color_consistency\": boolean, \"issues\": [{\"severity\": string, \"field\": string, \"issue\": string}], \"passed\": boolean}. Score 1.0=identical, 0.5=significant drift. passed=true if score >= 0.7.",
+            system_prompt: PROMPT_COMPARE_SETUP_ANCHOR,
             user_prompt: "Compare these two film production reference images and return the JSON analysis.",
           });
 
