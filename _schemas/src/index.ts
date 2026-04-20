@@ -29,13 +29,20 @@ export { SceneBreakdownSchema, type SceneBreakdown, SceneSchema, type Scene, Sce
 export { ScriptBriefSchema, type ScriptBrief, ScriptBriefJsonSchema } from "./artifacts/script-brief-v1.js";
 export { DirectorFilmVisionSchema, type DirectorFilmVision, CharacterEnergySchema, DirectorFilmVisionJsonSchema } from "./artifacts/director-film-vision-v1.js";
 export { DoPFilmVisionSchema, type DoPFilmVision, DoPFilmVisionJsonSchema } from "./artifacts/dop-film-vision-v1.js";
-export { DirectorSceneVisionSchema, type DirectorSceneVision, DirectorSceneVisionJsonSchema } from "./artifacts/director-scene-vision-v1.js";
+export { DirectorSceneVisionSchema, type DirectorSceneVision, DirectorSceneVisionJsonSchema, type DiegeticMusic } from "./artifacts/director-scene-vision-v1.js";
 export { DoPSceneVisionSchema, type DoPSceneVision, DoPSceneVisionJsonSchema } from "./artifacts/dop-scene-vision-v1.js";
 export {
   ShotSchema, type Shot, ShotSizeEnum, AudioTransitionEnum, ShotJsonSchema,
   CameraAngleEnum, CameraMovementEnum, CameraRigEnum, CompositionEnum, FrameBalanceEnum,
 } from "./artifacts/shot-v1.js";
 export { EdlSchema, type Edl, EdlRowSchema, type EdlRow, EdlJsonSchema, PacingMapSchema, type PacingMap, PacingMapJsonSchema } from "./artifacts/edl-v1.js";
+export { ComposerFilmVisionSchema, type ComposerFilmVision, ComposerFilmVisionJsonSchema } from "./artifacts/composer-film-vision-v1.js";
+export { ComposerSceneVisionSchema, type ComposerSceneVision, ComposerSceneVisionJsonSchema, type ScoreCue, type DiegeticCue, type ElevenLabsPayload, type DuckTrigger } from "./artifacts/composer-scene-vision-v1.js";
+
+// --- Sound Designer artifacts ---
+export { SoundBreakdownSchema, type SoundBreakdown, SoundBreakdownJsonSchema, SoundSegmentSchema, type SoundSegment, SoundLayerEnum, type SoundLayer, SegmentSourceEnum, type SegmentSource } from "./artifacts/sound-breakdown-v1.js";
+export { SoundReplacementSchema, type SoundReplacement, SoundReplacementJsonSchema } from "./artifacts/sound-replacement-v1.js";
+export { FinalMixSchema, type FinalMix, FinalMixJsonSchema, LayerSummarySchema, type LayerSummary } from "./artifacts/final-mix-v1.js";
 
 // --- Input schemas (inter-agent contracts) ---
 export { LocationBriefSchema, type LocationBrief } from "./inputs/location-brief.js";

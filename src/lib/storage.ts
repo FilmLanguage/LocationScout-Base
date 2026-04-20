@@ -17,6 +17,7 @@ import { promises as fs } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { S3_BUCKET, s3Upload, s3Download, s3Exists } from "./api-client.js";
+import { mirrorArtifactToDb } from "./db.js";
 
 const LOCAL_OUTPUT_DIR = process.env.LOCAL_OUTPUT_DIR || "";
 const AGENT_NAME = "location-scout";
@@ -77,6 +78,11 @@ export async function saveArtifact(type: string, id: string, data: unknown): Pro
 
   // Persist to disk if configured
   await writeLocal(path, json);
+
+  // Best-effort mirror to v2 Postgres schema. DB failures never fail the save.
+  mirrorArtifactToDb(type, id, data).catch((err) => {
+    console.warn(`[storage] v2 mirror failed for ${type}/${id}: ${err?.message ?? err}`);
+  });
 
   if (S3_BUCKET) {
     return s3Upload(path, json, "application/json");
