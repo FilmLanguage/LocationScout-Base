@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getTask, updateTask, deleteTask, loadArtifact, saveArtifact } from "../lib/storage.js";
+import { getTask, updateTask, deleteTask, loadArtifact, saveArtifact, listVersions } from "../lib/storage.js";
 import { VERSION } from "../lib/version.js";
 
 /**
@@ -201,6 +201,23 @@ export function registerCommonTools(server: McpServer) {
     async ({ artifact_uri, changes }) => {
       const task_id = crypto.randomUUID();
       return { content: [{ type: "text" as const, text: JSON.stringify({ task_id, artifact_uri, changes_count: changes.length }) }] };
+    },
+  );
+
+  // 10. list_versions — gallery read
+  server.tool(
+    "list_versions",
+    "List every saved version of a generated image for a given kind + entity_id, newest first. Reads sidecar JSON files (per prompt-gallery-contract.md §1) and returns the full metadata array so the UI can render a version dropdown, show the prompt used for each generation, and let the user jump between versions.",
+    {
+      kind: z.string().describe("Artifact kind, e.g. 'anchor', 'isometric', 'setup', 'floorplan', 'mood_variation'"),
+      entity_id: z.string().describe("Parent entity id (bible_id, setup_id, variation_id …)"),
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    async ({ kind, entity_id }) => {
+      const versions = await listVersions(kind, entity_id);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ kind, entity_id, versions }) }],
+      };
     },
   );
 

@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   saveArtifact,
   loadArtifact,
@@ -73,5 +76,74 @@ describe("task store", () => {
 
   it("returns false when deleting nonexistent task", () => {
     expect(deleteTask("nonexistent")).toBe(false);
+  });
+});
+
+describe("image versions (sidecar JSON)", () => {
+  // saveImage needs LOCAL_OUTPUT_DIR set to actually write versioned files.
+  // We set it to a temp dir, run the two saves, then inspect listVersions.
+  let tempDir: string;
+  let originalEnv: string | undefined;
+
+  beforeAll(async () => {
+    originalEnv = process.env.LOCAL_OUTPUT_DIR;
+    tempDir = mkdtempSync(join(tmpdir(), "ls-storage-test-"));
+    process.env.LOCAL_OUTPUT_DIR = tempDir;
+  });
+
+  afterAll(() => {
+    if (originalEnv === undefined) delete process.env.LOCAL_OUTPUT_DIR;
+    else process.env.LOCAL_OUTPUT_DIR = originalEnv;
+    try { rmSync(tempDir, { recursive: true, force: true }); } catch { /* best effort */ }
+  });
+
+  it("listVersions returns sidecars for multiple saves of the same entity", async () => {
+    // Import dynamically so LOCAL_OUTPUT_DIR is read at call time — storage.ts
+    // reads the env var at module load. We bypass that by using saveImage in
+    // a fresh import.
+    const storage = await import("./storage.js");
+    const entity_id = `anchor_${Date.now()}`;
+    const buf1 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const buf2 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]);
+
+    const saved1 = await storage.saveImage("anchor", buf1, {
+      entity_id,
+      prompt: "first prompt",
+      model: "nanobanana",
+      source_tool: "generate_anchor",
+    });
+    // Ensure timestamps differ so sort order is deterministic.
+    await new Promise((r) => setTimeout(r, 5));
+    const saved2 = await storage.saveImage("anchor", buf2, {
+      entity_id,
+      prompt: "second prompt — edited",
+      model: "nanobanana",
+      source_tool: "generate_anchor",
+    });
+
+    expect(saved1.image_id).not.toBe(saved2.image_id);
+
+    const versions = await storage.listVersions("anchor", entity_id);
+    expect(versions).toHaveLength(2);
+    // Newest first
+    expect(versions[0].image_id).toBe(saved2.image_id);
+    expect(versions[0].prompt).toBe("second prompt — edited");
+    expect(versions[1].image_id).toBe(saved1.image_id);
+    expect(versions[1].prompt).toBe("first prompt");
+    // Required contract fields
+    for (const v of versions) {
+      expect(v.entity_id).toBe(entity_id);
+      expect(v.kind).toBe("anchor");
+      expect(v.uri).toBe(`agent://location-scout/anchor/${entity_id}`);
+      expect(v.source_tool).toBe("generate_anchor");
+      expect(v.model).toBe("nanobanana");
+      expect(v.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    }
+  });
+
+  it("listVersions returns empty array when no images exist for entity", async () => {
+    const storage = await import("./storage.js");
+    const versions = await storage.listVersions("anchor", "nonexistent_entity");
+    expect(versions).toEqual([]);
   });
 });

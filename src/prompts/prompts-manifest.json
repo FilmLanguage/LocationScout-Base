@@ -1,0 +1,129 @@
+{
+  "agent": "LocationScout",
+  "version": "1",
+  "prompts": [
+    {
+      "id": "write-bible-system",
+      "file": "write-bible-system.md",
+      "category": "system",
+      "visible_to_user": false,
+      "description": "Claude writes the Location Bible JSON from research pack + director vision. Enforces LocationBible v2 schema.",
+      "used_by": ["write_location_bible_draft tool"],
+      "editable_without_deploy": false
+    },
+    {
+      "id": "write-bible-pipeline-system",
+      "file": "write-bible-pipeline-system.md",
+      "category": "system",
+      "visible_to_user": false,
+      "description": "Variant of write-bible-system used by the pipeline orchestration flow.",
+      "used_by": ["scout_location composite tool"],
+      "editable_without_deploy": false
+    },
+    {
+      "id": "research-pipeline-system",
+      "file": "research-pipeline-system.md",
+      "category": "system",
+      "visible_to_user": false,
+      "description": "Orchestrates location research collection pipeline.",
+      "used_by": ["scout_location composite tool"],
+      "editable_without_deploy": false
+    },
+    {
+      "id": "research-era-system",
+      "file": "research-era-system.md",
+      "category": "system",
+      "visible_to_user": false,
+      "description": "Generates period facts, typical elements, and anachronism list for the location era.",
+      "used_by": ["check_bible_era_accuracy tool"],
+      "editable_without_deploy": false
+    },
+    {
+      "id": "setup-planner-system",
+      "file": "setup-planner-system.md",
+      "category": "system",
+      "visible_to_user": false,
+      "description": "Claude generates per-scene camera setups from Location Bible + mood states (coordinates, angles, composition).",
+      "used_by": ["plan_location_setups tool"],
+      "editable_without_deploy": false
+    },
+    {
+      "id": "anchor-validator-system",
+      "file": "anchor-validator-system.md",
+      "category": "system",
+      "visible_to_user": false,
+      "description": "Gemini Vision validates anchor image against Location Bible (era accuracy, negative list, key details, light direction).",
+      "used_by": ["generate_anchor tool validation loop"],
+      "editable_without_deploy": false
+    },
+    {
+      "id": "check-anchor-visual-system",
+      "file": "check-anchor-visual-system.md",
+      "category": "system",
+      "visible_to_user": false,
+      "description": "Claude verifies anchor image matches Location Bible text description.",
+      "used_by": ["validate_anchor_visual tool"],
+      "editable_without_deploy": false
+    },
+    {
+      "id": "check-anachronisms-system",
+      "file": "check-anachronisms-system.md",
+      "category": "system",
+      "visible_to_user": false,
+      "description": "Claude checks Location Bible for period violations against the research pack.",
+      "used_by": ["analyze_bible_era_accuracy tool"],
+      "editable_without_deploy": false
+    },
+    {
+      "id": "check-consistency-system",
+      "file": "check-consistency-system.md",
+      "category": "system",
+      "visible_to_user": false,
+      "description": "Claude validates that all mood states align with the Location Bible base light state.",
+      "used_by": ["analyze_bible_light_consistency tool"],
+      "editable_without_deploy": false
+    },
+    {
+      "id": "compare-setup-anchor-system",
+      "file": "compare-setup-anchor-system.md",
+      "category": "system",
+      "visible_to_user": false,
+      "description": "Claude compares a camera setup image against the anchor for composition and color continuity.",
+      "used_by": ["compare_setup_to_anchor tool"],
+      "editable_without_deploy": false
+    },
+    {
+      "id": "generate-isometric-system",
+      "file": "generate-isometric-system.md",
+      "category": "user",
+      "visible_to_user": true,
+      "description": "FAL.ai img2img prompt template for isometric 3D reference from floorplan. Template variables: {{location_name}}, {{era_clause}}, {{space_description}}. Overridable via prompt_override parameter.",
+      "used_by": ["generate_isometric_reference tool"],
+      "ui_location": "ReferencesPage → Isometric Reference → Generation prompt field",
+      "editable_without_deploy": true,
+      "template_vars": ["location_name", "era_clause", "space_description"]
+    },
+    {
+      "id": "generate-anchor-system",
+      "file": "generate-anchor-system.md",
+      "category": "user",
+      "visible_to_user": true,
+      "description": "FAL.ai img2img prompt template for anchor location image. Template variable: {{space_description}}. Overridable via prompt_override parameter.",
+      "used_by": ["generate_anchor tool"],
+      "ui_location": "ReferencesPage → Anchor Image → Generation prompt field",
+      "editable_without_deploy": true,
+      "template_vars": ["space_description"]
+    },
+    {
+      "id": "generate-setup-system",
+      "file": "generate-setup-system.md",
+      "category": "user",
+      "visible_to_user": true,
+      "description": "FAL.ai prompt template for per-setup reference images. Template vars: {{space_description}}, {{scene}}, {{mood}}, {{camera}}. Overridable per-setup via prompt_overrides[setup_id].",
+      "used_by": ["generate_setup_images tool"],
+      "ui_location": "SetupsPage → Setup Detail → Prompt card",
+      "editable_without_deploy": true,
+      "template_vars": ["space_description", "scene", "mood", "camera"]
+    }
+  ]
+}

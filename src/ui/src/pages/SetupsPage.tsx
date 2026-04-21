@@ -16,6 +16,8 @@ import { useNavigate } from "react-router-dom";
 import { callTool, pollTask, type TaskStatus } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
 import type { SetupTile } from "../state/pipeline";
+import { PromptCard } from "../components/PromptCard";
+import { useGallery } from "../hooks/useGallery";
 
 const LOCATION_ID = "loc_001";
 const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
@@ -42,14 +44,6 @@ type BatchState =
   | { kind: "ready" }
   | { kind: "error"; message: string };
 
-interface SetupPrompt {
-  prompt: string;
-  negative_prompt: string | null;
-  scene: string;
-  mood: string;
-  camera: string | null;
-}
-
 export function SetupsPage() {
   const { state, dispatch } = usePipeline();
   const navigate = useNavigate();
@@ -63,10 +57,19 @@ export function SetupsPage() {
   const [tileCacheBust, setTileCacheBust] = useState<Record<string, number>>({});
   /** Set of tile IDs currently generating (for the single-tile regenerate flow). */
   const [regenerating, setRegenerating] = useState<Set<string>>(new Set());
-  /** Loaded prompt for the selected tile, if any. */
-  const [promptOpen, setPromptOpen] = useState(false);
-  const [promptData, setPromptData] = useState<SetupPrompt | null>(null);
-  const [promptLoading, setPromptLoading] = useState(false);
+
+  // Per-setup gallery + prompt state for the selected setup.
+  const selectedSetupId = selected?.id ?? "";
+  const setupGallery = useGallery("setup", selectedSetupId.replace(/\//g, "_"));
+  const [setupPrompt, setSetupPrompt] = useState("");
+  const [setupSelectedVersionId, setSetupSelectedVersionId] = useState<string | null>(null);
+
+  // When the selected tile changes or its gallery loads, pre-fill the textarea
+  // from the latest sidecar and reset the version selector to newest.
+  useEffect(() => {
+    setSetupPrompt(setupGallery.versions[0]?.prompt ?? "");
+    setSetupSelectedVersionId(setupGallery.versions[0]?.image_id ?? null);
+  }, [selectedSetupId, setupGallery.versions]);
 
   const setupsArg = useMemo(
     () =>
@@ -160,37 +163,6 @@ export function SetupsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Reset prompt panel whenever the selected tile changes.
-  useEffect(() => {
-    setPromptOpen(false);
-    setPromptData(null);
-  }, [selectedId]);
-
-  const togglePrompt = async () => {
-    if (promptOpen) {
-      setPromptOpen(false);
-      return;
-    }
-    setPromptOpen(true);
-    if (promptData) return;
-    setPromptLoading(true);
-    try {
-      const r = await callTool<SetupPrompt | { error: string }>("get_setup_prompt", {
-        setup_id: selected.id,
-      });
-      if (r.data && "prompt" in r.data) {
-        setPromptData(r.data);
-      } else {
-        setPromptData(null);
-      }
-    } catch (err) {
-      console.error("[get_setup_prompt] failed:", err);
-      setPromptData(null);
-    } finally {
-      setPromptLoading(false);
-    }
-  };
-
   const approveSetup = async (id: string) => {
     dispatch({ type: "SET_SETUP_STATUS", id, status: "approved" });
     try {
@@ -249,9 +221,11 @@ export function SetupsPage() {
     if (!tile) return;
     setRegenerating((prev) => new Set(prev).add(selected.id));
     try {
+      const override = setupPrompt.trim();
       const result = await callTool<{ task_id: string }>("generate_setup_images", {
         bible_uri: BIBLE_URI,
         setups: [tile],
+        ...(override ? { prompt_overrides: { [tile.id]: override } } : {}),
       });
       const taskId = result.data?.task_id;
       if (!taskId) throw new Error("no task_id");
@@ -260,8 +234,8 @@ export function SetupsPage() {
         throw new Error(final.error || "Regeneration failed");
       }
       setTileCacheBust((prev) => ({ ...prev, [selected.id]: Date.now() }));
-      // Invalidate prompt cache so the next open re-fetches it.
-      setPromptData(null);
+      await setupGallery.refresh();
+      setSetupSelectedVersionId(null);
     } catch (err) {
       console.error("[regenerate] failed:", err);
     } finally {
@@ -305,41 +279,6 @@ export function SetupsPage() {
         alt={`Setup ${t.id}`}
         className="setup-tile__image"
         style={{ objectFit: "cover", width: "100%", display: "block" }}
-      />
-    );
-  };
-
-  const renderDetailPreview = () => {
-    const isRegen = regenerating.has(selected.id);
-    const bust = tileCacheBust[selected.id];
-    if (isBatchBusy || isRegen || bust === undefined) {
-      return (
-        <div
-          className="placeholder-box"
-          style={{
-            minHeight: 140,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-          }}
-        >
-          <span aria-hidden>⏳</span>
-          <span>
-            {isRegen
-              ? "Regenerating this setup…"
-              : batch.kind === "generating"
-              ? batch.status?.current_step || "Generating all setups…"
-              : "Checking storage…"}
-          </span>
-        </div>
-      );
-    }
-    return (
-      <img
-        src={`${setupImgPath(selected.id)}?v=${bust}`}
-        alt={`Full preview of ${selected.id}`}
-        style={{ width: "100%", borderRadius: 8, background: "var(--img-placeholder)", display: "block" }}
       />
     );
   };
@@ -451,7 +390,6 @@ export function SetupsPage() {
           </div>
           <article className="card">
             <div className="card__body" style={{ gap: "var(--s-3)" }}>
-              {renderDetailPreview()}
               <div className="detail-field">
                 <span className="detail-field__label">Scene / Mood</span>
                 <span className="detail-field__value">
@@ -466,57 +404,22 @@ export function SetupsPage() {
                 <span className="detail-field__label">Anchor Ref</span>
                 <span className="detail-field__value">anchor_loc_001 (matched)</span>
               </div>
-              <button type="button" className="add-link" onClick={togglePrompt}>
-                {promptOpen ? "▾ PROMPT (click to collapse)" : "▸ PROMPT (click to expand)"}
-              </button>
-              {promptOpen && (
-                <div
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: 6,
-                    background: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.1)",
-                    fontSize: 12,
-                    fontFamily: "ui-monospace, Menlo, monospace",
-                    lineHeight: 1.45,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                    maxHeight: 220,
-                    overflowY: "auto",
-                  }}
-                >
-                  {promptLoading ? (
-                    <span style={{ opacity: 0.6 }}>Loading prompt…</span>
-                  ) : promptData ? (
-                    <>
-                      <div style={{ opacity: 0.6, marginBottom: 6 }}>prompt</div>
-                      <div>{promptData.prompt}</div>
-                      {promptData.negative_prompt && (
-                        <>
-                          <div style={{ opacity: 0.6, marginTop: 10, marginBottom: 6 }}>
-                            negative_prompt
-                          </div>
-                          <div>{promptData.negative_prompt}</div>
-                        </>
-                      )}
-                    </>
-                  ) : (
-                    <span style={{ opacity: 0.6 }}>
-                      No prompt saved yet — regenerate this setup to create one.
-                    </span>
-                  )}
-                </div>
-              )}
+              <PromptCard
+                label={`Setup ${selected.id}`}
+                kind="setup"
+                entityId={selected.id.replace(/\//g, "_")}
+                versions={setupGallery.versions}
+                selectedVersionId={setupSelectedVersionId}
+                onSelectVersion={setSetupSelectedVersionId}
+                prompt={setupPrompt}
+                promptUsed={setupGallery.versions[0]?.prompt ?? null}
+                onChange={setSetupPrompt}
+                onRegenerate={handleRegenerateSelected}
+                busy={regenerating.has(selected.id) || isBatchBusy}
+                cacheBust={tileCacheBust[selected.id]}
+              />
               <button type="button" className="btn btn--ghost btn--block" onClick={handleCompare}>
                 ⇄ Compare with Anchor
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost btn--block"
-                onClick={handleRegenerateSelected}
-                disabled={regenerating.has(selected.id) || isBatchBusy}
-              >
-                {regenerating.has(selected.id) ? "↻ Regenerating…" : "↻ Regenerate This Setup"}
               </button>
             </div>
           </article>

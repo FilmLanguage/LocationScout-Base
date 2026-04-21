@@ -6,13 +6,17 @@ import { flError, FL_ERRORS } from "../lib/errors.js";
 import { validateAnchorAgainstBible, issuesToCorrectionHint, type ValidatorBibleSpec } from "../lib/anchor-validator.js";
 import { resolveModel } from "../lib/model-registry.js";
 import { analyzeWithGeminiVision, stripJsonFence } from "../lib/gemini-vision.js";
-import { loadPrompt } from "../lib/prompt-loader.js";
+import { loadPrompt, fillTemplate } from "../lib/prompt-loader.js";
 import { spawnSync } from "node:child_process";
 import { resolve as pathResolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+const PROMPT_ISOMETRIC_TEMPLATE = loadPrompt(import.meta.url, "generate-isometric-system");
+const PROMPT_ANCHOR_TEMPLATE = loadPrompt(import.meta.url, "generate-anchor-system");
+const PROMPT_SETUP_TEMPLATE = loadPrompt(import.meta.url, "generate-setup-system");
 
 const PROMPT_RESEARCH_PIPELINE = loadPrompt(import.meta.url, "research-pipeline-system");
 const PROMPT_RESEARCH_ERA = loadPrompt(import.meta.url, "research-era-system");
@@ -237,6 +241,7 @@ export function registerLocationTools(server: McpServer) {
     "Generate anchor image for an approved Location Bible. Hard-gated: requires Bible with approval_status='approved'. Runs Gemini Vision validation against the Bible spec; on failure retries up to max_attempts with corrective prompt. Returns task_id for async tracking.",
     {
       bible_uri: z.string().describe("MCP resource URI of the approved Location Bible"),
+      prompt_override: z.string().optional().describe("Custom image generation prompt. If provided, skips template assembly and uses this text as the base prompt (max 2000 chars). User-editable in the UI."),
       generation_params: z.object({
         model: z.string().optional().describe("Image generation model"),
         seed: z.number().int().optional().describe("Random seed"),
@@ -248,7 +253,7 @@ export function registerLocationTools(server: McpServer) {
       }).optional(),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async ({ bible_uri, generation_params, validation }) => {
+    async ({ bible_uri, prompt_override, generation_params, validation }) => {
       const task_id = crypto.randomUUID();
       createTask(task_id, "Generating anchor image");
 
@@ -277,7 +282,11 @@ export function registerLocationTools(server: McpServer) {
           const negativePrompt = Array.isArray(negativeListRaw)
             ? negativeListRaw.map((n) => (typeof n === "string" ? n : n.item)).join(", ")
             : "";
-          const basePrompt = `Cinematic film location photograph. ${(bible.space_description as string | undefined) ?? ""}`.slice(0, 2000);
+          const spaceDescription = (bible.space_description as string | undefined) ?? "";
+          const basePrompt = (prompt_override
+            ? prompt_override
+            : fillTemplate(PROMPT_ANCHOR_TEMPLATE, { space_description: spaceDescription })
+          ).slice(0, 2000);
 
           // Hard gate: require isometric reference (Floorplan → Isometric → Anchor pipeline)
           updateTask(task_id, { progress: 0.08, current_step: "Loading isometric reference for img2img" });
@@ -322,10 +331,18 @@ export function registerLocationTools(server: McpServer) {
             }
             lastImageUrl = result.images[0].url;
 
-            // Download and persist — saveImage returns { uri, local_path, ... }
+            // Download and persist — saveImage writes the PNG + sidecar JSON per the prompt-gallery contract.
             const imgRes = await fetch(lastImageUrl);
             const imgBuf = Buffer.from(await imgRes.arrayBuffer());
-            lastSaveResult = await saveImage("anchor", bibleId, imgBuf);
+            lastSaveResult = await saveImage("anchor", imgBuf, {
+              entity_id: bibleId,
+              prompt: promptForAttempt,
+              model: resolvedModel,
+              source_tool: "generate_anchor",
+              negative_prompt: negativePrompt || undefined,
+              seed: generation_params?.seed != null ? generation_params.seed + (attempt - 1) : undefined,
+              source_task_id: task_id,
+            });
 
             if (!validationEnabled) break;
 
@@ -364,6 +381,7 @@ export function registerLocationTools(server: McpServer) {
             current_step: passed
               ? "Anchor generated and validated"
               : `Anchor generated but failed validation after ${maxAttempts} attempts (score ${lastReport?.score.toFixed(2) ?? "n/a"})`,
+            prompt_used: basePrompt,
             artifacts: [
               {
                 uri: lastSaveResult?.uri ?? `agent://location-scout/anchor/${bibleId}`,
@@ -486,7 +504,13 @@ export function registerLocationTools(server: McpServer) {
           }
 
           updateTask(task_id, { progress: 0.85, current_step: "Saving floorplan PNG" });
-          const saveResult = await saveImage("floorplan", bibleId, pngBuffer);
+          const saveResult = await saveImage("floorplan", pngBuffer, {
+            entity_id: bibleId,
+            prompt: "",
+            model: "matplotlib",
+            source_tool: "create_floorplan",
+            source_task_id: task_id,
+          });
 
           updateTask(task_id, {
             status: "completed",
@@ -519,13 +543,14 @@ export function registerLocationTools(server: McpServer) {
     {
       floorplan_uri: z.string().describe("MCP resource URI of the floorplan PNG (agent://location-scout/floorplan/{id})"),
       bible_uri: z.string().optional().describe("MCP resource URI of the Location Bible — used for prompt context (era, description). Optional but recommended."),
+      prompt_override: z.string().optional().describe("Custom image generation prompt. If provided, skips template assembly and uses this text verbatim (max 2000 chars). User-editable in the UI."),
       generation_params: z.object({
         model: z.string().optional().describe("Image generation model override"),
         seed: z.number().int().optional().describe("Random seed for reproducibility"),
       }).optional(),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async ({ floorplan_uri, bible_uri, generation_params }) => {
+    async ({ floorplan_uri, bible_uri, prompt_override, generation_params }) => {
       const task_id = crypto.randomUUID();
       createTask(task_id, "Generating isometric reference");
 
@@ -560,13 +585,14 @@ export function registerLocationTools(server: McpServer) {
             }
           }
 
-          const prompt = [
-            "Isometric architectural illustration. Convert this top-down floorplan into a clean 3D isometric view.",
-            locationName,
-            era ? `Era: ${era}.` : "",
-            spaceDesc,
-            "Show walls, doors, windows, furniture in correct isometric projection. Cinematic film production reference. High detail.",
-          ].filter(Boolean).join(" ").slice(0, 2000);
+          const prompt = (prompt_override
+            ? prompt_override
+            : fillTemplate(PROMPT_ISOMETRIC_TEMPLATE, {
+                location_name: locationName,
+                era_clause: era ? ` Era: ${era}.` : "",
+                space_description: spaceDesc ? ` ${spaceDesc}` : "",
+              })
+          ).slice(0, 2000);
 
           updateTask(task_id, { progress: 0.3, current_step: "Sending floorplan to FAL for isometric rendering" });
 
@@ -589,12 +615,20 @@ export function registerLocationTools(server: McpServer) {
 
           const imgRes = await fetch(result.images[0].url);
           const imgBuf = Buffer.from(await imgRes.arrayBuffer());
-          const saveResult = await saveImage("isometric", floorplanId, imgBuf);
+          const saveResult = await saveImage("isometric", imgBuf, {
+            entity_id: floorplanId,
+            prompt,
+            model: resolvedModel,
+            source_tool: "generate_isometric_reference",
+            seed: generation_params?.seed,
+            source_task_id: task_id,
+          });
 
           updateTask(task_id, {
             status: "completed",
             progress: 1.0,
             current_step: `Isometric reference ready (${imgBuf.length} bytes)`,
+            prompt_used: prompt,
             artifacts: [
               {
                 uri: saveResult.uri,
@@ -685,9 +719,10 @@ export function registerLocationTools(server: McpServer) {
         mood: z.string(),
         camera: z.string().optional(),
       })).describe("Setup tiles to generate images for"),
+      prompt_overrides: z.record(z.string(), z.string()).optional().describe("Optional per-setup prompt overrides keyed by setup id. If provided for a setup, skips template assembly and uses this text verbatim (max 2000 chars). User-editable in the UI."),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async ({ bible_uri, setups }) => {
+    async ({ bible_uri, setups, prompt_overrides }) => {
       const task_id = crypto.randomUUID();
       createTask(task_id, "Generating setup images");
       (async () => {
@@ -708,13 +743,24 @@ export function registerLocationTools(server: McpServer) {
           }
 
           const artifacts: Array<{ uri: string; mime_type: string; created_at: string; local_path?: string }> = [];
+          const promptsUsed: Record<string, string> = {};
 
           for (let i = 0; i < setups.length; i++) {
             const setup = setups[i];
             const progress = 0.1 + 0.8 * (i / setups.length);
             updateTask(task_id, { progress, current_step: `Generating image for ${setup.id} (${i + 1}/${setups.length})` });
 
-            const prompt = `Cinematic film still, ${spaceDesc}. Scene ${setup.scene}, ${setup.mood} mood. ${setup.camera ?? ""}. Photorealistic interior photography.`.slice(0, 2000);
+            const override = prompt_overrides?.[setup.id];
+            const prompt = (override
+              ? override
+              : fillTemplate(PROMPT_SETUP_TEMPLATE, {
+                  space_description: spaceDesc,
+                  scene: setup.scene,
+                  mood: setup.mood,
+                  camera: setup.camera ?? "",
+                })
+            ).slice(0, 2000);
+            promptsUsed[setup.id] = prompt;
             const resolvedModel = resolveModel("SETUP", undefined);
             const result = await generateImage({
               prompt,
@@ -726,7 +772,14 @@ export function registerLocationTools(server: McpServer) {
               const imgRes = await fetch(result.images[0].url);
               const imgBuf = Buffer.from(await imgRes.arrayBuffer());
               const setupId = setup.id.replace(/\//g, "_");
-              const saveResult = await saveImage("setup", setupId, imgBuf);
+              const saveResult = await saveImage("setup", imgBuf, {
+                entity_id: setupId,
+                prompt,
+                model: resolvedModel,
+                source_tool: "generate_setup_images",
+                source_task_id: task_id,
+                references: anchorImage ? [`anchor:${bibleId}`] : undefined,
+              });
               artifacts.push({
                 uri: saveResult.uri,
                 mime_type: "image/png",
@@ -741,6 +794,7 @@ export function registerLocationTools(server: McpServer) {
             progress: 1.0,
             current_step: `${artifacts.length} setup images generated`,
             artifacts,
+            prompts_used: promptsUsed,
           });
         } catch (err) {
           updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) });
@@ -1263,7 +1317,13 @@ export function registerLocationTools(server: McpServer) {
           updateTask(task_id, { progress: 0.8, current_step: "Saving variation image" });
           const imgRes = await fetch(result.images[0].url);
           const imgBuf = Buffer.from(await imgRes.arrayBuffer());
-          const saveResult = await saveImage("mood_variation", variation_id, imgBuf);
+          const saveResult = await saveImage("mood_variation", imgBuf, {
+            entity_id: variation_id,
+            prompt: moodParts,
+            model: resolvedModel,
+            source_tool: "add_mood_variation",
+            source_task_id: task_id,
+          });
 
           updateTask(task_id, {
             status: "completed",

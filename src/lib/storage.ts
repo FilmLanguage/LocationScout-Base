@@ -7,9 +7,10 @@
  *      then be read back by humans or by Claude via Read tool)
  *   3. In-memory map — always active as L1 cache / fallback
  *
- * Binary artifacts (images) are persisted to disk whenever LOCAL_OUTPUT_DIR
- * is set, and the absolute path is returned to the caller so it can surface
- * it in tool responses.
+ * Binary artifacts (images) are stored as versioned files with a sidecar JSON
+ * per file (see prompt-gallery-contract.md §1). Each generate_* call creates
+ * a new version; `loadImage` returns the newest version; `listVersions`
+ * returns the full history for a gallery UI.
  */
 
 import { copyFileSync, existsSync } from "node:fs";
@@ -19,15 +20,25 @@ import { readFileSync } from "node:fs";
 import { S3_BUCKET, s3Upload, s3Download, s3Exists } from "./api-client.js";
 import { mirrorArtifactToDb } from "./db.js";
 
-const LOCAL_OUTPUT_DIR = process.env.LOCAL_OUTPUT_DIR || "";
 const AGENT_NAME = "location-scout";
 
 // In-memory fallback for local development
 const memoryStore = new Map<string, { data: string; contentType: string }>();
 
+function localOutputDir(): string {
+  return process.env.LOCAL_OUTPUT_DIR || "";
+}
+
 function resolveLocalPath(path: string): string | null {
-  if (!LOCAL_OUTPUT_DIR) return null;
-  return resolve(LOCAL_OUTPUT_DIR, AGENT_NAME, path);
+  const dir = localOutputDir();
+  if (!dir) return null;
+  return resolve(dir, AGENT_NAME, path);
+}
+
+function resolveLocalDir(kind: string): string | null {
+  const dir = localOutputDir();
+  if (!dir) return null;
+  return resolve(dir, AGENT_NAME, kind);
 }
 
 async function writeLocal(path: string, data: Buffer | string): Promise<string | null> {
@@ -136,10 +147,49 @@ export async function artifactExists(type: string, id: string): Promise<boolean>
 
 // ─── Binary Artifacts (images) ──────────────────────────────────────
 
-export interface SaveImageResult {
-  /** MCP resource URI (e.g. `agent://location-scout/anchor/loc_001`) */
+/**
+ * Sidecar JSON schema — one per saved image. See prompt-gallery-contract.md §1.
+ */
+export interface SidecarEntry {
+  image_id: string;
+  entity_type: string;
+  entity_id: string;
+  kind: string;
+  prompt: string;
+  negative_prompt?: string;
+  model: string;
+  seed?: number;
+  created_at: string;
   uri: string;
-  /** Absolute filesystem path — null if LOCAL_OUTPUT_DIR not set */
+  local_path?: string;
+  source_tool: string;
+  source_task_id?: string;
+  references?: string[];
+}
+
+export interface SaveImageOptions {
+  /** Stable identifier of the parent entity (e.g. bible_id, setup_id). */
+  entity_id: string;
+  /** Final prompt actually sent to the image generator (post template-fill + override). */
+  prompt: string;
+  /** Name of the model that produced the image. */
+  model: string;
+  /** Tool that invoked saveImage — for provenance. */
+  source_tool: string;
+  /** Optional entity type (defaults to kind). */
+  entity_type?: string;
+  negative_prompt?: string;
+  seed?: number;
+  source_task_id?: string;
+  references?: string[];
+}
+
+export interface SaveImageResult {
+  /** MCP resource URI pointing at the *entity* (latest version); e.g. `agent://location-scout/anchor/loc_001` */
+  uri: string;
+  /** Short UUID — also embedded in the filename. */
+  image_id: string;
+  /** Absolute filesystem path of the PNG — null if LOCAL_OUTPUT_DIR not set */
   local_path: string | null;
   /** GCS path if uploaded, null otherwise */
   s3_path: string | null;
@@ -147,26 +197,81 @@ export interface SaveImageResult {
   content_type: string;
 }
 
+/** Turn a Date into a filesystem-safe ISO-ish timestamp (no colons / dots). */
+function tsSafe(d = new Date()): string {
+  return d.toISOString().replace(/[:.]/g, "-").replace(/Z$/, "Z");
+}
+
+function shortUuid(): string {
+  return (globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`)
+    .replace(/-/g, "")
+    .slice(0, 8);
+}
+
+/**
+ * Save a generated image with a sidecar JSON per the prompt-gallery contract.
+ * Filename format: `{kind}/{entity_id}_{ts}_{uuid8}.{ext}` plus a parallel `.json`.
+ * The returned `uri` points at the entity (latest) for backward compatibility.
+ */
 export async function saveImage(
-  type: string,
-  id: string,
+  kind: string,
   data: Buffer,
+  opts: SaveImageOptions,
   contentType = "image/png",
 ): Promise<SaveImageResult> {
   const ext = contentType === "image/png" ? "png" : "jpg";
-  const path = `${type}/${id}.${ext}`;
+  const image_id = shortUuid();
+  const created_at = new Date().toISOString();
+  const basename = `${opts.entity_id}_${tsSafe(new Date(created_at))}_${image_id}`;
+  const imagePath = `${kind}/${basename}.${ext}`;
+  const sidecarPath = `${kind}/${basename}.json`;
 
-  memoryStore.set(path, { data: data.toString("base64"), contentType });
+  // Also mirror the bytes under the legacy "latest" key so in-memory reads stay
+  // fast and /artifacts/{kind}/{entity_id}.png keeps working.
+  const latestKey = `${kind}/${opts.entity_id}.${ext}`;
+  memoryStore.set(imagePath, { data: data.toString("base64"), contentType });
+  memoryStore.set(latestKey, { data: data.toString("base64"), contentType });
 
-  const local_path = await writeLocal(path, data);
+  const local_path = await writeLocal(imagePath, data);
 
   let s3_path: string | null = null;
   if (S3_BUCKET) {
-    s3_path = await s3Upload(path, data, contentType);
+    s3_path = await s3Upload(imagePath, data, contentType);
+  }
+
+  const uri = `agent://${AGENT_NAME}/${kind}/${opts.entity_id}`;
+
+  const sidecar: SidecarEntry = {
+    image_id,
+    entity_type: opts.entity_type ?? kind,
+    entity_id: opts.entity_id,
+    kind,
+    prompt: opts.prompt,
+    model: opts.model,
+    created_at,
+    uri,
+    source_tool: opts.source_tool,
+    ...(opts.negative_prompt ? { negative_prompt: opts.negative_prompt } : {}),
+    ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
+    ...(local_path ? { local_path } : {}),
+    ...(opts.source_task_id ? { source_task_id: opts.source_task_id } : {}),
+    ...(opts.references ? { references: opts.references } : {}),
+  };
+
+  const sidecarJson = JSON.stringify(sidecar, null, 2);
+  memoryStore.set(sidecarPath, { data: sidecarJson, contentType: "application/json" });
+  await writeLocal(sidecarPath, sidecarJson);
+  if (S3_BUCKET) {
+    try {
+      await s3Upload(sidecarPath, sidecarJson, "application/json");
+    } catch (err) {
+      console.warn(`[storage] sidecar s3 upload failed for ${sidecarPath}: ${(err as Error)?.message ?? err}`);
+    }
   }
 
   return {
-    uri: `agent://${AGENT_NAME}/${type}/${id}`,
+    uri,
+    image_id,
     local_path,
     s3_path,
     bytes: data.length,
@@ -174,33 +279,153 @@ export async function saveImage(
   };
 }
 
+/**
+ * Load the *latest* image version for `{kind}/{entity_id}`. Falls back to any
+ * legacy unversioned `{kind}/{entity_id}.{ext}` file if no versioned files exist.
+ */
 export async function loadImage(
   type: string,
   id: string,
   ext = "png",
 ): Promise<{ data: Buffer; contentType: string } | null> {
-  const path = `${type}/${id}.${ext}`;
+  const contentType = ext === "png" ? "image/png" : "image/jpeg";
 
-  // Memory
-  const entry = memoryStore.get(path);
-  if (entry) return { data: Buffer.from(entry.data, "base64"), contentType: entry.contentType };
+  // 1. Check memory "latest" cache first
+  const latestKey = `${type}/${id}.${ext}`;
+  const cached = memoryStore.get(latestKey);
+  if (cached) return { data: Buffer.from(cached.data, "base64"), contentType: cached.contentType };
 
-  // Disk
-  const local = await readLocal(path);
-  if (local) {
-    return { data: local, contentType: ext === "png" ? "image/png" : "image/jpeg" };
+  // 2. Find newest versioned file on local disk
+  const newest = await findNewestVersionPath(type, id, ext);
+  if (newest) {
+    try {
+      const data = await fs.readFile(newest);
+      return { data, contentType };
+    } catch {
+      /* fall through */
+    }
   }
 
-  // GCS
+  // 3. Legacy unversioned file on disk
+  const legacy = await readLocal(`${type}/${id}.${ext}`);
+  if (legacy) return { data: legacy, contentType };
+
+  // 4. GCS (unversioned legacy key; multi-version listing over S3 not implemented yet)
   if (S3_BUCKET) {
     try {
-      return await s3Download(path);
+      return await s3Download(`${type}/${id}.${ext}`);
     } catch {
       return null;
     }
   }
 
   return null;
+}
+
+/** Load a specific version by its image_id. Local disk only for now. */
+export async function loadImageVersion(
+  kind: string,
+  image_id: string,
+  ext = "png",
+): Promise<{ data: Buffer; contentType: string } | null> {
+  const dir = resolveLocalDir(kind);
+  if (!dir) return null;
+  try {
+    const entries = await fs.readdir(dir);
+    const match = entries.find((f) => f.endsWith(`_${image_id}.${ext}`));
+    if (!match) return null;
+    const data = await fs.readFile(join(dir, match));
+    return { data, contentType: ext === "png" ? "image/png" : "image/jpeg" };
+  } catch {
+    return null;
+  }
+}
+
+async function findNewestVersionPath(kind: string, entity_id: string, ext: string): Promise<string | null> {
+  const dir = resolveLocalDir(kind);
+  if (!dir) return null;
+  try {
+    const entries = await fs.readdir(dir);
+    const prefix = `${entity_id}_`;
+    const matches = entries.filter((f) => f.startsWith(prefix) && f.endsWith(`.${ext}`));
+    if (matches.length === 0) return null;
+    // Sort by mtime descending.
+    const withStat = await Promise.all(
+      matches.map(async (f) => {
+        const full = join(dir, f);
+        const s = await fs.stat(full);
+        return { full, mtime: s.mtimeMs };
+      }),
+    );
+    withStat.sort((a, b) => b.mtime - a.mtime);
+    return withStat[0].full;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * List every saved version for `{kind}/{entity_id}` newest-first.
+ * Reads sidecar JSONs where present; falls back to a synthetic entry for any
+ * legacy unversioned image so existing dev data isn't lost.
+ */
+export async function listVersions(kind: string, entity_id: string): Promise<SidecarEntry[]> {
+  const dir = resolveLocalDir(kind);
+  const results: SidecarEntry[] = [];
+
+  if (dir) {
+    let entries: string[] = [];
+    try {
+      entries = await fs.readdir(dir);
+    } catch {
+      entries = [];
+    }
+    const prefix = `${entity_id}_`;
+    const sidecarFiles = entries.filter(
+      (f) => f.startsWith(prefix) && f.endsWith(".json") && !f.endsWith(".prev.json"),
+    );
+
+    for (const f of sidecarFiles) {
+      try {
+        const raw = await fs.readFile(join(dir, f), "utf8");
+        const parsed = JSON.parse(raw) as SidecarEntry;
+        if (parsed.entity_id === entity_id) results.push(parsed);
+      } catch {
+        /* skip malformed */
+      }
+    }
+
+    // Backward-compat: if we found no sidecars but a legacy `{entity_id}.{ext}` exists, surface it.
+    if (results.length === 0) {
+      for (const ext of ["png", "jpg"]) {
+        const legacy = join(dir, `${entity_id}.${ext}`);
+        if (existsSync(legacy)) {
+          try {
+            const stat = await fs.stat(legacy);
+            results.push({
+              image_id: "legacy",
+              entity_type: kind,
+              entity_id,
+              kind,
+              prompt: "",
+              model: "unknown",
+              created_at: stat.mtime.toISOString(),
+              uri: `agent://${AGENT_NAME}/${kind}/${entity_id}`,
+              local_path: legacy,
+              source_tool: "legacy",
+            });
+          } catch {
+            /* ignore */
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // Sort newest first
+  results.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  return results;
 }
 
 // ─── Task Store (always in-memory) ──────────────────────────────────
@@ -213,6 +438,10 @@ interface TaskEntry {
   artifacts: Array<{ uri: string; mime_type: string; created_at: string; local_path?: string }>;
   error?: string;
   setup_map?: Record<string, unknown>;
+  /** Final prompt actually sent to the image generator (after override + template fill + correction hints). Surfaced to the UI so user can edit and re-run. */
+  prompt_used?: string;
+  /** Per-setup prompts for multi-image tools like generate_setup_images. */
+  prompts_used?: Record<string, string>;
   created_at: string;
   updated_at: string;
 }
@@ -236,7 +465,7 @@ export function createTask(task_id: string, step: string): TaskEntry {
 
 export function updateTask(
   task_id: string,
-  update: Partial<Pick<TaskEntry, "status" | "progress" | "current_step" | "artifacts" | "error" | "setup_map">>,
+  update: Partial<Pick<TaskEntry, "status" | "progress" | "current_step" | "artifacts" | "error" | "setup_map" | "prompt_used" | "prompts_used">>,
 ): TaskEntry | null {
   const entry = taskStore.get(task_id);
   if (!entry) return null;

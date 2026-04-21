@@ -62,6 +62,24 @@ app.post("/mcp", async (req, res) => {
   await transport.handleRequest(req, res, req.body);
 });
 
+// Serve a specific image version by its short image_id — used by PromptCard
+// when the user selects an older version from the gallery dropdown.
+app.get("/artifacts/:type/v/:file", async (req, res) => {
+  const { type, file } = req.params;
+  const ext = file.split(".").pop() ?? "png";
+  const image_id = file.replace(/\.[^.]+$/, "");
+  try {
+    const { loadImageVersion } = await import("./lib/storage.js");
+    const img = await loadImageVersion(type, image_id, ext === "jpeg" ? "jpg" : ext);
+    if (!img) { res.status(404).json({ error: "not_found" }); return; }
+    res.setHeader("Content-Type", img.contentType);
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.send(img.data);
+  } catch {
+    res.status(500).json({ error: "internal" });
+  }
+});
+
 // Serve stored artifacts (images, JSON) via HTTP so the UI can display them.
 // GET /artifacts/:type/:id.ext → loads from storage layer (memory → disk → S3).
 app.get("/artifacts/:type/:file", async (req, res) => {

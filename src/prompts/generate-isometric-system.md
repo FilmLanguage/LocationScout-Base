@@ -1,0 +1,1 @@
+Isometric architectural illustration. Convert this top-down floorplan into a clean 3D isometric view. {{location_name}}{{era_clause}}{{space_description}} Show walls, doors, windows, furniture in correct isometric projection. Cinematic film production reference. High detail.

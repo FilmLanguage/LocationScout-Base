@@ -13,3 +13,8 @@ export function loadPrompt(importMetaUrl: string, name: string): string {
   const promptPath = resolve(callerDir, "..", "prompts", `${name}.md`);
   return readFileSync(promptPath, "utf8");
 }
+
+/** Replace {{variable}} placeholders in a template string. */
+export function fillTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "").replace(/\s{2,}/g, " ").trim();
+}

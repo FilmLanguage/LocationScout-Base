@@ -15,6 +15,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { callTool, pollTask, type TaskStatus } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
+import { PromptCard } from "../components/PromptCard";
+import { useGallery } from "../hooks/useGallery";
 
 const LOCATION_ID = "loc_001";
 const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
@@ -45,6 +47,41 @@ export function ReferencesPage() {
   const [floorplan, setFloorplan] = useState<AnchorState>({ kind: "checking" });
   const [isometric, setIsometric] = useState<AnchorState>({ kind: "checking" });
 
+  // User-editable prompts (pre-filled from the latest sidecar entry)
+  const [isometricPrompt, setIsometricPrompt] = useState("");
+  const [anchorPrompt, setAnchorPrompt] = useState("");
+
+  // Gallery state (prior versions) for each kind.
+  const anchorGallery = useGallery("anchor", LOCATION_ID);
+  const isometricGallery = useGallery("isometric", LOCATION_ID);
+  const [anchorSelectedId, setAnchorSelectedId] = useState<string | null>(null);
+  const [isometricSelectedId, setIsometricSelectedId] = useState<string | null>(null);
+
+  // Pre-fill textareas from the newest sidecar once a gallery loads, but only
+  // when the user hasn't started typing (don't clobber their edits).
+  useEffect(() => {
+    if (!anchorPrompt && anchorGallery.versions[0]?.prompt) {
+      setAnchorPrompt(anchorGallery.versions[0].prompt);
+    }
+    if (!anchorSelectedId && anchorGallery.versions[0]) {
+      setAnchorSelectedId(anchorGallery.versions[0].image_id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchorGallery.versions]);
+
+  useEffect(() => {
+    if (!isometricPrompt && isometricGallery.versions[0]?.prompt) {
+      setIsometricPrompt(isometricGallery.versions[0].prompt);
+    }
+    if (!isometricSelectedId && isometricGallery.versions[0]) {
+      setIsometricSelectedId(isometricGallery.versions[0].image_id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isometricGallery.versions]);
+
+  const anchorPromptUsed = anchorGallery.versions[0]?.prompt ?? null;
+  const isometricPromptUsed = isometricGallery.versions[0]?.prompt ?? null;
+
   const checkExists = async (path: string): Promise<boolean> => {
     try {
       const res = await fetch(path, { method: "HEAD", cache: "no-store" });
@@ -58,7 +95,7 @@ export function ReferencesPage() {
   const checkAnchorExists = () => checkExists(ANCHOR_IMG_PATH);
 
   /** Fire generate_anchor and poll until terminal. Requires isometric to exist first. */
-  const runGeneration = async () => {
+  const runGeneration = async (promptOverride?: string) => {
     // Hard gate: isometric must exist before anchor can be generated
     const isoExists = await checkExists(ISOMETRIC_IMG_PATH);
     if (!isoExists) {
@@ -70,6 +107,7 @@ export function ReferencesPage() {
       const result = await callTool<{ task_id: string }>("generate_anchor", {
         bible_uri: BIBLE_URI,
         generation_params: { aspect_ratio: "16:9", quality: "high" },
+        ...(promptOverride?.trim() ? { prompt_override: promptOverride.trim() } : {}),
       });
       const taskId = result.data?.task_id;
       if (!taskId) {
@@ -86,6 +124,7 @@ export function ReferencesPage() {
         setAnchor({ kind: "error", message: final.error || "Image generation failed" });
         return;
       }
+      if ((final as any).prompt_used) setAnchorPrompt((final as any).prompt_used);
       // Confirm the image is now reachable, then flip to ready.
       const exists = await checkAnchorExists();
       if (!exists) {
@@ -96,6 +135,9 @@ export function ReferencesPage() {
         return;
       }
       setAnchor({ kind: "ready", cacheBust: Date.now() });
+      // Pull the new sidecar into the gallery and auto-select it as newest.
+      await anchorGallery.refresh();
+      setAnchorSelectedId(null);
     } catch (err) {
       setAnchor({ kind: "error", message: err instanceof Error ? err.message : String(err) });
     }
@@ -127,7 +169,7 @@ export function ReferencesPage() {
   }, [isometric.kind]);
 
   const handleRegenerateAnchor = async () => {
-    runGeneration();
+    runGeneration(anchorPrompt || undefined);
   };
 
   // ─── Floorplan: auto-generate on mount ──────────────────────────
@@ -156,19 +198,23 @@ export function ReferencesPage() {
   }, []);
 
   // ─── Isometric: auto-generate after floorplan is ready ──────────
-  const runIsometric = async () => {
+  const runIsometric = async (promptOverride?: string) => {
     setIsometric({ kind: "generating", status: null });
     try {
       const result = await callTool<{ task_id: string }>("generate_isometric_reference", {
         floorplan_uri: `agent://location-scout/floorplan/${LOCATION_ID}`,
         bible_uri: BIBLE_URI,
+        ...(promptOverride?.trim() ? { prompt_override: promptOverride.trim() } : {}),
       });
       const taskId = result.data?.task_id;
       if (!taskId) { setIsometric({ kind: "error", message: "generate_isometric returned no task_id" }); return; }
       const final = await pollTask(taskId, (s) => setIsometric({ kind: "generating", status: s }), 1500, 120000);
       if (final.status === "failed") { setIsometric({ kind: "error", message: final.error || "Isometric generation failed" }); return; }
+      if ((final as any).prompt_used) setIsometricPrompt((final as any).prompt_used);
       const exists = await checkExists(ISOMETRIC_IMG_PATH);
       setIsometric(exists ? { kind: "ready", cacheBust: Date.now() } : { kind: "error", message: "Isometric generated but not reachable" });
+      await isometricGallery.refresh();
+      setIsometricSelectedId(null);
     } catch (err) { setIsometric({ kind: "error", message: err instanceof Error ? err.message : String(err) }); }
   };
 
@@ -346,30 +392,35 @@ export function ReferencesPage() {
           </div>
           <article className="card">
             <div className="card__body">
-              {isometric.kind === "ready" ? (
-                <img
-                  src={`${ISOMETRIC_IMG_PATH}?v=${isometric.cacheBust}`}
-                  alt="Isometric reference"
-                  style={{ width: "100%", borderRadius: 6 }}
-                />
-              ) : isometric.kind === "error" ? (
-                <div className="placeholder-box placeholder-box--tall" style={{ borderColor: "rgba(220,60,60,0.5)" }}>
-                  <span style={{ color: "var(--red)" }}>{"✗ "}{isometric.message}</span>
-                </div>
-              ) : (
-                <div className="placeholder-box placeholder-box--tall">
-                  {isometric.kind === "generating" ? `Generating isometric… ${isometric.status?.current_step ?? ""}` : floorplan.kind === "ready" ? "Checking…" : "Waiting for floorplan…"}
+              {isometric.kind === "error" && (
+                <div className="placeholder-box" style={{ borderColor: "rgba(220,60,60,0.5)", color: "var(--red)", marginBottom: "var(--s-2)" }}>
+                  ✗ {isometric.message}
                 </div>
               )}
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm"
-                style={{ alignSelf: "flex-end", marginTop: "var(--s-2)" }}
-                disabled={isometric.kind === "generating" || floorplan.kind !== "ready"}
-                onClick={() => runIsometric()}
-              >
-                {isometric.kind === "generating" ? "Generating…" : "Regenerate"}
-              </button>
+              <PromptCard
+                label="Isometric"
+                kind="isometric"
+                entityId={LOCATION_ID}
+                versions={isometricGallery.versions}
+                selectedVersionId={isometricSelectedId}
+                onSelectVersion={setIsometricSelectedId}
+                prompt={isometricPrompt}
+                promptUsed={isometricPromptUsed}
+                onChange={setIsometricPrompt}
+                onRegenerate={() => runIsometric(isometricPrompt || undefined)}
+                busy={isometric.kind === "generating"}
+                disabled={floorplan.kind !== "ready"}
+                cacheBust={isometric.kind === "ready" ? isometric.cacheBust : undefined}
+                statusLine={
+                  isometric.kind === "generating"
+                    ? `Generating isometric… ${isometric.status?.current_step ?? ""}`
+                    : isometric.kind === "ready"
+                    ? undefined
+                    : floorplan.kind === "ready"
+                    ? "Checking…"
+                    : "Waiting for floorplan…"
+                }
+              />
             </div>
           </article>
         </div>
@@ -408,7 +459,22 @@ export function ReferencesPage() {
           </div>
           <article className="card">
             <div className="card__body" style={{ gap: "var(--s-3)" }}>
-              {renderAnchorSlot()}
+              {anchor.kind !== "ready" ? renderAnchorSlot() : null}
+              <PromptCard
+                label="Anchor"
+                kind="anchor"
+                entityId={LOCATION_ID}
+                versions={anchorGallery.versions}
+                selectedVersionId={anchorSelectedId}
+                onSelectVersion={setAnchorSelectedId}
+                prompt={anchorPrompt}
+                promptUsed={anchorPromptUsed}
+                onChange={setAnchorPrompt}
+                onRegenerate={handleRegenerateAnchor}
+                busy={anchor.kind === "generating" || anchor.kind === "checking"}
+                disabled={isometric.kind !== "ready"}
+                cacheBust={anchor.kind === "ready" ? anchor.cacheBust : undefined}
+              />
               <span className="section-label">VLM Audit</span>
               <div className="score-group">
                 <div className="score">
