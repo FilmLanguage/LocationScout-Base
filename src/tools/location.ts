@@ -1,15 +1,60 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { createTask, updateTask, saveArtifact, loadArtifact, saveImage, loadImage, getArtifactDiff, isArtifactStale, listLocalArtifacts } from "../lib/storage.js";
+import { createTask, updateTask, saveArtifact, loadArtifact, saveImage, loadImage, loadImageVersion, getArtifactDiff, isArtifactStale, listLocalArtifacts } from "../lib/storage.js";
 import { llmComplete, generateImage } from "../lib/api-client.js";
 import { flError, FL_ERRORS } from "../lib/errors.js";
 import { validateAnchorAgainstBible, issuesToCorrectionHint, type ValidatorBibleSpec } from "../lib/anchor-validator.js";
 import { resolveModel } from "../lib/model-registry.js";
 import { analyzeWithGeminiVision, stripJsonFence } from "../lib/gemini-vision.js";
 import { loadPrompt, fillTemplate } from "../lib/prompt-loader.js";
+import {
+  buildAnchorPromptVars,
+  buildIsometricPromptVars,
+  buildSetupPromptVars,
+} from "../lib/prompt-assembly.js";
 import { spawnSync } from "node:child_process";
 import { resolve as pathResolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ReferenceRefSchema, type ReferenceRef } from "../lib/ref-schema.js";
+import { EditModeSchema, composeEditPrompt, resolveEditBase } from "../lib/edit-mode.js";
+
+/**
+ * Resolve a ReferenceRef to a data URL the image model can ingest. Supports:
+ *   - data: URLs (pass through)
+ *   - agent:// URIs pointing at this agent's gallery (load via image_id)
+ *   - http(s): URLs (pass through — FAL fetches them itself)
+ *
+ * Returns null for refs we can't resolve so callers can skip silently rather
+ * than fail the whole generation.
+ */
+async function refToImageUrl(ref: ReferenceRef): Promise<string | null> {
+  if (ref.uri.startsWith("data:")) return ref.uri;
+  if (ref.uri.startsWith("http://") || ref.uri.startsWith("https://")) return ref.uri;
+  if (ref.uri.startsWith("agent://")) {
+    // agent://location-scout/<kind>/<entity_id>
+    // User uploads are stored under kind="user-ref"; map ref.kind to the stored kind.
+    const parts = ref.uri.replace("agent://", "").split("/");
+    if (parts.length < 3) return null;
+    const kindFromUri = parts[1];
+    try {
+      const img = await loadImageVersion(kindFromUri, ref.image_id, "png")
+        ?? await loadImageVersion(kindFromUri, ref.image_id, "jpg");
+      if (img) {
+        const mime = img.contentType || "image/png";
+        return `data:${mime};base64,${img.data.toString("base64")}`;
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  return null;
+}
+
+async function resolveReferenceImages(refs: ReferenceRef[] | undefined): Promise<string[]> {
+  if (!refs || refs.length === 0) return [];
+  const urls = await Promise.all(refs.map((r) => refToImageUrl(r)));
+  return urls.filter((u): u is string => !!u);
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -251,9 +296,12 @@ export function registerLocationTools(server: McpServer) {
         max_attempts: z.number().int().min(1).max(5).default(3).describe("Max generation+validation attempts"),
         threshold: z.number().min(0).max(1).default(0.75).describe("Score threshold to pass validation"),
       }).optional(),
+      reference_images: z.array(ReferenceRefSchema).optional().describe("Extra reference images to attach as img2img inputs (user uploads, cross-agent anchors). Appended after the default isometric chain ref."),
+      auto_resolve: z.boolean().default(true).describe("If true (default), also pull the upstream isometric chain ref. Set false to generate using only `reference_images`."),
+      edit_mode: EditModeSchema.optional().describe("When enabled, treat prompt_override as a change directive and anchor the generation on a previous version instead of the isometric chain ref."),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async ({ bible_uri, prompt_override, generation_params, validation }) => {
+    async ({ bible_uri, prompt_override, generation_params, validation, reference_images, auto_resolve, edit_mode }) => {
       const task_id = crypto.randomUUID();
       createTask(task_id, "Generating anchor image");
 
@@ -282,22 +330,59 @@ export function registerLocationTools(server: McpServer) {
           const negativePrompt = Array.isArray(negativeListRaw)
             ? negativeListRaw.map((n) => (typeof n === "string" ? n : n.item)).join(", ")
             : "";
-          const spaceDescription = (bible.space_description as string | undefined) ?? "";
-          const basePrompt = (prompt_override
-            ? prompt_override
-            : fillTemplate(PROMPT_ANCHOR_TEMPLATE, { space_description: spaceDescription })
-          ).slice(0, 2000);
-
-          // Hard gate: require isometric reference (Floorplan → Isometric → Anchor pipeline)
-          updateTask(task_id, { progress: 0.08, current_step: "Loading isometric reference for img2img" });
-          const isometricImage = await loadImage("isometric", bibleId);
-          if (!isometricImage) {
-            throw flError(FL_ERRORS.MISSING_DEPENDENCY, `Isometric reference not found for ${bibleId}. Generate floorplan and isometric first.`, {
+          const editing = edit_mode?.enabled === true;
+          const userChange = (prompt_override ?? "").trim();
+          if (editing && userChange.length === 0) {
+            throw flError(FL_ERRORS.GENERATION_ERROR, "Edit mode requires a non-empty prompt_override describing the change.", {
               retryable: false,
-              suggestion: "Run create_floorplan then generate_isometric_reference before generating the anchor.",
+              suggestion: "Pass prompt_override with the edit directive (e.g. 'add golden-hour sunset through window').",
             });
           }
-          const isometricDataUrl = `data:image/png;base64,${isometricImage.data.toString("base64")}`;
+
+          let editBase: { dataUrl: string; image_id: string } | null = null;
+          if (editing) {
+            editBase = await resolveEditBase("anchor", bibleId, edit_mode?.base_image_id);
+            if (!editBase) {
+              throw flError(FL_ERRORS.MISSING_DEPENDENCY, `No base anchor version found to edit for ${bibleId}.`, {
+                retryable: false,
+                suggestion: "Generate an anchor first, or pass edit_mode.base_image_id of a known version.",
+              });
+            }
+          }
+
+          const basePrompt = (editing
+            ? composeEditPrompt(userChange)
+            : (prompt_override
+              ? prompt_override
+              : fillTemplate(PROMPT_ANCHOR_TEMPLATE, buildAnchorPromptVars(bible)))
+          ).slice(0, 2000);
+
+          // Assemble img2img inputs. Edit mode: base version only; otherwise
+          // isometric chain ref + any user-supplied refs.
+          updateTask(task_id, { progress: 0.08, current_step: editing ? "Loading edit base image" : "Loading reference images for img2img" });
+          const imageUrls: string[] = [];
+          if (editing && editBase) {
+            imageUrls.push(editBase.dataUrl);
+          } else {
+            if (auto_resolve !== false) {
+              const isometricImage = await loadImage("isometric", bibleId);
+              if (!isometricImage) {
+                throw flError(FL_ERRORS.MISSING_DEPENDENCY, `Isometric reference not found for ${bibleId}. Generate floorplan and isometric first.`, {
+                  retryable: false,
+                  suggestion: "Run create_floorplan then generate_isometric_reference before generating the anchor, or pass explicit reference_images with auto_resolve=false.",
+                });
+              }
+              imageUrls.push(`data:image/png;base64,${isometricImage.data.toString("base64")}`);
+            }
+            const extraRefs = await resolveReferenceImages(reference_images);
+            imageUrls.push(...extraRefs);
+            if (imageUrls.length === 0) {
+              throw flError(FL_ERRORS.MISSING_DEPENDENCY, `No reference images available for anchor generation of ${bibleId}.`, {
+                retryable: false,
+                suggestion: "Either run create_floorplan + generate_isometric_reference first, or pass reference_images with auto_resolve=false.",
+              });
+            }
+          }
 
           let lastImageUrl: string | null = null;
           let lastReport: import("@filmlanguage/schemas").ValidationReport | null = null;
@@ -320,7 +405,8 @@ export function registerLocationTools(server: McpServer) {
               negative_prompt: negativePrompt || undefined,
               seed: generation_params?.seed != null ? generation_params.seed + (attempt - 1) : undefined,
               model: resolvedModel,
-              image_urls: [isometricDataUrl],
+              image_urls: imageUrls,
+              ...(editing ? { image_ref_strength: 0.85 } : {}),
             });
 
             if (result.images.length === 0) {
@@ -342,6 +428,7 @@ export function registerLocationTools(server: McpServer) {
               negative_prompt: negativePrompt || undefined,
               seed: generation_params?.seed != null ? generation_params.seed + (attempt - 1) : undefined,
               source_task_id: task_id,
+              ...(editing && editBase ? { parent_version_id: editBase.image_id } : {}),
             });
 
             if (!validationEnabled) break;
@@ -548,9 +635,12 @@ export function registerLocationTools(server: McpServer) {
         model: z.string().optional().describe("Image generation model override"),
         seed: z.number().int().optional().describe("Random seed for reproducibility"),
       }).optional(),
+      reference_images: z.array(ReferenceRefSchema).optional().describe("Extra reference images appended after the floorplan chain ref."),
+      auto_resolve: z.boolean().default(true).describe("If true (default), use the floorplan PNG as the base chain ref. Set false to skip and rely solely on `reference_images`."),
+      edit_mode: EditModeSchema.optional().describe("When enabled, treat prompt_override as a change directive and anchor the generation on a previous isometric version instead of the floorplan."),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async ({ floorplan_uri, bible_uri, prompt_override, generation_params }) => {
+    async ({ floorplan_uri, bible_uri, prompt_override, generation_params, reference_images, auto_resolve, edit_mode }) => {
       const task_id = crypto.randomUUID();
       createTask(task_id, "Generating isometric reference");
 
@@ -558,50 +648,73 @@ export function registerLocationTools(server: McpServer) {
         try {
           updateTask(task_id, { status: "processing", progress: 0.05, current_step: "Loading floorplan" });
 
-          // Resolve floorplan ID and load PNG
+          // Resolve floorplan ID and load PNG (default chain ref).
           const floorplanId = floorplan_uri.includes("/") ? (floorplan_uri.split("/").pop() ?? "") : floorplan_uri;
-          const floorplanImage = await loadImage("floorplan", floorplanId);
-          if (!floorplanImage) {
-            throw flError(FL_ERRORS.MISSING_DEPENDENCY, `Floorplan not found: ${floorplan_uri}`, {
+          const editing = edit_mode?.enabled === true;
+          const userChange = (prompt_override ?? "").trim();
+          if (editing && userChange.length === 0) {
+            throw flError(FL_ERRORS.GENERATION_ERROR, "Edit mode requires a non-empty prompt_override describing the change.", {
               retryable: false,
-              suggestion: "Generate the floorplan first with create_floorplan.",
+              suggestion: "Pass prompt_override with the edit directive.",
             });
           }
-
-          // Encode as data URL for FAL img2img
-          const floorplanDataUrl = `data:image/png;base64,${floorplanImage.data.toString("base64")}`;
+          let editBase: { dataUrl: string; image_id: string } | null = null;
+          if (editing) {
+            editBase = await resolveEditBase("isometric", floorplanId, edit_mode?.base_image_id);
+            if (!editBase) {
+              throw flError(FL_ERRORS.MISSING_DEPENDENCY, `No base isometric version found to edit for ${floorplanId}.`, {
+                retryable: false,
+                suggestion: "Generate an isometric first, or pass edit_mode.base_image_id.",
+              });
+            }
+          }
+          const imageUrls: string[] = [];
+          if (editing && editBase) {
+            imageUrls.push(editBase.dataUrl);
+          } else {
+            if (auto_resolve !== false) {
+              const floorplanImage = await loadImage("floorplan", floorplanId);
+              if (!floorplanImage) {
+                throw flError(FL_ERRORS.MISSING_DEPENDENCY, `Floorplan not found: ${floorplan_uri}`, {
+                  retryable: false,
+                  suggestion: "Generate the floorplan first with create_floorplan, or pass reference_images with auto_resolve=false.",
+                });
+              }
+              imageUrls.push(`data:image/png;base64,${floorplanImage.data.toString("base64")}`);
+            }
+            const extraRefs = await resolveReferenceImages(reference_images);
+            imageUrls.push(...extraRefs);
+          }
 
           // Optional: load Bible for richer prompt
-          let locationName = floorplanId;
-          let era = "";
-          let spaceDesc = "";
+          let isometricVars: Record<string, string> = {
+            location_name: floorplanId,
+            era_clause: "",
+            space_description: "",
+          };
           if (bible_uri) {
             const bible = await loadArtifact<Record<string, unknown>>("bible", bible_uri.includes("/") ? (bible_uri.split("/").pop() ?? "") : bible_uri);
             if (bible) {
-              const passport = bible.passport as Record<string, unknown> | undefined;
-              locationName = (passport?.location_name as string | undefined) ?? floorplanId;
-              era = (passport?.era as string | undefined) ?? "";
-              spaceDesc = (bible.space_description as string | undefined) ?? "";
+              isometricVars = buildIsometricPromptVars(bible, floorplanId);
             }
           }
 
-          const prompt = (prompt_override
-            ? prompt_override
-            : fillTemplate(PROMPT_ISOMETRIC_TEMPLATE, {
-                location_name: locationName,
-                era_clause: era ? ` Era: ${era}.` : "",
-                space_description: spaceDesc ? ` ${spaceDesc}` : "",
-              })
+          const prompt = (editing
+            ? composeEditPrompt(userChange)
+            : (prompt_override
+              ? prompt_override
+              : fillTemplate(PROMPT_ISOMETRIC_TEMPLATE, isometricVars))
           ).slice(0, 2000);
 
-          updateTask(task_id, { progress: 0.3, current_step: "Sending floorplan to FAL for isometric rendering" });
+          updateTask(task_id, { progress: 0.3, current_step: editing ? "Sending edit base to FAL for isometric rendering" : "Sending floorplan to FAL for isometric rendering" });
 
           const resolvedModel = resolveModel("ISOMETRIC", generation_params?.model);
           const result = await generateImage({
             prompt,
             seed: generation_params?.seed,
             model: resolvedModel,
-            image_urls: [floorplanDataUrl],
+            image_urls: imageUrls,
+            ...(editing ? { image_ref_strength: 0.85 } : {}),
           });
 
           if (result.images.length === 0) {
@@ -622,6 +735,7 @@ export function registerLocationTools(server: McpServer) {
             source_tool: "generate_isometric_reference",
             seed: generation_params?.seed,
             source_task_id: task_id,
+            ...(editing && editBase ? { parent_version_id: editBase.image_id } : {}),
           });
 
           updateTask(task_id, {
@@ -720,9 +834,12 @@ export function registerLocationTools(server: McpServer) {
         camera: z.string().optional(),
       })).describe("Setup tiles to generate images for"),
       prompt_overrides: z.record(z.string(), z.string()).optional().describe("Optional per-setup prompt overrides keyed by setup id. If provided for a setup, skips template assembly and uses this text verbatim (max 2000 chars). User-editable in the UI."),
+      reference_images: z.record(z.string(), z.array(ReferenceRefSchema)).optional().describe("Optional per-setup reference image arrays keyed by setup id. Appended after the default anchor chain ref."),
+      auto_resolve: z.boolean().default(true).describe("If true (default), use the approved anchor image as the chain ref for every setup. Set false to skip and rely solely on `reference_images`."),
+      edit_mode: z.record(z.string(), EditModeSchema).optional().describe("Per-setup edit-mode config keyed by setup id. When enabled for a setup, treats prompt_overrides[setup.id] as a change directive and anchors on a previous setup version."),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async ({ bible_uri, setups, prompt_overrides }) => {
+    async ({ bible_uri, setups, prompt_overrides, reference_images, auto_resolve, edit_mode }) => {
       const task_id = crypto.randomUUID();
       createTask(task_id, "Generating setup images");
       (async () => {
@@ -730,15 +847,14 @@ export function registerLocationTools(server: McpServer) {
           updateTask(task_id, { status: "processing", progress: 0.05, current_step: "Checking Bible approval gate" });
           const bible = await requireApprovedBible(bible_uri);
           const bibleId = bible_uri.includes("/") ? (bible_uri.split("/").pop() ?? "") : bible_uri;
-          const spaceDesc = ((bible.space_description as string) ?? "").slice(0, 300);
 
           // Load anchor image for img2img visual consistency (ERD: SETUP_IMAGE ← ANCHOR_IMAGE)
           updateTask(task_id, { progress: 0.08, current_step: "Loading anchor image for img2img" });
-          const anchorImage = await loadImage("anchor", bibleId);
+          const anchorImage = auto_resolve !== false ? await loadImage("anchor", bibleId) : null;
           const anchorDataUrl = anchorImage
             ? `data:image/png;base64,${anchorImage.data.toString("base64")}`
             : null;
-          if (!anchorImage) {
+          if (!anchorImage && auto_resolve !== false) {
             updateTask(task_id, { progress: 0.08, current_step: "No anchor found — text-only generation" });
           }
 
@@ -750,35 +866,69 @@ export function registerLocationTools(server: McpServer) {
             const progress = 0.1 + 0.8 * (i / setups.length);
             updateTask(task_id, { progress, current_step: `Generating image for ${setup.id} (${i + 1}/${setups.length})` });
 
+            const setupId = setup.id.replace(/\//g, "_");
+            const setupEdit = edit_mode?.[setup.id];
+            const editingSetup = setupEdit?.enabled === true;
             const override = prompt_overrides?.[setup.id];
-            const prompt = (override
-              ? override
-              : fillTemplate(PROMPT_SETUP_TEMPLATE, {
-                  space_description: spaceDesc,
-                  scene: setup.scene,
-                  mood: setup.mood,
-                  camera: setup.camera ?? "",
-                })
+            let editBase: { dataUrl: string; image_id: string } | null = null;
+            if (editingSetup) {
+              const userChange = (override ?? "").trim();
+              if (userChange.length === 0) {
+                throw flError(FL_ERRORS.GENERATION_ERROR, `Edit mode for setup ${setup.id} requires prompt_overrides[${setup.id}] describing the change.`, {
+                  retryable: false,
+                  suggestion: "Pass prompt_overrides[setup.id] with the edit directive.",
+                });
+              }
+              editBase = await resolveEditBase("setup", setupId, setupEdit?.base_image_id);
+              if (!editBase) {
+                throw flError(FL_ERRORS.MISSING_DEPENDENCY, `No base setup version found to edit for ${setup.id}.`, {
+                  retryable: false,
+                  suggestion: "Generate a setup image first, or pass edit_mode[setup.id].base_image_id.",
+                });
+              }
+            }
+            const prompt = (editingSetup
+              ? composeEditPrompt((override ?? "").trim())
+              : (override
+                ? override
+                : fillTemplate(PROMPT_SETUP_TEMPLATE, buildSetupPromptVars(bible, setup)))
             ).slice(0, 2000);
             promptsUsed[setup.id] = prompt;
             const resolvedModel = resolveModel("SETUP", undefined);
+            const setupRefs = reference_images?.[setup.id];
+            const imageUrls: string[] = [];
+            if (editingSetup && editBase) {
+              imageUrls.push(editBase.dataUrl);
+            } else {
+              const extraSetupUrls = await resolveReferenceImages(setupRefs);
+              if (anchorDataUrl) imageUrls.push(anchorDataUrl);
+              imageUrls.push(...extraSetupUrls);
+            }
             const result = await generateImage({
               prompt,
               model: resolvedModel,
-              ...(anchorDataUrl ? { image_urls: [anchorDataUrl] } : {}),
+              ...(imageUrls.length > 0 ? { image_urls: imageUrls } : {}),
+              ...(editingSetup ? { image_ref_strength: 0.85 } : {}),
             });
 
             if (result.images.length > 0) {
               const imgRes = await fetch(result.images[0].url);
               const imgBuf = Buffer.from(await imgRes.arrayBuffer());
-              const setupId = setup.id.replace(/\//g, "_");
+              const refTokens: string[] = [];
+              if (editingSetup && editBase) {
+                refTokens.push(`edit_base:${editBase.image_id}`);
+              } else {
+                if (anchorImage) refTokens.push(`anchor:${bibleId}`);
+                if (setupRefs) refTokens.push(...setupRefs.map((r) => `${r.kind}:${r.image_id}`));
+              }
               const saveResult = await saveImage("setup", imgBuf, {
                 entity_id: setupId,
                 prompt,
                 model: resolvedModel,
                 source_tool: "generate_setup_images",
                 source_task_id: task_id,
-                references: anchorImage ? [`anchor:${bibleId}`] : undefined,
+                references: refTokens.length > 0 ? refTokens : undefined,
+                ...(editingSetup && editBase ? { parent_version_id: editBase.image_id } : {}),
               });
               artifacts.push({
                 uri: saveResult.uri,
@@ -1468,6 +1618,152 @@ export function registerLocationTools(server: McpServer) {
         return {
           content: [{ type: "text" as const, text: JSON.stringify({
             error: "get_diff_failed",
+            message: err instanceof Error ? err.message : String(err),
+          }) }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Prompt-preview tools — back the UI's ✦ Auto-fill button.
+  //
+  // These mirror the template assembly inside generate_anchor /
+  // generate_isometric_reference / generate_setup_images without calling
+  // FAL.ai. They're read-only, tolerant of draft-state bibles (the user may
+  // want to preview before approving), and return the same text the
+  // corresponding generator would send as its base prompt.
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** Load a bible by URI or bare id without enforcing approval — for preview. */
+  async function loadBibleForPreview(bible_uri: string): Promise<{
+    bible: Record<string, unknown>;
+    bibleId: string;
+    approved: boolean;
+  }> {
+    const bibleId = bible_uri.includes("/") ? (bible_uri.split("/").pop() ?? "") : bible_uri;
+    const bible = await loadArtifact<Record<string, unknown>>("bible", bibleId);
+    if (!bible) {
+      throw flError(FL_ERRORS.MISSING_DEPENDENCY, `Location Bible not found: ${bible_uri}`, {
+        retryable: false,
+        suggestion: "Create the Bible with write_bible before previewing prompts.",
+      });
+    }
+    return { bible, bibleId, approved: bible.approval_status === "approved" };
+  }
+
+  server.tool(
+    "assemble_anchor_prompt",
+    "Preview the anchor prompt that would be sent to FAL.ai without generating. Reads the anchor template and Bible vars, returns the filled text and source list. Used by the UI's ✦ Auto-fill button. Tolerant of draft bibles (returns the preview plus `approved: false` so the UI can warn).",
+    {
+      bible_uri: z.string().describe("MCP resource URI or bare id of the Location Bible"),
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    async ({ bible_uri }) => {
+      try {
+        const { bible, bibleId, approved } = await loadBibleForPreview(bible_uri);
+        const prompt = fillTemplate(PROMPT_ANCHOR_TEMPLATE, buildAnchorPromptVars(bible)).slice(0, 2000);
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              prompt,
+              approved,
+              bible_id: bibleId,
+              sources: ["Location Bible.space_description"],
+            }),
+          }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({
+            error: "assemble_anchor_prompt_failed",
+            message: err instanceof Error ? err.message : String(err),
+          }) }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    "assemble_isometric_prompt",
+    "Preview the isometric reference prompt without generating. Mirrors generate_isometric_reference's template assembly. Used by the UI's ✦ Auto-fill button on the Isometric card.",
+    {
+      bible_uri: z.string().describe("MCP resource URI or bare id of the Location Bible"),
+      floorplan_uri: z.string().optional().describe("Optional floorplan URI — only used to derive a fallback location_name when the Bible passport is missing it"),
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    async ({ bible_uri, floorplan_uri }) => {
+      try {
+        const { bible, bibleId, approved } = await loadBibleForPreview(bible_uri);
+        const fallbackLocationName = floorplan_uri
+          ? (floorplan_uri.includes("/") ? (floorplan_uri.split("/").pop() ?? "") : floorplan_uri)
+          : bibleId;
+        const prompt = fillTemplate(
+          PROMPT_ISOMETRIC_TEMPLATE,
+          buildIsometricPromptVars(bible, fallbackLocationName),
+        ).slice(0, 2000);
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              prompt,
+              approved,
+              bible_id: bibleId,
+              sources: ["Location Bible.passport", "Location Bible.space_description"],
+            }),
+          }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({
+            error: "assemble_isometric_prompt_failed",
+            message: err instanceof Error ? err.message : String(err),
+          }) }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    "assemble_setup_prompt",
+    "Preview a per-setup camera prompt without generating. Mirrors generate_setup_images's template assembly for a single setup. Used by the UI's ✦ Auto-fill button on each setup detail card.",
+    {
+      bible_uri: z.string().describe("MCP resource URI or bare id of the Location Bible"),
+      setup: z.object({
+        id: z.string(),
+        scene: z.string(),
+        mood: z.string(),
+        camera: z.string().optional(),
+      }).describe("Setup tile — same shape the UI passes to generate_setup_images"),
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    async ({ bible_uri, setup }) => {
+      try {
+        const { bible, bibleId, approved } = await loadBibleForPreview(bible_uri);
+        const prompt = fillTemplate(
+          PROMPT_SETUP_TEMPLATE,
+          buildSetupPromptVars(bible, setup),
+        ).slice(0, 2000);
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              prompt,
+              approved,
+              bible_id: bibleId,
+              setup_id: setup.id,
+              sources: [`setup ${setup.id}`, "Location Bible.space_description"],
+            }),
+          }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({
+            error: "assemble_setup_prompt_failed",
             message: err instanceof Error ? err.message : String(err),
           }) }],
           isError: true,

@@ -6,6 +6,7 @@ import { VERSION } from "./lib/version.js";
 
 import { registerCommonTools } from "./tools/common.js";
 import { registerLocationTools } from "./tools/location.js";
+import { registerReferenceTools } from "./tools/references.js";
 import { registerResources } from "./resources/location.js";
 import { mountSwagger } from "./swagger.js";
 
@@ -23,6 +24,7 @@ function createServer(): McpServer {
   });
   registerCommonTools(server);
   registerLocationTools(server);
+  registerReferenceTools(server);
   registerResources(server);
   return server;
 }

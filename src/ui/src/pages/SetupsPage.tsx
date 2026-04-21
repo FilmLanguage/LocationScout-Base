@@ -11,13 +11,15 @@
  * prompt used for the selected setup from get_setup_prompt.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { callTool, pollTask, type TaskStatus } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
 import type { SetupTile } from "../state/pipeline";
 import { PromptCard } from "../components/PromptCard";
+import { ReferencePicker, type ReferenceRef } from "../components/ReferencePicker";
 import { useGallery } from "../hooks/useGallery";
+import { useAssemblePrompt } from "../hooks/useAssemblePrompt";
 
 const LOCATION_ID = "loc_001";
 const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
@@ -63,6 +65,50 @@ export function SetupsPage() {
   const setupGallery = useGallery("setup", selectedSetupId.replace(/\//g, "_"));
   const [setupPrompt, setSetupPrompt] = useState("");
   const [setupSelectedVersionId, setSetupSelectedVersionId] = useState<string | null>(null);
+
+  // Per-setup record of what ✦ Auto-fill last populated the textarea with,
+  // so we only show a confirm dialog when the user has actually edited the
+  // text since the last auto-fill for that specific setup.
+  const [setupAutoFillBase, setSetupAutoFillBase] = useState<Record<string, string>>({});
+  // Per-setup extra reference images (beyond the default anchor chain ref).
+  const [setupRefs, setSetupRefs] = useState<Record<string, ReferenceRef[]>>({});
+  const assemble = useAssemblePrompt();
+
+  // ─── Edit mode (see updates/edit-mode-contract.md) ───
+  const [setupEditMode, setSetupEditMode] = useState<Record<string, boolean>>({});
+  const [setupEditBaseId, setSetupEditBaseId] = useState<Record<string, string | null>>({});
+  const [setupSavedPrompt, setSetupSavedPrompt] = useState<Record<string, string>>({});
+  const setupCardRef = useRef<HTMLDivElement | null>(null);
+
+  const enterSetupEdit = (id: string, imageId: string | null) => {
+    setSetupSavedPrompt((prev) => ({ ...prev, [id]: setupPrompt }));
+    setSetupPrompt("");
+    setSetupEditBaseId((prev) => ({ ...prev, [id]: imageId }));
+    setSetupEditMode((prev) => ({ ...prev, [id]: true }));
+  };
+  const toggleSetupEdit = () => {
+    if (!selected) return;
+    const id = selected.id;
+    const on = setupEditMode[id] === true;
+    if (!on) {
+      const baseId = setupSelectedVersionId ?? setupGallery.versions[0]?.image_id ?? null;
+      enterSetupEdit(id, baseId);
+    } else {
+      setSetupPrompt(setupSavedPrompt[id] ?? "");
+      setSetupSavedPrompt((prev) => {
+        const n = { ...prev };
+        delete n[id];
+        return n;
+      });
+      setSetupEditBaseId((prev) => ({ ...prev, [id]: null }));
+      setSetupEditMode((prev) => ({ ...prev, [id]: false }));
+    }
+  };
+  const handleSetupEditFromVersion = (imageId: string) => {
+    if (!selected) return;
+    enterSetupEdit(selected.id, imageId);
+    setupCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
 
   // When the selected tile changes or its gallery loads, pre-fill the textarea
   // from the latest sidecar and reset the version selector to newest.
@@ -221,11 +267,25 @@ export function SetupsPage() {
     if (!tile) return;
     setRegenerating((prev) => new Set(prev).add(selected.id));
     try {
+      const editing = setupEditMode[tile.id] === true;
       const override = setupPrompt.trim();
+      const refs = setupRefs[tile.id];
+      const baseId = setupEditBaseId[tile.id] ?? null;
       const result = await callTool<{ task_id: string }>("generate_setup_images", {
         bible_uri: BIBLE_URI,
         setups: [tile],
         ...(override ? { prompt_overrides: { [tile.id]: override } } : {}),
+        ...(refs && refs.length > 0 && !editing ? { reference_images: { [tile.id]: refs } } : {}),
+        ...(editing
+          ? {
+              edit_mode: {
+                [tile.id]: {
+                  enabled: true,
+                  ...(baseId ? { base_image_id: baseId } : {}),
+                },
+              },
+            }
+          : {}),
       });
       const taskId = result.data?.task_id;
       if (!taskId) throw new Error("no task_id");
@@ -234,8 +294,14 @@ export function SetupsPage() {
         throw new Error(final.error || "Regeneration failed");
       }
       setTileCacheBust((prev) => ({ ...prev, [selected.id]: Date.now() }));
-      await setupGallery.refresh();
+      const refreshed = await setupGallery.refresh();
       setSetupSelectedVersionId(null);
+      if (editing) {
+        // Chain edits: clear the textarea and re-point the base to the new newest.
+        setSetupPrompt("");
+        const newest = refreshed[0]?.image_id ?? null;
+        if (newest) setSetupEditBaseId((prev) => ({ ...prev, [tile.id]: newest }));
+      }
     } catch (err) {
       console.error("[regenerate] failed:", err);
     } finally {
@@ -244,6 +310,28 @@ export function SetupsPage() {
         next.delete(selected.id);
         return next;
       });
+    }
+  };
+
+  const handleSetupAutoFill = async () => {
+    if (!selected) return;
+    const tile = setupsArg.find((s) => s.id === selected.id);
+    if (!tile) return;
+    const baseline = setupAutoFillBase[selected.id];
+    const hasUnsavedEdits =
+      setupPrompt.trim().length > 0 &&
+      baseline !== undefined &&
+      setupPrompt !== baseline;
+    if (hasUnsavedEdits) {
+      const ok = window.confirm(
+        "Overwrite your edits with auto-filled text from the Location Bible?",
+      );
+      if (!ok) return;
+    }
+    const result = await assemble.assembleSetup(BIBLE_URI, tile);
+    if (result) {
+      setSetupPrompt(result.prompt);
+      setSetupAutoFillBase((prev) => ({ ...prev, [selected.id]: result.prompt }));
     }
   };
 
@@ -382,7 +470,7 @@ export function SetupsPage() {
         </div>
 
         {/* ───── Setup Detail ───── */}
-        <div className="input-page__column">
+        <div className="input-page__column" ref={setupCardRef}>
           <div className="section-header">
             <span className="section-header__title" style={{ color: "var(--accent)" }}>
               Setup Detail: {selected.id}
@@ -408,6 +496,7 @@ export function SetupsPage() {
                 label={`Setup ${selected.id}`}
                 kind="setup"
                 entityId={selected.id.replace(/\//g, "_")}
+                collapsible
                 versions={setupGallery.versions}
                 selectedVersionId={setupSelectedVersionId}
                 onSelectVersion={setSetupSelectedVersionId}
@@ -415,8 +504,30 @@ export function SetupsPage() {
                 promptUsed={setupGallery.versions[0]?.prompt ?? null}
                 onChange={setSetupPrompt}
                 onRegenerate={handleRegenerateSelected}
+                onAutoFill={handleSetupAutoFill}
+                autoFillBusy={assemble.busy}
                 busy={regenerating.has(selected.id) || isBatchBusy}
                 cacheBust={tileCacheBust[selected.id]}
+                editMode={setupEditMode[selected.id] === true}
+                onToggleEditMode={toggleSetupEdit}
+                editBaseId={setupEditBaseId[selected.id] ?? null}
+                onEditFromVersion={handleSetupEditFromVersion}
+              />
+              <ReferencePicker
+                entity_id={selected.id.replace(/\//g, "_")}
+                value={setupRefs[selected.id] ?? []}
+                onChange={(next) =>
+                  setSetupRefs((prev) => ({ ...prev, [selected.id]: next }))
+                }
+                lockedAutoRefs={[
+                  {
+                    parentLabel: "anchor",
+                    imageUrl: `/artifacts/anchor/${LOCATION_ID}.png`,
+                    kind: "anchor",
+                  },
+                ]}
+                label={`Refs for ${selected.id}`}
+                disabled={regenerating.has(selected.id) || isBatchBusy}
               />
               <button type="button" className="btn btn--ghost btn--block" onClick={handleCompare}>
                 ⇄ Compare with Anchor

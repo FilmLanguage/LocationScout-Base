@@ -165,6 +165,7 @@ export interface SidecarEntry {
   source_tool: string;
   source_task_id?: string;
   references?: string[];
+  parent_version_id?: string;
 }
 
 export interface SaveImageOptions {
@@ -182,6 +183,8 @@ export interface SaveImageOptions {
   seed?: number;
   source_task_id?: string;
   references?: string[];
+  /** image_id of the version this was derived from (edit mode). */
+  parent_version_id?: string;
 }
 
 export interface SaveImageResult {
@@ -256,6 +259,7 @@ export async function saveImage(
     ...(local_path ? { local_path } : {}),
     ...(opts.source_task_id ? { source_task_id: opts.source_task_id } : {}),
     ...(opts.references ? { references: opts.references } : {}),
+    ...(opts.parent_version_id ? { parent_version_id: opts.parent_version_id } : {}),
   };
 
   const sidecarJson = JSON.stringify(sidecar, null, 2);

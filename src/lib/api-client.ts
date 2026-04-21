@@ -101,6 +101,8 @@ interface ImageGenParams {
   model?: string;
   /** Reference image URLs (for edit / img2img models like nano-banana/edit) */
   image_urls?: string[];
+  /** Strength with which the reference image biases the generation (0..1). Used by edit mode to force preservation. */
+  image_ref_strength?: number;
 }
 
 interface ImageGenResult {
@@ -139,6 +141,9 @@ export async function generateImage(params: ImageGenParams): Promise<ImageGenRes
     // send the field anyway — FAL accepts both.
     if (params.image_urls && params.image_urls.length > 0) {
       body.image_urls = params.image_urls;
+    }
+    if (params.image_ref_strength != null) {
+      body.image_ref_strength = params.image_ref_strength;
     }
   } else {
     body.image_size = {

@@ -11,12 +11,14 @@
  * after floorplan is ready.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { callTool, pollTask, type TaskStatus } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
 import { PromptCard } from "../components/PromptCard";
+import { ReferencePicker, type ReferenceRef } from "../components/ReferencePicker";
 import { useGallery } from "../hooks/useGallery";
+import { useAssemblePrompt } from "../hooks/useAssemblePrompt";
 
 const LOCATION_ID = "loc_001";
 const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
@@ -51,11 +53,116 @@ export function ReferencesPage() {
   const [isometricPrompt, setIsometricPrompt] = useState("");
   const [anchorPrompt, setAnchorPrompt] = useState("");
 
+  // Remember the text we last dropped in via ✦ Auto-fill so we can detect
+  // "user edited since last auto-fill" and show a confirm before clobbering.
+  const [anchorAutoFillBase, setAnchorAutoFillBase] = useState<string | null>(null);
+  const [isometricAutoFillBase, setIsometricAutoFillBase] = useState<string | null>(null);
+
+  const assemble = useAssemblePrompt();
+
+  const handleAnchorAutoFill = async () => {
+    const hasUnsavedEdits =
+      anchorPrompt.trim().length > 0 &&
+      anchorAutoFillBase !== null &&
+      anchorPrompt !== anchorAutoFillBase;
+    if (hasUnsavedEdits) {
+      const ok = window.confirm(
+        "Overwrite your edits with auto-filled text from the Location Bible?",
+      );
+      if (!ok) return;
+    }
+    const result = await assemble.assembleAnchor(BIBLE_URI);
+    if (result) {
+      setAnchorPrompt(result.prompt);
+      setAnchorAutoFillBase(result.prompt);
+    }
+  };
+
+  const handleIsometricAutoFill = async () => {
+    const hasUnsavedEdits =
+      isometricPrompt.trim().length > 0 &&
+      isometricAutoFillBase !== null &&
+      isometricPrompt !== isometricAutoFillBase;
+    if (hasUnsavedEdits) {
+      const ok = window.confirm(
+        "Overwrite your edits with auto-filled text from the Location Bible?",
+      );
+      if (!ok) return;
+    }
+    const result = await assemble.assembleIsometric(
+      BIBLE_URI,
+      `agent://location-scout/floorplan/${LOCATION_ID}`,
+    );
+    if (result) {
+      setIsometricPrompt(result.prompt);
+      setIsometricAutoFillBase(result.prompt);
+    }
+  };
+
   // Gallery state (prior versions) for each kind.
   const anchorGallery = useGallery("anchor", LOCATION_ID);
   const isometricGallery = useGallery("isometric", LOCATION_ID);
   const [anchorSelectedId, setAnchorSelectedId] = useState<string | null>(null);
   const [isometricSelectedId, setIsometricSelectedId] = useState<string | null>(null);
+
+  // Reference picker state — extra refs attached by the user on top of the
+  // default img2img cascade (floorplan→isometric→anchor).
+  const [anchorRefs, setAnchorRefs] = useState<ReferenceRef[]>([]);
+  const [isometricRefs, setIsometricRefs] = useState<ReferenceRef[]>([]);
+
+  // ─── Edit mode state (see updates/edit-mode-contract.md) ───
+  const [anchorEditMode, setAnchorEditMode] = useState(false);
+  const [anchorEditBaseId, setAnchorEditBaseId] = useState<string | null>(null);
+  const [anchorSavedPrompt, setAnchorSavedPrompt] = useState("");
+  const [isometricEditMode, setIsometricEditMode] = useState(false);
+  const [isometricEditBaseId, setIsometricEditBaseId] = useState<string | null>(null);
+  const [isometricSavedPrompt, setIsometricSavedPrompt] = useState("");
+  const anchorCardRef = useRef<HTMLDivElement | null>(null);
+  const isometricCardRef = useRef<HTMLDivElement | null>(null);
+
+  const enterAnchorEdit = (imageId: string | null) => {
+    setAnchorSavedPrompt(anchorPrompt);
+    setAnchorPrompt("");
+    setAnchorEditBaseId(imageId);
+    setAnchorEditMode(true);
+  };
+  const toggleAnchorEdit = () => {
+    if (!anchorEditMode) {
+      const baseId = anchorSelectedId ?? anchorGallery.versions[0]?.image_id ?? null;
+      enterAnchorEdit(baseId);
+    } else {
+      setAnchorPrompt(anchorSavedPrompt);
+      setAnchorSavedPrompt("");
+      setAnchorEditBaseId(null);
+      setAnchorEditMode(false);
+    }
+  };
+  const handleAnchorEditFromVersion = (imageId: string) => {
+    enterAnchorEdit(imageId);
+    anchorCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
+  const enterIsometricEdit = (imageId: string | null) => {
+    setIsometricSavedPrompt(isometricPrompt);
+    setIsometricPrompt("");
+    setIsometricEditBaseId(imageId);
+    setIsometricEditMode(true);
+  };
+  const toggleIsometricEdit = () => {
+    if (!isometricEditMode) {
+      const baseId = isometricSelectedId ?? isometricGallery.versions[0]?.image_id ?? null;
+      enterIsometricEdit(baseId);
+    } else {
+      setIsometricPrompt(isometricSavedPrompt);
+      setIsometricSavedPrompt("");
+      setIsometricEditBaseId(null);
+      setIsometricEditMode(false);
+    }
+  };
+  const handleIsometricEditFromVersion = (imageId: string) => {
+    enterIsometricEdit(imageId);
+    isometricCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
 
   // Pre-fill textareas from the newest sidecar once a gallery loads, but only
   // when the user hasn't started typing (don't clobber their edits).
@@ -108,6 +215,15 @@ export function ReferencesPage() {
         bible_uri: BIBLE_URI,
         generation_params: { aspect_ratio: "16:9", quality: "high" },
         ...(promptOverride?.trim() ? { prompt_override: promptOverride.trim() } : {}),
+        ...(anchorRefs.length > 0 && !anchorEditMode ? { reference_images: anchorRefs } : {}),
+        ...(anchorEditMode
+          ? {
+              edit_mode: {
+                enabled: true,
+                ...(anchorEditBaseId ? { base_image_id: anchorEditBaseId } : {}),
+              },
+            }
+          : {}),
       });
       const taskId = result.data?.task_id;
       if (!taskId) {
@@ -136,8 +252,15 @@ export function ReferencesPage() {
       }
       setAnchor({ kind: "ready", cacheBust: Date.now() });
       // Pull the new sidecar into the gallery and auto-select it as newest.
-      await anchorGallery.refresh();
+      const refreshed = await anchorGallery.refresh();
       setAnchorSelectedId(null);
+      // After a successful edit: clear the textarea and re-point the base to
+      // the freshly-generated version so chained edits (v1 → v2 → v3) work.
+      if (anchorEditMode) {
+        setAnchorPrompt("");
+        const newest = refreshed[0]?.image_id ?? null;
+        if (newest) setAnchorEditBaseId(newest);
+      }
     } catch (err) {
       setAnchor({ kind: "error", message: err instanceof Error ? err.message : String(err) });
     }
@@ -205,6 +328,15 @@ export function ReferencesPage() {
         floorplan_uri: `agent://location-scout/floorplan/${LOCATION_ID}`,
         bible_uri: BIBLE_URI,
         ...(promptOverride?.trim() ? { prompt_override: promptOverride.trim() } : {}),
+        ...(isometricRefs.length > 0 && !isometricEditMode ? { reference_images: isometricRefs } : {}),
+        ...(isometricEditMode
+          ? {
+              edit_mode: {
+                enabled: true,
+                ...(isometricEditBaseId ? { base_image_id: isometricEditBaseId } : {}),
+              },
+            }
+          : {}),
       });
       const taskId = result.data?.task_id;
       if (!taskId) { setIsometric({ kind: "error", message: "generate_isometric returned no task_id" }); return; }
@@ -213,8 +345,13 @@ export function ReferencesPage() {
       if ((final as any).prompt_used) setIsometricPrompt((final as any).prompt_used);
       const exists = await checkExists(ISOMETRIC_IMG_PATH);
       setIsometric(exists ? { kind: "ready", cacheBust: Date.now() } : { kind: "error", message: "Isometric generated but not reachable" });
-      await isometricGallery.refresh();
+      const refreshed = await isometricGallery.refresh();
       setIsometricSelectedId(null);
+      if (isometricEditMode) {
+        setIsometricPrompt("");
+        const newest = refreshed[0]?.image_id ?? null;
+        if (newest) setIsometricEditBaseId(newest);
+      }
     } catch (err) { setIsometric({ kind: "error", message: err instanceof Error ? err.message : String(err) }); }
   };
 
@@ -385,7 +522,7 @@ export function ReferencesPage() {
           </article>
         </div>
 
-        <div className="input-page__column">
+        <div className="input-page__column" ref={isometricCardRef}>
           <div className="section-header">
             <span className="section-header__title">Isometric Reference</span>
             <span className="tech-badge tech-badge--gold">NANOBANANA</span>
@@ -401,6 +538,7 @@ export function ReferencesPage() {
                 label="Isometric"
                 kind="isometric"
                 entityId={LOCATION_ID}
+                collapsible
                 versions={isometricGallery.versions}
                 selectedVersionId={isometricSelectedId}
                 onSelectVersion={setIsometricSelectedId}
@@ -408,9 +546,15 @@ export function ReferencesPage() {
                 promptUsed={isometricPromptUsed}
                 onChange={setIsometricPrompt}
                 onRegenerate={() => runIsometric(isometricPrompt || undefined)}
+                onAutoFill={handleIsometricAutoFill}
+                autoFillBusy={assemble.busy}
                 busy={isometric.kind === "generating"}
                 disabled={floorplan.kind !== "ready"}
                 cacheBust={isometric.kind === "ready" ? isometric.cacheBust : undefined}
+                editMode={isometricEditMode}
+                onToggleEditMode={toggleIsometricEdit}
+                editBaseId={isometricEditBaseId}
+                onEditFromVersion={handleIsometricEditFromVersion}
                 statusLine={
                   isometric.kind === "generating"
                     ? `Generating isometric… ${isometric.status?.current_step ?? ""}`
@@ -420,6 +564,25 @@ export function ReferencesPage() {
                     ? "Checking…"
                     : "Waiting for floorplan…"
                 }
+              />
+              <ReferencePicker
+                entity_id={LOCATION_ID}
+                value={isometricRefs}
+                onChange={setIsometricRefs}
+                lockedAutoRefs={
+                  floorplan.kind === "ready"
+                    ? [
+                        {
+                          parentLabel: "floorplan",
+                          imageUrl: `${FLOORPLAN_IMG_PATH}?v=${floorplan.cacheBust}`,
+                          kind: "external",
+                        },
+                      ]
+                    : undefined
+                }
+                autoCascadeHint={floorplan.kind !== "ready" ? ["floorplan (auto)"] : undefined}
+                label="Refs for isometric"
+                disabled={isometric.kind === "generating"}
               />
             </div>
           </article>
@@ -452,7 +615,7 @@ export function ReferencesPage() {
           </article>
         </div>
 
-        <div className="input-page__column">
+        <div className="input-page__column" ref={anchorCardRef}>
           <div className="section-header">
             <span className="section-header__title">Anchor Image</span>
             <span className="tech-badge tech-badge--gold">NANOBANANA</span>
@@ -464,6 +627,7 @@ export function ReferencesPage() {
                 label="Anchor"
                 kind="anchor"
                 entityId={LOCATION_ID}
+                collapsible
                 versions={anchorGallery.versions}
                 selectedVersionId={anchorSelectedId}
                 onSelectVersion={setAnchorSelectedId}
@@ -471,9 +635,34 @@ export function ReferencesPage() {
                 promptUsed={anchorPromptUsed}
                 onChange={setAnchorPrompt}
                 onRegenerate={handleRegenerateAnchor}
+                onAutoFill={handleAnchorAutoFill}
+                autoFillBusy={assemble.busy}
                 busy={anchor.kind === "generating" || anchor.kind === "checking"}
                 disabled={isometric.kind !== "ready"}
                 cacheBust={anchor.kind === "ready" ? anchor.cacheBust : undefined}
+                editMode={anchorEditMode}
+                onToggleEditMode={toggleAnchorEdit}
+                editBaseId={anchorEditBaseId}
+                onEditFromVersion={handleAnchorEditFromVersion}
+              />
+              <ReferencePicker
+                entity_id={LOCATION_ID}
+                value={anchorRefs}
+                onChange={setAnchorRefs}
+                lockedAutoRefs={
+                  isometric.kind === "ready"
+                    ? [
+                        {
+                          parentLabel: "isometric",
+                          imageUrl: `${ISOMETRIC_IMG_PATH}?v=${isometric.cacheBust}`,
+                          kind: "isometric",
+                        },
+                      ]
+                    : undefined
+                }
+                autoCascadeHint={isometric.kind !== "ready" ? ["isometric (auto)"] : undefined}
+                label="Refs for anchor"
+                disabled={anchor.kind === "generating" || anchor.kind === "checking"}
               />
               <span className="section-label">VLM Audit</span>
               <div className="score-group">

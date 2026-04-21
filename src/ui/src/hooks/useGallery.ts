@@ -29,13 +29,16 @@ export function useGallery(kind: string, entityId: string) {
   const [versions, setVersions] = useState<GalleryVersion[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<GalleryVersion[]> => {
     setLoading(true);
     try {
       const { data } = await callTool<ListVersionsResult>("list_versions", { kind, entity_id: entityId });
-      setVersions(data?.versions ?? []);
+      const next = data?.versions ?? [];
+      setVersions(next);
+      return next;
     } catch (err) {
       console.warn(`[useGallery ${kind}/${entityId}] failed:`, err);
+      return [];
     } finally {
       setLoading(false);
     }

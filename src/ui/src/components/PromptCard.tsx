@@ -9,7 +9,7 @@
  * prompt.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 export interface GalleryVersion {
   image_id: string;
@@ -39,6 +39,31 @@ export interface PromptCardProps {
   entityId: string;
   /** Status line shown under the preview (progress, error, idle hint). */
   statusLine?: string;
+  /**
+   * ✦ Auto-fill — when provided, a button appears next to the textarea that
+   * asks the backend to preview the prompt it would send (via
+   * `assemble_*_prompt` MCP tools) and overwrites the textarea with it.
+   * The page owns the confirm-before-clobber logic so it can track "did the
+   * user edit since the last auto-fill?" across Regenerate calls.
+   */
+  onAutoFill?: () => void;
+  /** Disables the ✦ Auto-fill button while its preview tool is in flight. */
+  autoFillBusy?: boolean;
+
+  // ─── Edit mode (see updates/edit-mode-contract.md) ───
+  /** When true, textarea becomes "what to change" and Regenerate sends edit_mode to the backend. */
+  editMode?: boolean;
+  /** Toggle handler: page owns the prompt save/restore and base-image resolution. */
+  onToggleEditMode?: () => void;
+  /** image_id of the version currently serving as the edit base (shown in the label). */
+  editBaseId?: string | null;
+  /** Called when user clicks the per-version ✎ Edit button — seeds edit mode with that specific version. */
+  onEditFromVersion?: (imageId: string) => void;
+
+  /** Render with a collapsible "▼ PROMPT" header row (Figma PromptCard/v2). */
+  collapsible?: boolean;
+  /** Initial collapsed state when `collapsible`; defaults to `false` (open). */
+  defaultCollapsed?: boolean;
 }
 
 function formatTs(iso: string): string {
@@ -72,7 +97,17 @@ export function PromptCard(props: PromptCardProps) {
     kind,
     entityId,
     statusLine,
+    onAutoFill,
+    autoFillBusy,
+    editMode = false,
+    onToggleEditMode,
+    editBaseId,
+    onEditFromVersion,
+    collapsible = false,
+    defaultCollapsed = false,
   } = props;
+
+  const [collapsed, setCollapsed] = useState<boolean>(collapsible && defaultCollapsed);
 
   const selected = useMemo(
     () => versions.find((v) => v.image_id === selectedVersionId) ?? versions[0] ?? null,
@@ -100,6 +135,76 @@ export function PromptCard(props: PromptCardProps) {
       style={{ display: "flex", flexDirection: "column", gap: "var(--s-2)" }}
       data-prompt-card={label}
     >
+      {/* Collapsible header row (Figma PromptCard/v2 — collapsed state) */}
+      {collapsible && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            height: 32,
+            fontSize: 11,
+            color: "var(--text-muted)",
+          }}
+          data-prompt-card-header
+        >
+          <button
+            type="button"
+            onClick={() => setCollapsed((c) => !c)}
+            aria-expanded={!collapsed}
+            aria-controls={`prompt-card-body-${label}`}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--text)",
+              cursor: "pointer",
+              padding: 0,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 11,
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+            }}
+            data-prompt-card-toggle={label}
+          >
+            <span aria-hidden style={{ display: "inline-block", width: 10 }}>
+              {collapsed ? "▶" : "▼"}
+            </span>
+            <span>Prompt</span>
+          </button>
+          {onToggleEditMode && (
+            <label
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                marginLeft: 8,
+                cursor: busy ? "not-allowed" : "pointer",
+              }}
+              data-edit-mode-toggle-compact={label}
+            >
+              <input
+                type="checkbox"
+                checked={editMode}
+                onChange={onToggleEditMode}
+                disabled={busy || disabled}
+                style={{ margin: 0 }}
+              />
+              <span>Edit mode{editMode && editBaseId ? ` · ${editBaseId.slice(0, 8)}` : ""}</span>
+            </label>
+          )}
+          <span style={{ flex: 1 }} />
+          {collapsed && versions.length > 0 && (
+            <span style={{ opacity: 0.7 }}>
+              {versions.length} version{versions.length === 1 ? "" : "s"}
+            </span>
+          )}
+        </div>
+      )}
+
+      {collapsible && collapsed ? null : (
+      <div id={`prompt-card-body-${label}`} style={{ display: "flex", flexDirection: "column", gap: "var(--s-2)" }}>
       {/* Version dropdown */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
@@ -128,6 +233,19 @@ export function PromptCard(props: PromptCardProps) {
               </option>
             ))}
           </select>
+        )}
+        {onEditFromVersion && selected && (
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            onClick={() => onEditFromVersion(selected.image_id)}
+            disabled={busy}
+            title="Edit this version — enter edit mode with the selected version as base"
+            style={{ fontSize: 11, padding: "2px 6px" }}
+            data-edit-from-version={label}
+          >
+            ✎ Edit
+          </button>
         )}
       </div>
 
@@ -181,15 +299,70 @@ export function PromptCard(props: PromptCardProps) {
         </div>
       )}
 
+      {/* Edit mode checkbox (hidden when collapsible — header carries the compact checkbox) */}
+      {onToggleEditMode && !collapsible && (
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 11,
+            color: "var(--text-muted)",
+            cursor: busy ? "not-allowed" : "pointer",
+          }}
+          data-edit-mode-toggle={label}
+        >
+          <input
+            type="checkbox"
+            checked={editMode}
+            onChange={onToggleEditMode}
+            disabled={busy || disabled}
+            style={{ margin: 0 }}
+          />
+          <span>
+            Edit mode
+            {editMode && editBaseId && (
+              <span style={{ opacity: 0.7 }}> — from {editBaseId.slice(0, 8)}</span>
+            )}
+          </span>
+        </label>
+      )}
+
       {/* Prompt textarea */}
       <div>
-        <label style={{ display: "block", fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
-          Generation prompt
-        </label>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 4,
+          }}
+        >
+          <label style={{ fontSize: 11, color: "var(--text-muted)" }}>
+            {editMode ? "What to change" : "Generation prompt"}
+          </label>
+          {onAutoFill && !editMode && (
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={onAutoFill}
+              disabled={autoFillBusy || busy}
+              style={{ fontSize: 11, padding: "2px 8px" }}
+              title="Preview the prompt that would be sent to FAL.ai, filled from the Location Bible"
+              data-auto-fill={label}
+            >
+              {autoFillBusy ? "…" : "✦ Auto-fill from Bibles"}
+            </button>
+          )}
+        </div>
         <textarea
           value={prompt}
           onChange={(e) => onChange(e.target.value)}
-          placeholder={templateHint ?? "Auto-filled after first generation — edit to customise next run"}
+          placeholder={
+            editMode
+              ? "Опишите что изменить… e.g. add golden-hour sunset through window"
+              : templateHint ?? "Auto-filled after first generation — edit to customise next run"
+          }
           rows={3}
           disabled={busy || disabled}
           style={{
@@ -213,12 +386,20 @@ export function PromptCard(props: PromptCardProps) {
           type="button"
           className="btn btn--ghost btn--sm"
           onClick={onRegenerate}
-          disabled={busy || disabled}
-          title={disabled ? "Disabled — gate not met" : undefined}
+          disabled={busy || disabled || (editMode && prompt.trim().length === 0)}
+          title={
+            disabled
+              ? "Disabled — gate not met"
+              : editMode && prompt.trim().length === 0
+              ? "Describe what to change"
+              : undefined
+          }
         >
-          {busy ? "Generating…" : "Regenerate"}
+          {busy ? "Generating…" : editMode ? "Generate Edit" : "Regenerate"}
         </button>
       </div>
+      </div>
+      )}
     </div>
   );
 }
