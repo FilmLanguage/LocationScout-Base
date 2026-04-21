@@ -17,7 +17,7 @@ import { copyFileSync, existsSync } from "node:fs";
 import { promises as fs } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { readFileSync } from "node:fs";
-import { S3_BUCKET, s3Upload, s3Download, s3Exists } from "./api-client.js";
+import { S3_BUCKET, s3Upload, s3Download, s3Exists, s3List } from "./api-client.js";
 import { mirrorArtifactToDb } from "./db.js";
 
 const AGENT_NAME = "location-scout";
@@ -95,8 +95,15 @@ export async function saveArtifact(type: string, id: string, data: unknown): Pro
     console.warn(`[storage] v2 mirror failed for ${type}/${id}: ${err?.message ?? err}`);
   });
 
+  // Best-effort S3 dual-write. On Cloud Run local fs dies after idle (~15 min),
+  // so S3 is the only thing that survives cold starts. Failures here are logged
+  // but never fail the save — local + memory are still valid within the request.
   if (S3_BUCKET) {
-    return s3Upload(path, json, "application/json");
+    try {
+      return await s3Upload(path, json, "application/json");
+    } catch (err) {
+      console.warn(`[storage] S3 upload failed for ${path}: ${(err as Error)?.message ?? err}`);
+    }
   }
 
   return `mem://${path}`;
@@ -236,10 +243,24 @@ export async function saveImage(
   memoryStore.set(latestKey, { data: data.toString("base64"), contentType });
 
   const local_path = await writeLocal(imagePath, data);
+  // Mirror the "latest alias" locally too so /artifacts/{kind}/{entity_id}.png
+  // keeps working even after the memoryStore is flushed (process restart).
+  await writeLocal(latestKey, data);
 
+  // Best-effort S3 dual-write (versioned image + latest alias). Cloud Run local
+  // fs dies after ~15 min idle, so cold-start reads must hit S3 to succeed.
   let s3_path: string | null = null;
   if (S3_BUCKET) {
-    s3_path = await s3Upload(imagePath, data, contentType);
+    try {
+      s3_path = await s3Upload(imagePath, data, contentType);
+    } catch (err) {
+      console.warn(`[storage] S3 upload failed for ${imagePath}: ${(err as Error)?.message ?? err}`);
+    }
+    try {
+      await s3Upload(latestKey, data, contentType);
+    } catch (err) {
+      console.warn(`[storage] S3 upload failed for ${latestKey}: ${(err as Error)?.message ?? err}`);
+    }
   }
 
   const uri = `agent://${AGENT_NAME}/${kind}/${opts.entity_id}`;
@@ -314,35 +335,71 @@ export async function loadImage(
   const legacy = await readLocal(`${type}/${id}.${ext}`);
   if (legacy) return { data: legacy, contentType };
 
-  // 4. GCS (unversioned legacy key; multi-version listing over S3 not implemented yet)
+  // 4. GCS "latest alias" — written alongside versioned file in saveImage.
+  //    Survives Cloud Run cold starts when local fs has been wiped.
   if (S3_BUCKET) {
     try {
       return await s3Download(`${type}/${id}.${ext}`);
     } catch {
-      return null;
+      /* fall through to versioned scan */
+    }
+
+    // 5. GCS versioned scan — if latest-alias is missing (older data, or upload
+    //    race), list all versioned files for this entity and return the newest.
+    const prefix = `${type}/${id}_`;
+    const keys = (await s3List(prefix)).filter(
+      (k) => k.endsWith(`.${ext}`) && !k.endsWith(".json"),
+    );
+    if (keys.length > 0) {
+      // Keys include a ts-safe ISO timestamp between the entity_id and image_id,
+      // so lexicographic sort is chronological — newest last.
+      keys.sort();
+      try {
+        return await s3Download(keys[keys.length - 1]);
+      } catch {
+        return null;
+      }
     }
   }
 
   return null;
 }
 
-/** Load a specific version by its image_id. Local disk only for now. */
+/** Load a specific version by its image_id. Local disk first, then S3 fallback. */
 export async function loadImageVersion(
   kind: string,
   image_id: string,
   ext = "png",
 ): Promise<{ data: Buffer; contentType: string } | null> {
+  const contentType = ext === "png" ? "image/png" : "image/jpeg";
+
   const dir = resolveLocalDir(kind);
-  if (!dir) return null;
-  try {
-    const entries = await fs.readdir(dir);
-    const match = entries.find((f) => f.endsWith(`_${image_id}.${ext}`));
-    if (!match) return null;
-    const data = await fs.readFile(join(dir, match));
-    return { data, contentType: ext === "png" ? "image/png" : "image/jpeg" };
-  } catch {
-    return null;
+  if (dir) {
+    try {
+      const entries = await fs.readdir(dir);
+      const match = entries.find((f) => f.endsWith(`_${image_id}.${ext}`));
+      if (match) {
+        const data = await fs.readFile(join(dir, match));
+        return { data, contentType };
+      }
+    } catch {
+      /* fall through to S3 */
+    }
   }
+
+  // S3 fallback: list versioned files under kind/ and match by image_id suffix.
+  if (S3_BUCKET) {
+    const keys = await s3List(`${kind}/`);
+    const match = keys.find((k) => k.endsWith(`_${image_id}.${ext}`));
+    if (!match) return null;
+    try {
+      return await s3Download(match);
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
 }
 
 async function findNewestVersionPath(kind: string, entity_id: string, ext: string): Promise<string | null> {
@@ -376,6 +433,7 @@ async function findNewestVersionPath(kind: string, entity_id: string, ext: strin
 export async function listVersions(kind: string, entity_id: string): Promise<SidecarEntry[]> {
   const dir = resolveLocalDir(kind);
   const results: SidecarEntry[] = [];
+  const seenImageIds = new Set<string>();
 
   if (dir) {
     let entries: string[] = [];
@@ -393,7 +451,10 @@ export async function listVersions(kind: string, entity_id: string): Promise<Sid
       try {
         const raw = await fs.readFile(join(dir, f), "utf8");
         const parsed = JSON.parse(raw) as SidecarEntry;
-        if (parsed.entity_id === entity_id) results.push(parsed);
+        if (parsed.entity_id === entity_id) {
+          results.push(parsed);
+          seenImageIds.add(parsed.image_id);
+        }
       } catch {
         /* skip malformed */
       }
@@ -423,6 +484,27 @@ export async function listVersions(kind: string, entity_id: string): Promise<Sid
           }
           break;
         }
+      }
+    }
+  }
+
+  // Cloud Run cold-start fallback: if local has nothing (or only a subset),
+  // pick up sidecars from S3 so the UI gallery keeps working across restarts.
+  if (S3_BUCKET) {
+    const prefix = `${kind}/${entity_id}_`;
+    const keys = (await s3List(prefix)).filter(
+      (k) => k.endsWith(".json") && !k.endsWith(".prev.json"),
+    );
+    for (const key of keys) {
+      try {
+        const { data } = await s3Download(key);
+        const parsed = JSON.parse(data.toString("utf8")) as SidecarEntry;
+        if (parsed.entity_id !== entity_id) continue;
+        if (seenImageIds.has(parsed.image_id)) continue;
+        results.push(parsed);
+        seenImageIds.add(parsed.image_id);
+      } catch {
+        /* skip malformed / missing */
       }
     }
   }
@@ -487,11 +569,44 @@ export function deleteTask(task_id: string): boolean {
 
 // ─── List artifacts by type ─────────────────────────────────────────
 
-export function listLocalArtifacts(type: string): string[] {
+/**
+ * List artifact ids of a given type. Reads memory + local disk + S3
+ * (deduped) so the result survives Cloud Run cold starts. Returns base
+ * ids without the `.json` suffix (e.g. `bible_001`, not `bible_001.json`).
+ */
+export async function listLocalArtifacts(type: string): Promise<string[]> {
   const prefix = `${type}/`;
-  return Array.from(memoryStore.keys())
-    .filter((k) => k.startsWith(prefix))
-    .map((k) => k.slice(prefix.length).replace(/\.json$/, ""));
+  const ids = new Set<string>();
+
+  for (const k of memoryStore.keys()) {
+    if (!k.startsWith(prefix)) continue;
+    ids.add(k.slice(prefix.length).replace(/\.json$/, ""));
+  }
+
+  const localDir = resolveLocalDir(type);
+  if (localDir) {
+    try {
+      const entries = await fs.readdir(localDir);
+      for (const f of entries) {
+        if (!f.endsWith(".json") || f.endsWith(".prev.json")) continue;
+        ids.add(f.replace(/\.json$/, ""));
+      }
+    } catch {
+      /* no local dir — fine */
+    }
+  }
+
+  if (S3_BUCKET) {
+    const keys = await s3List(prefix);
+    for (const key of keys) {
+      if (!key.endsWith(".json") || key.endsWith(".prev.json")) continue;
+      const rel = key.slice(prefix.length);
+      if (rel.includes("/")) continue; // direct children only
+      ids.add(rel.replace(/\.json$/, ""));
+    }
+  }
+
+  return Array.from(ids).sort();
 }
 
 // ─── Diff & Staleness helpers ──────────────────────────────────────

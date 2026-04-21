@@ -1522,7 +1522,7 @@ export function registerLocationTools(server: McpServer) {
         const stale: Array<{ artifact: string; source: string }> = [];
 
         // Get all local bible IDs
-        const bibleIds = listLocalArtifacts("bible");
+        const bibleIds = await listLocalArtifacts("bible");
         const sampleBibleId = bibleIds[0]; // use first bible as reference for staleness
 
         if (sampleBibleId) {

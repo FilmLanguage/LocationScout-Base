@@ -38,7 +38,7 @@ describe("artifact CRUD (memory mode, no GCS)", () => {
     const t = `list-test-${Date.now()}`;
     await saveArtifact(t, "a", { n: 1 });
     await saveArtifact(t, "b", { n: 2 });
-    const ids = listLocalArtifacts(t);
+    const ids = await listLocalArtifacts(t);
     expect(ids).toContain("a");
     expect(ids).toContain("b");
     expect(ids.length).toBe(2);

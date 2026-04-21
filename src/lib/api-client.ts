@@ -3,7 +3,7 @@
  * Each agent customizes this for its specific external dependencies.
  */
 
-import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { flError, FL_ERRORS } from "./errors.js";
 
 // ─── Environment ────────────────────────────────────────────────────
@@ -311,4 +311,35 @@ export async function s3Exists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * List all keys under a prefix. Returns full keys (including the prefix).
+ * Returns [] if S3 is not configured or listing fails.
+ */
+export async function s3List(prefix: string): Promise<string[]> {
+  if (!S3_BUCKET) return [];
+
+  const client = getS3Client();
+  const keys: string[] = [];
+  let continuationToken: string | undefined;
+
+  try {
+    do {
+      const resp = await client.send(new ListObjectsV2Command({
+        Bucket: S3_BUCKET,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      }));
+      for (const obj of resp.Contents ?? []) {
+        if (obj.Key) keys.push(obj.Key);
+      }
+      continuationToken = resp.IsTruncated ? resp.NextContinuationToken : undefined;
+    } while (continuationToken);
+  } catch (err) {
+    console.warn(`[api-client] s3List failed for prefix ${prefix}:`, (err as Error)?.message ?? err);
+    return keys;
+  }
+
+  return keys;
 }
