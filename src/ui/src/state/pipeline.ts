@@ -161,6 +161,9 @@ export const INITIAL_STATE: PipelineState = {
     colorPalette: {
       description:
         "Desaturated beiges, sickly yellows, muted earth tones. Oppressive flatness.",
+      // Mock director palette for Walter's living room demo — user-editable
+      // content, not UI styling. Intentionally NOT tokenized; the palette is
+      // the director's creative data that flows into the color-picker swatches.
       swatches: ["#c4a746", "#a89a6b", "#6b5d3a", "#7a7a5e"],
     },
     spatialPhilosophy:

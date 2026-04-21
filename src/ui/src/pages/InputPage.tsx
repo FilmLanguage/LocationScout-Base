@@ -238,6 +238,8 @@ export function InputPage() {
 
   // ──────────── Color picker ────────────
   const openPicker = (idx: number) => {
+    // Literal hex fallback: the <input type="color"> requires a concrete hex
+    // string; can't pass a CSS var here. Matches --img-placeholder.
     setPickerDraft(vision.colorPalette.swatches[idx] ?? "#000000");
     setPickerIndex(idx);
   };
@@ -615,6 +617,8 @@ export function InputPage() {
                         <input
                           type="color"
                           className="color-picker__native"
+                          // Literal hex: the native color input needs a valid
+                          // hex string, not a CSS var. Matches --img-placeholder.
                           value={
                             /^#[0-9a-fA-F]{6}$/.test(pickerDraft) ? pickerDraft : "#000000"
                           }

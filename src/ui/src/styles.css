@@ -1630,10 +1630,12 @@ button.btn[aria-disabled="true"] {
  *
  * Used in Light State Variations > Mood Configuration > Color Temp.
  * Gradient track maps the slider position to the actual perceived
- * color temperature:
- *   left  (1800K, warm tungsten) → --accent  (#f0c040 amber)
- *   mid   (~4150K, neutral)      → --text    (#e8e6e3 off-white)
- *   right (6500K, cool daylight) → --blue    (#5b9bd5 sky blue)
+ * color temperature. Hex values below are REFERENCE ONLY — the
+ * gradient below uses the CSS vars, not the inline hex:
+ *   left  (1800K, warm tungsten) → --accent  (ref: #f0c040 amber)
+ *   mid   (~4150K, neutral)      → --text    (ref: #e8e6e3 off-white)
+ *   right (6500K, cool daylight) → --blue    (ref: #5b9bd5 sky blue)
+ * Source of truth: tokens.css.
  *
  * All three colors come from the design-system palette in tokens.css
  * so the slider reads as part of the UI, not a drop-in widget.
