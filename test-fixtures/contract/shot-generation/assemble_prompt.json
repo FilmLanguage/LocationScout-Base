@@ -1,0 +1,41 @@
+{
+  "meta": {
+    "fixture_id": "shot-generation.assemble_prompt.v1",
+    "agent": "shot-generation",
+    "tool": "assemble_prompt",
+    "version_added": "v1.0.13",
+    "adapted_on_replit": "2026-04-22",
+    "regression_guard": "Renamed from `prompt` to avoid prompt-gallery contract collision (docs/prompt-gallery-contract.md). Top-level `prompt` must NOT exist in v1.0.13+. Replit-agent client reads `image_prompt ?? prompt ?? ''` with legacy fallback for safety, but presence of `prompt` again would mask the breakage and let stale clients keep limping along."
+  },
+  "request_template": {
+    "method": "tools/call",
+    "params": {
+      "name": "assemble_prompt",
+      "arguments": {
+        "shot_id": "<scene_id>_s001",
+        "scene_id": "<scene_id>",
+        "scene_description": "Maya unplugs the microphone, sets it gently on the desk",
+        "camera": {
+          "shot_type": "CU",
+          "angle": "eye_level",
+          "lens_mm": 85,
+          "movement": "static"
+        }
+      }
+    }
+  },
+  "async": false,
+  "response_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "required": ["image_prompt"],
+    "properties": {
+      "image_prompt": { "type": "string", "minLength": 1 },
+      "negative_prompt": { "type": "string" },
+      "sources": { "type": "array", "items": { "type": "string" } },
+      "prompt_sources": { "type": "object" },
+      "char_count": { "type": "integer", "minimum": 0 }
+    },
+    "not": { "required": ["prompt"] }
+  }
+}

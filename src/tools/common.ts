@@ -235,8 +235,17 @@ export function registerCommonTools(server: McpServer) {
       }),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    async ({ artifact_uri, feedback }) => ({
-      content: [{ type: "text" as const, text: JSON.stringify({ artifact_uri, received: true, category: feedback.category }) }],
+    async ({ artifact_uri, feedback: { category } }) => ({
+      content: [{ type: "text" as const, text: JSON.stringify({
+        error: "capability_not_available",
+        tool: "submit_feedback",
+        agent: "location-scout-base",
+        reason: "Feedback persistence is not yet implemented. Submitted feedback is not stored.",
+        alternatives: ["reject_artifact", "request_revision"],
+        received_category: category,
+        artifact_uri,
+      }) }],
+      isError: true,
     }),
   );
 }

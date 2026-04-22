@@ -1,0 +1,110 @@
+{
+  "meta": {
+    "fixture_id": "shot-generation.generate_shot.v1",
+    "agent": "shot-generation",
+    "tool": "generate_shot",
+    "version_added": "v1.0.13",
+    "adapted_on_replit": "2026-04-22",
+    "regression_guard": "image_id at kickoff MUST be the literal sentinel \"pending\". Real UUID arrives only as the trailing segment of artifacts[0].uri in the terminal task result. If kickoff returns a real UUID again, clients that learned to TRUST `image_id===\"pending\"` as a guard against premature lookups will mis-fire. If artifacts[0].uri scheme/path changes (e.g. drops `shot-generation` segment or stops being `agent://shot-generation/shot/<uuid>`), the trailing-segment extraction returns garbage instead of failing loud."
+  },
+  "request_template": {
+    "method": "tools/call",
+    "params": {
+      "name": "generate_shot",
+      "arguments": {
+        "shot_id": "<scene_id>_s001",
+        "scene_id": "<scene_id>",
+        "project_id": "<project_id>",
+        "prompt": "<image_prompt from assemble_prompt>",
+        "negative_prompt": "<optional negative_prompt from assemble_prompt>",
+        "model": "fal-ai/nano-banana-2"
+      }
+    }
+  },
+  "async": true,
+  "kickoff_response_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "required": ["task_id", "image_id", "status"],
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "pattern": "^[0-9a-f-]{32,36}$"
+      },
+      "image_id": {
+        "type": "string",
+        "const": "pending"
+      },
+      "status": {
+        "type": "string",
+        "enum": ["accepted", "submitted", "queued"]
+      },
+      "validation_enabled": { "type": "boolean" },
+      "max_attempts": { "type": "integer", "minimum": 1 }
+    }
+  },
+  "poll_contract": {
+    "tool": "get_task_status",
+    "task_id_from": "$.task_id",
+    "args_template": { "task_id": "${task_id}" },
+    "interval_sec": 5,
+    "max_wait_sec": 180,
+    "terminal_success": ["completed", "success", "done"],
+    "terminal_failure": ["failed", "error", "cancelled"],
+    "status_response_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string" },
+        "progress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "current_step": { "type": "string" },
+        "task_id": { "type": "string" }
+      }
+    },
+    "unknown_task_response_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "const": "unknown" }
+      }
+    }
+  },
+  "final_fetch": {
+    "tool": "get_task_result",
+    "args_template": { "task_id": "${task_id}" }
+  },
+  "final_response_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "required": ["status", "artifacts"],
+    "properties": {
+      "status": { "const": "completed" },
+      "artifacts": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["uri", "mime_type"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "pattern": "^agent://shot-generation/shot/[0-9a-f-]{32,36}$"
+            },
+            "mime_type": { "const": "image/png" },
+            "created_at": { "type": "string", "format": "date-time" }
+          }
+        }
+      },
+      "image_id": { "type": "string" },
+      "validation_score": { "type": "number" },
+      "validation_passed": { "type": "boolean" },
+      "attempt": { "type": "integer", "minimum": 1 },
+      "task_id": { "type": "string" }
+    }
+  },
+  "extract_for_chaining": {
+    "image_id": "split($.artifacts[0].uri, '/')[-1]"
+  }
+}

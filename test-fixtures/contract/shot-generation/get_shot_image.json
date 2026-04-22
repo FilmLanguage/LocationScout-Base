@@ -1,0 +1,50 @@
+{
+  "meta": {
+    "fixture_id": "shot-generation.get_shot_image.v1",
+    "agent": "shot-generation",
+    "tool": "get_shot_image",
+    "version_added": "v1.0.13",
+    "adapted_on_replit": "2026-04-22",
+    "regression_guard": "Image-only MCP-canonical content array. Previously this tool returned a flat top-level `data` field on `result` — clients still reading `result.data` get undefined and silently fail. The new shape is `result.content[0] = {type:\"image\", data:<base64>, mimeType:\"image/png\"}`. A text content item appearing alongside the image would push our shared MCP client into the JSON/text fallback path (the image-only branch only fires when `textParts.length === 0`), and the image base64 would be discarded. Image-only is the contract."
+  },
+  "request_template": {
+    "method": "tools/call",
+    "params": {
+      "name": "get_shot_image",
+      "arguments": {
+        "image_id": "<UUID extracted from generate_shot artifacts[0].uri trailing segment>"
+      }
+    }
+  },
+  "async": false,
+  "response_target": "$.result",
+  "response_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "required": ["content"],
+    "properties": {
+      "content": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["type", "data", "mimeType"],
+          "properties": {
+            "type": { "const": "image" },
+            "data": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "minLength": 1024
+            },
+            "mimeType": {
+              "type": "string",
+              "enum": ["image/png", "image/jpeg", "image/webp"]
+            }
+          }
+        }
+      }
+    },
+    "not": { "required": ["data"] }
+  }
+}
