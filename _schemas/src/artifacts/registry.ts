@@ -21,6 +21,15 @@ import { ARTIFACT_TYPE as DIRECTOR_SCENE_VISION, URI_PATTERN as DIRECTOR_SCENE_V
 import { ARTIFACT_TYPE as DOP_SCENE_VISION, URI_PATTERN as DOP_SCENE_VISION_URI, PRODUCED_BY as DOP_SCENE_VISION_PRODUCER, MIME_TYPE as DOP_SCENE_VISION_MIME } from "./dop-scene-vision-v1.js";
 import { ARTIFACT_TYPE as EDL, URI_PATTERN as EDL_URI, PRODUCED_BY as EDL_PRODUCER, MIME_TYPE as EDL_MIME } from "./edl-v1.js";
 import { ARTIFACT_TYPE as SHOT_RECIPE, URI_PATTERN as SHOT_RECIPE_URI, PRODUCED_BY as SHOT_RECIPE_PRODUCER, MIME_TYPE as SHOT_RECIPE_MIME } from "./shot-recipe-v1.js";
+import { ARTIFACT_TYPE as COMPOSER_FILM_VISION, URI_PATTERN as COMPOSER_FILM_VISION_URI, PRODUCED_BY as COMPOSER_FILM_VISION_PRODUCER, MIME_TYPE as COMPOSER_FILM_VISION_MIME } from "./composer-film-vision-v1.js";
+import { ARTIFACT_TYPE as COMPOSER_SCENE_VISION, URI_PATTERN as COMPOSER_SCENE_VISION_URI, PRODUCED_BY as COMPOSER_SCENE_VISION_PRODUCER, MIME_TYPE as COMPOSER_SCENE_VISION_MIME } from "./composer-scene-vision-v1.js";
+import { ARTIFACT_TYPE as SOUND_BREAKDOWN, URI_PATTERN as SOUND_BREAKDOWN_URI, PRODUCED_BY as SOUND_BREAKDOWN_PRODUCER, MIME_TYPE as SOUND_BREAKDOWN_MIME } from "./sound-breakdown-v1.js";
+import { ARTIFACT_TYPE as SOUND_REPLACEMENT, URI_PATTERN as SOUND_REPLACEMENT_URI, PRODUCED_BY as SOUND_REPLACEMENT_PRODUCER, MIME_TYPE as SOUND_REPLACEMENT_MIME } from "./sound-replacement-v1.js";
+import { ARTIFACT_TYPE as FINAL_MIX, URI_PATTERN as FINAL_MIX_URI, PRODUCED_BY as FINAL_MIX_PRODUCER, MIME_TYPE as FINAL_MIX_MIME } from "./final-mix-v1.js";
+import { ARTIFACT_TYPE as SCENE_STYLE, URI_PATTERN as SCENE_STYLE_URI, PRODUCED_BY as SCENE_STYLE_PRODUCER, MIME_TYPE as SCENE_STYLE_MIME } from "./scene-style-v1.js";
+import { ARTIFACT_TYPE as VALIDATION_REPORT, URI_PATTERN as VALIDATION_REPORT_URI, PRODUCED_BY as VALIDATION_REPORT_PRODUCER, MIME_TYPE as VALIDATION_REPORT_MIME } from "./validation-report-v1.js";
+import { ARTIFACT_TYPE as CHARACTER_BRIEFS, URI_PATTERN as CHARACTER_BRIEFS_URI, PRODUCED_BY as CHARACTER_BRIEFS_PRODUCER, MIME_TYPE as CHARACTER_BRIEFS_MIME } from "./character-briefs-v1.js";
+import { ARTIFACT_TYPE as LOCATION_BRIEFS, URI_PATTERN as LOCATION_BRIEFS_URI, PRODUCED_BY as LOCATION_BRIEFS_PRODUCER, MIME_TYPE as LOCATION_BRIEFS_MIME } from "./location-briefs-v1.js";
 
 export const ARTIFACT_REGISTRY = {
   [FILM_IR]: { uriPattern: FILM_IR_URI, producedBy: FILM_IR_PRODUCER, mimeType: FILM_IR_MIME },
@@ -29,38 +38,49 @@ export const ARTIFACT_REGISTRY = {
   [DIRECTOR_VISION]: { uriPattern: DIRECTOR_VISION_URI, producedBy: DIRECTOR_VISION_PRODUCER, mimeType: DIRECTOR_VISION_MIME },
   [RESEARCH_PACK]: { uriPattern: RESEARCH_PACK_URI, producedBy: RESEARCH_PACK_PRODUCER, mimeType: RESEARCH_PACK_MIME },
 
-  // Placeholders for agents not yet implemented — add schema files when developing
-  location_anchor:     { uriPattern: "agent://location-scout/anchor/{id}" as const,           producedBy: "location-scout-base" as const,       mimeType: "image/png" as const },
-  location_floorplan:  { uriPattern: "agent://location-scout/floorplan/{id}" as const,        producedBy: "location-scout-base" as const,       mimeType: "image/png" as const },
-  setup_extraction:    { uriPattern: "agent://location-scout/setup/{id}" as const,            producedBy: "location-scout-base" as const,       mimeType: "application/json" as const },
+  // LocationScout ancillary outputs — no separate Zod body, handled as binary/JSON blobs.
+  location_anchor:     { uriPattern: "agent://location-scout/anchor/{id}" as const,     producedBy: "location-scout-base" as const, mimeType: "image/png" as const },
+  location_floorplan:  { uriPattern: "agent://location-scout/floorplan/{id}" as const,  producedBy: "location-scout-base" as const, mimeType: "image/png" as const },
+
+  // 1AD input-brief collections (1AD produces, downstream agents consume).
+  [CHARACTER_BRIEFS]:  { uriPattern: CHARACTER_BRIEFS_URI, producedBy: CHARACTER_BRIEFS_PRODUCER, mimeType: CHARACTER_BRIEFS_MIME },
+  [LOCATION_BRIEFS]:   { uriPattern: LOCATION_BRIEFS_URI, producedBy: LOCATION_BRIEFS_PRODUCER, mimeType: LOCATION_BRIEFS_MIME },
+
   [SCENE_BREAKDOWN]:   { uriPattern: SCENE_BREAKDOWN_URI, producedBy: SCENE_BREAKDOWN_PRODUCER, mimeType: SCENE_BREAKDOWN_MIME },
   [SCRIPT_BRIEF]:      { uriPattern: SCRIPT_BRIEF_URI, producedBy: SCRIPT_BRIEF_PRODUCER, mimeType: SCRIPT_BRIEF_MIME },
   [DIRECTOR_FILM_VISION]: { uriPattern: DIRECTOR_FILM_VISION_URI, producedBy: DIRECTOR_FILM_VISION_PRODUCER, mimeType: DIRECTOR_FILM_VISION_MIME },
   [DIRECTOR_SCENE_VISION]: { uriPattern: DIRECTOR_SCENE_VISION_URI, producedBy: DIRECTOR_SCENE_VISION_PRODUCER, mimeType: DIRECTOR_SCENE_VISION_MIME },
   [DOP_FILM_VISION]:   { uriPattern: DOP_FILM_VISION_URI, producedBy: DOP_FILM_VISION_PRODUCER, mimeType: DOP_FILM_VISION_MIME },
   [DOP_SCENE_VISION]:  { uriPattern: DOP_SCENE_VISION_URI, producedBy: DOP_SCENE_VISION_PRODUCER, mimeType: DOP_SCENE_VISION_MIME },
-  character_brief:     { uriPattern: "agent://1ad/character-briefs/{id}" as const,            producedBy: "1ad-base" as const,                  mimeType: "application/json" as const },
-  schedule:            { uriPattern: "agent://1ad/schedule/{id}" as const,                    producedBy: "1ad-base" as const,                  mimeType: "application/json" as const },
-  casting_philosophy:  { uriPattern: "agent://director/casting-philosophy/{id}" as const,     producedBy: "director-base" as const,             mimeType: "application/json" as const },
-  shot_list:           { uriPattern: "agent://cinematographer/shot-list/{id}" as const,       producedBy: "cinematographer-base" as const,      mimeType: "application/json" as const },
-  lighting_plan:       { uriPattern: "agent://cinematographer/lighting-plan/{id}" as const,   producedBy: "cinematographer-base" as const,      mimeType: "application/json" as const },
-  camera_movement_map: { uriPattern: "agent://cinematographer/camera-map/{id}" as const,      producedBy: "cinematographer-base" as const,      mimeType: "application/json" as const },
-  set_design_bible:    { uriPattern: "agent://art-director/set-design/{id}" as const,         producedBy: "art-director-base" as const,         mimeType: "application/json" as const },
-  props_list:          { uriPattern: "agent://art-director/props/{id}" as const,              producedBy: "art-director-base" as const,         mimeType: "application/json" as const },
+
+  // Director — stub tool, live MCP resource in Director-Base (resources/domain.ts).
+  // Retained without a Zod body until create_casting_philosophy is implemented.
+  casting_philosophy:  { uriPattern: "agent://director/casting-philosophy/{id}" as const, producedBy: "director-base" as const, mimeType: "application/json" as const },
+
   [CHARACTER_BIBLE]:   { uriPattern: CHARACTER_BIBLE_URI, producedBy: CHARACTER_BIBLE_PRODUCER, mimeType: CHARACTER_BIBLE_MIME },
   [CHARACTER_RESEARCH]: { uriPattern: CHARACTER_RESEARCH_URI, producedBy: CHARACTER_RESEARCH_PRODUCER, mimeType: CHARACTER_RESEARCH_MIME },
   [WARDROBE_BIBLE]:    { uriPattern: WARDROBE_BIBLE_URI, producedBy: WARDROBE_BIBLE_PRODUCER, mimeType: WARDROBE_BIBLE_MIME },
   [APPEARANCE_STATES]: { uriPattern: APPEARANCE_STATES_URI, producedBy: APPEARANCE_STATES_PRODUCER, mimeType: APPEARANCE_STATES_MIME },
   [MODEL_SHEET]:       { uriPattern: MODEL_SHEET_URI, producedBy: MODEL_SHEET_PRODUCER, mimeType: MODEL_SHEET_MIME },
+
   [SHOT_RECIPE]:       { uriPattern: SHOT_RECIPE_URI, producedBy: SHOT_RECIPE_PRODUCER, mimeType: SHOT_RECIPE_MIME },
-  shot_image:          { uriPattern: "agent://shot-generation/shot/{id}" as const,            producedBy: "shot-generation-base" as const,      mimeType: "image/png" as const },
-  sound_map:           { uriPattern: "agent://sound-designer/sound-map/{id}" as const,        producedBy: "sound-designer-base" as const,       mimeType: "application/json" as const },
-  sfx_bible:           { uriPattern: "agent://sound-designer/sfx-bible/{id}" as const,        producedBy: "sound-designer-base" as const,       mimeType: "application/json" as const },
-  ambience_design:     { uriPattern: "agent://sound-designer/ambience/{id}" as const,         producedBy: "sound-designer-base" as const,       mimeType: "application/json" as const },
-  score_brief:         { uriPattern: "agent://composer/score-brief/{id}" as const,            producedBy: "composer-base" as const,             mimeType: "application/json" as const },
-  cue_sheet:           { uriPattern: "agent://composer/cue-sheet/{id}" as const,              producedBy: "composer-base" as const,             mimeType: "application/json" as const },
+
+  // ShotGeneration — binary output referenced by shot-validator.ts; no Zod body.
+  shot_image:          { uriPattern: "agent://shot-generation/shot/{id}" as const, producedBy: "shot-generation-base" as const, mimeType: "image/png" as const },
+
+  [COMPOSER_FILM_VISION]: { uriPattern: COMPOSER_FILM_VISION_URI, producedBy: COMPOSER_FILM_VISION_PRODUCER, mimeType: COMPOSER_FILM_VISION_MIME },
+  [COMPOSER_SCENE_VISION]: { uriPattern: COMPOSER_SCENE_VISION_URI, producedBy: COMPOSER_SCENE_VISION_PRODUCER, mimeType: COMPOSER_SCENE_VISION_MIME },
+  [SOUND_BREAKDOWN]:   { uriPattern: SOUND_BREAKDOWN_URI, producedBy: SOUND_BREAKDOWN_PRODUCER, mimeType: SOUND_BREAKDOWN_MIME },
+  [SOUND_REPLACEMENT]: { uriPattern: SOUND_REPLACEMENT_URI, producedBy: SOUND_REPLACEMENT_PRODUCER, mimeType: SOUND_REPLACEMENT_MIME },
+  [FINAL_MIX]:         { uriPattern: FINAL_MIX_URI, producedBy: FINAL_MIX_PRODUCER, mimeType: FINAL_MIX_MIME },
+  [SCENE_STYLE]:       { uriPattern: SCENE_STYLE_URI, producedBy: SCENE_STYLE_PRODUCER, mimeType: SCENE_STYLE_MIME },
+  [VALIDATION_REPORT]: { uriPattern: VALIDATION_REPORT_URI, producedBy: VALIDATION_REPORT_PRODUCER, mimeType: VALIDATION_REPORT_MIME },
+
   [EDL]:               { uriPattern: EDL_URI, producedBy: EDL_PRODUCER, mimeType: EDL_MIME },
-  pacing_map:          { uriPattern: "agent://editor/pacing-map/{id}" as const,               producedBy: "editor-base" as const,               mimeType: "application/json" as const },
+
+  // Editor — live MCP resource in Editor-Base (resources/domain.ts). Retained
+  // without a Zod body; if PacingMap grows structure, promote to pacing-map-v1.
+  pacing_map:          { uriPattern: "agent://editor/pacing-map/{id}" as const, producedBy: "editor-base" as const, mimeType: "application/json" as const },
 } as const;
 
 export type ArtifactType = keyof typeof ARTIFACT_REGISTRY;

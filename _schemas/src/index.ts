@@ -50,5 +50,9 @@ export { CharacterBriefSchema, type CharacterBrief } from "./inputs/character-br
 export { DirectorVisionInputSchema, type DirectorVisionInput } from "./inputs/director-vision-input.js";
 export { CastingVisionSchema, type CastingVision } from "./inputs/casting-vision.js";
 
+// --- Brief collections (1AD output → downstream consumers) ---
+export { CharacterBriefsSchema, type CharacterBriefs, CharacterBriefsJsonSchema } from "./artifacts/character-briefs-v1.js";
+export { LocationBriefsSchema, type LocationBriefs, LocationBriefsJsonSchema } from "./artifacts/location-briefs-v1.js";
+
 // --- Registry ---
 export { ARTIFACT_REGISTRY, type ArtifactType } from "./artifacts/registry.js";
