@@ -166,7 +166,7 @@ h3 {
   border-radius: var(--radius-sm);
   font-family: var(--sans);
   font-size: 13px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   transition: color var(--dur-fast) var(--ease-out);
   white-space: nowrap;
 }
@@ -184,17 +184,17 @@ h3 {
 }
 
 .stage-nav__item--locked {
-  color: var(--text-dim);
+  color: var(--text-muted);
   opacity: 0.5;
   cursor: not-allowed;
 }
 
 .stage-nav__item--locked:hover {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .stage-nav__arrow {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -406,7 +406,7 @@ h3 {
   flex-direction: column;
   gap: var(--s-3);
   padding: var(--s-3);
-  background: var(--surface-2);
+  background: var(--surface);
   border: 1px solid var(--border-accent);
   border-radius: var(--radius-md);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
@@ -474,7 +474,7 @@ h3 {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: var(--surface-3);
+  background: var(--border);
   border: 1px solid var(--border-accent);
   color: var(--text-muted);
   padding: 0;
@@ -556,7 +556,7 @@ h3 {
 }
 
 .chip-add-input::placeholder {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .chip-add-input:focus {
@@ -569,7 +569,7 @@ h3 {
 .form-textarea {
   width: 100%;
   padding: var(--s-2) var(--s-3);
-  background: var(--surface-2);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text);
@@ -606,7 +606,7 @@ h3 {
 .form-input {
   width: 100%;
   padding: var(--s-2) var(--s-3);
-  background: var(--surface-2);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text);
@@ -617,7 +617,7 @@ h3 {
 }
 
 .form-input::placeholder {
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .form-input:hover {
@@ -656,7 +656,7 @@ h3 {
 }
 
 .btn--ghost:hover {
-  background: var(--surface-2);
+  background: var(--surface);
   border-color: var(--border-accent);
 }
 
@@ -806,7 +806,7 @@ h3 {
 
 .consumer-card__consumers {
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   margin-bottom: var(--s-2);
 }
 
@@ -833,7 +833,7 @@ h3 {
 
 .file-list__more {
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-style: italic;
   padding: 2px 0;
 }
@@ -898,7 +898,7 @@ h3 {
   flex-direction: column;
   gap: 2px;
   padding: var(--s-3);
-  background: var(--surface-2);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   cursor: pointer;
@@ -944,7 +944,7 @@ h3 {
 }
 
 .delta-row__base {
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -1218,8 +1218,8 @@ button.btn[aria-disabled="true"] {
 }
 
 .tech-badge--cyan {
-  background: rgba(96, 192, 192, 0.15);
-  color: var(--cyan);
+  background: rgba(65, 134, 246, 0.15);
+  color: var(--blue-border);
 }
 
 /* Placeholder visualization (floorplan, isometric, anchor image) */
@@ -1248,7 +1248,7 @@ button.btn[aria-disabled="true"] {
   align-items: center;
   gap: var(--s-2);
   padding: var(--s-2);
-  background: var(--surface-2);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
@@ -1312,7 +1312,7 @@ button.btn[aria-disabled="true"] {
 }
 
 .score__value--warn {
-  color: var(--orange);
+  color: var(--red);
 }
 
 .score__value--bad {
@@ -1421,7 +1421,7 @@ button.btn[aria-disabled="true"] {
   padding: var(--s-1) var(--s-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--surface-2);
+  background: var(--surface);
 }
 
 .bullet-row__marker {
@@ -1435,7 +1435,7 @@ button.btn[aria-disabled="true"] {
 
 /* Text block inside card (for Bible text) */
 .text-block {
-  background: var(--surface-2);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: var(--s-3);
@@ -1458,7 +1458,7 @@ button.btn[aria-disabled="true"] {
 
 /* Fact card — nested card inside a list */
 .fact-card {
-  background: var(--surface-2);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: var(--s-3);
@@ -1499,7 +1499,7 @@ button.btn[aria-disabled="true"] {
   background: rgba(255, 255, 255, 0.04);
   display: grid;
   place-items: center;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 10px;
 }
 
@@ -1567,7 +1567,7 @@ button.btn[aria-disabled="true"] {
 .mini-label {
   font-family: var(--sans);
   font-size: 10px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   text-transform: none;
 }
 
@@ -1617,7 +1617,7 @@ button.btn[aria-disabled="true"] {
   font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 
 .page-placeholder__node {
@@ -1692,7 +1692,7 @@ button.btn[aria-disabled="true"] {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: var(--surface-3);
+  background: var(--border);
   border: 2px solid var(--text);
   box-shadow: 0 0 0 1px var(--bg), 0 1px 4px rgba(0, 0, 0, 0.5);
   /* Offset so the thumb sits centered over the 8px track */
@@ -1722,7 +1722,7 @@ button.btn[aria-disabled="true"] {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: var(--surface-3);
+  background: var(--border);
   border: 2px solid var(--text);
   box-shadow: 0 0 0 1px var(--bg), 0 1px 4px rgba(0, 0, 0, 0.5);
   cursor: grab;

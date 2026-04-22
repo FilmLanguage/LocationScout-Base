@@ -13,13 +13,12 @@ import { mkdirSync, writeFileSync } from "fs";
 // Updated 2026-04-10 from Figma Design System page swatches
 
 const colors = {
-  bg: "#111111", surface: "#131416", "surface-2": "#1e2024", "surface-3": "#26262f",
+  bg: "#111111", surface: "#131416",
   border: "#2b2e31", "border-accent": "#43474c",
-  text: "#eaebec", "text-muted": "#a1a6aa", "text-dim": "#6b6960",
-  accent: "#f7e27e", "accent-dim": "#c09a20",
+  text: "#eaebec", "text-muted": "#a1a6aa",
+  accent: "#f7e27e",
   blue: "#156bf4", "blue-border": "#4186f6",
   green: "#a6f77e", red: "#f7927e",
-  pink: "#d08ab4", cyan: "#60c0c0", orange: "#e0904a",
   "focus-ring": "#7f8081",
   white: "#ffffff",
 };

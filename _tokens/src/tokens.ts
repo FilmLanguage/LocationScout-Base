@@ -14,28 +14,21 @@ export const colors = {
   // Backgrounds
   bg:         "#111111",    // Page BG
   surface:    "#131416",    // Card BG
-  "surface-2": "#1e2024",   // Nested containers, image placeholders
-  "surface-3": "#26262f",   // Tertiary depth
 
   // Borders
-  border:       "#2b2e31",  // Page Border
+  border:       "#2b2e31",  // Page Border / neutral placeholder
   "border-accent": "#43474c", // Card / Chip Border
   "blue-border": "#4186f6", // CTA Border
 
   // Text
   text:      "#eaebec",     // Primary Text
   "text-muted": "#a1a6aa",  // Secondary Text
-  "text-dim":   "#6b6960",  // Tertiary text
 
   // Accent & semantic
   accent:    "#f7e27e",     // Gold / Active
-  "accent-dim": "#c09a20",  // Muted accent
   blue:      "#156bf4",     // Blue / CTA
   green:     "#a6f77e",     // Green / Status
   red:       "#f7927e",     // Red / Warning, negative list
-  pink:      "#d08ab4",     // Gate badges, keywords
-  cyan:      "#60c0c0",     // Technical tags
-  orange:    "#e0904a",     // Warnings
 
   // Chip/Tag fills
   "chip-fill":    "rgba(255,255,255,0.1)",   // 10% white
