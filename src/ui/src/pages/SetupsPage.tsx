@@ -387,7 +387,7 @@ export function SetupsPage() {
             display: "flex",
             alignItems: "center",
             gap: 10,
-            marginBottom: "var(--s-3)",
+            marginBottom: "var(--sp-3)",
           }}
         >
           <span aria-hidden>⏳</span>
@@ -407,8 +407,8 @@ export function SetupsPage() {
             fontSize: 13,
             background: "rgba(220,60,60,0.08)",
             border: "1px solid rgba(220,60,60,0.4)",
-            marginBottom: "var(--s-3)",
-            color: "var(--error-text)",
+            marginBottom: "var(--sp-3)",
+            color: "var(--red)",
           }}
         >
           ✗ Setup generation failed: {batch.message}
@@ -477,7 +477,7 @@ export function SetupsPage() {
             </span>
           </div>
           <article className="card">
-            <div className="card__body" style={{ gap: "var(--s-3)" }}>
+            <div className="card__body" style={{ gap: "var(--sp-3)" }}>
               <div className="detail-field">
                 <span className="detail-field__label">Scene / Mood</span>
                 <span className="detail-field__value">
@@ -547,7 +547,7 @@ export function SetupsPage() {
           Approve All ({draftCount})
         </button>
         <span className="page-footer__spacer" />
-        <span className="mini-label" style={{ marginRight: "var(--s-2)" }}>
+        <span className="mini-label" style={{ marginRight: "var(--sp-2)" }}>
           {approvedCount} / {tiles.length} approved
         </span>
         <button type="button" className="btn btn--primary" onClick={handleAdvance}>

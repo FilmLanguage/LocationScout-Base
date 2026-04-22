@@ -395,7 +395,7 @@ export function ReferencesPage() {
             width: "100%",
             borderRadius: 8,
             display: "block",
-            background: "var(--img-placeholder)",
+            background: "var(--border)",
           }}
         />
       );
@@ -408,7 +408,7 @@ export function ReferencesPage() {
           style={{
             background: "rgba(220,60,60,0.08)",
             borderColor: "rgba(220,60,60,0.4)",
-            color: "var(--error-text)",
+            color: "var(--red)",
             textAlign: "center",
             padding: 16,
           }}
@@ -490,7 +490,7 @@ export function ReferencesPage() {
             <span className="tech-badge tech-badge--muted">PYTHON + FFmpeg</span>
           </div>
           <article className="card">
-            <div className="card__body" style={{ gap: "var(--s-2)" }}>
+            <div className="card__body" style={{ gap: "var(--sp-2)" }}>
               {floorplan.kind === "ready" ? (
                 <img
                   src={`${FLOORPLAN_IMG_PATH}?v=${floorplan.cacheBust}`}
@@ -530,7 +530,7 @@ export function ReferencesPage() {
           <article className="card">
             <div className="card__body">
               {isometric.kind === "error" && (
-                <div className="placeholder-box" style={{ borderColor: "rgba(220,60,60,0.5)", color: "var(--red)", marginBottom: "var(--s-2)" }}>
+                <div className="placeholder-box" style={{ borderColor: "rgba(220,60,60,0.5)", color: "var(--red)", marginBottom: "var(--sp-2)" }}>
                   ✗ {isometric.message}
                 </div>
               )}
@@ -597,7 +597,7 @@ export function ReferencesPage() {
             <span className="tech-badge tech-badge--green">CLAUDE</span>
           </div>
           <article className="card">
-            <div className="card__body" style={{ gap: "var(--s-2)" }}>
+            <div className="card__body" style={{ gap: "var(--sp-2)" }}>
               {setupsSummary.map((s) => (
                 <div key={s.id} className="setup-row">
                   <span className="setup-row__badge">{s.id}</span>
@@ -621,7 +621,7 @@ export function ReferencesPage() {
             <span className="tech-badge tech-badge--gold">NANOBANANA</span>
           </div>
           <article className="card">
-            <div className="card__body" style={{ gap: "var(--s-3)" }}>
+            <div className="card__body" style={{ gap: "var(--sp-3)" }}>
               {anchor.kind !== "ready" ? renderAnchorSlot() : null}
               <PromptCard
                 label="Anchor"

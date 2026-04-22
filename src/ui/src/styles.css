@@ -1,4 +1,4 @@
-@import "./tokens.css";
+@import "@filmlanguage/tokens/css";
 
 *,
 *::before,
@@ -85,7 +85,7 @@ h3 {
 
 .app__main {
   flex: 1;
-  padding: var(--s-3) var(--s-4);
+  padding: var(--sp-3) var(--sp-4);
   max-width: 1440px;
   width: 100%;
   margin: 0 auto;
@@ -93,15 +93,15 @@ h3 {
 
 @media (min-width: 1200px) {
   .app__main {
-    padding: var(--s-4) var(--s-6);
+    padding: var(--sp-4) var(--sp-6);
   }
 }
 
 .header {
   display: flex;
   align-items: center;
-  gap: var(--s-4);
-  padding: var(--s-2) var(--s-4);
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-4);
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   position: sticky;
@@ -112,7 +112,7 @@ h3 {
 .header__logo {
   display: flex;
   align-items: center;
-  gap: var(--s-2);
+  gap: var(--sp-2);
   font-family: var(--sans);
   font-size: 16px;
   font-weight: 600;
@@ -145,13 +145,13 @@ h3 {
 .stage-nav {
   display: flex;
   align-items: center;
-  gap: var(--s-1);
+  gap: var(--sp-1);
   flex-wrap: nowrap;
   overflow-x: auto;
   scrollbar-width: none;
   flex: 1;
   min-width: 0;
-  padding: 0 var(--s-1);
+  padding: 0 var(--sp-1);
 }
 
 .stage-nav::-webkit-scrollbar {
@@ -161,8 +161,8 @@ h3 {
 .stage-nav__item {
   display: inline-flex;
   align-items: center;
-  gap: var(--s-1);
-  padding: var(--s-1) var(--s-2);
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
   border-radius: var(--radius-sm);
   font-family: var(--sans);
   font-size: 13px;
@@ -204,8 +204,8 @@ h3 {
 .section-header {
   display: flex;
   align-items: baseline;
-  gap: var(--s-2);
-  padding: 0 var(--s-1);
+  gap: var(--sp-2);
+  padding: 0 var(--sp-1);
   font-size: 18px;
   line-height: 20px;
 }
@@ -225,23 +225,23 @@ h3 {
   background: var(--surface);
   border: 1px solid var(--border-accent);
   border-radius: var(--radius-md);
-  padding: var(--s-3);
+  padding: var(--sp-3);
   min-width: 0;
 }
 
 .card__body {
   display: flex;
   flex-direction: column;
-  gap: var(--s-3);
+  gap: var(--sp-3);
   min-width: 0;
 }
 
 @media (min-width: 1200px) {
   .card {
-    padding: var(--s-4);
+    padding: var(--sp-4);
   }
   .card__body {
-    gap: var(--s-4);
+    gap: var(--sp-4);
   }
 }
 
@@ -249,7 +249,7 @@ h3 {
 .field {
   display: flex;
   flex-direction: column;
-  gap: var(--s-1);
+  gap: var(--sp-1);
 }
 
 .field__label {
@@ -276,7 +276,7 @@ h3 {
 .field__quote-list {
   display: flex;
   flex-direction: column;
-  gap: var(--s-1);
+  gap: var(--sp-1);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -292,21 +292,21 @@ h3 {
 /* Row layouts inside a card */
 .field-row {
   display: flex;
-  gap: var(--s-4);
+  gap: var(--sp-4);
   align-items: flex-start;
   flex-wrap: wrap;
 }
 
 .field-row--wide {
-  gap: var(--s-6);
+  gap: var(--sp-6);
 }
 
 @media (min-width: 1200px) {
   .field-row {
-    gap: var(--s-6);
+    gap: var(--sp-6);
   }
   .field-row--wide {
-    gap: var(--s-12);
+    gap: var(--sp-12);
   }
 }
 
@@ -314,7 +314,7 @@ h3 {
 .chip-group {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--s-1);
+  gap: var(--sp-1);
   align-items: center;
 }
 
@@ -322,7 +322,7 @@ h3 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: var(--s-2) var(--s-4);
+  padding: var(--sp-2) var(--sp-4);
   border-radius: var(--radius-md);
   font-family: var(--sans);
   font-size: 14px;
@@ -368,8 +368,8 @@ h3 {
 /* Swatch row (color palette) */
 .swatch-row {
   display: flex;
-  gap: var(--s-2);
-  margin-top: var(--s-1);
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
   position: relative; /* anchor for the color picker popover */
 }
 
@@ -401,11 +401,11 @@ h3 {
   position: absolute;
   top: 100%;
   left: 0;
-  margin-top: var(--s-2);
+  margin-top: var(--sp-2);
   display: flex;
   flex-direction: column;
-  gap: var(--s-3);
-  padding: var(--s-3);
+  gap: var(--sp-3);
+  padding: var(--sp-3);
   background: var(--surface);
   border: 1px solid var(--border-accent);
   border-radius: var(--radius-md);
@@ -417,7 +417,7 @@ h3 {
 .color-picker__row {
   display: flex;
   align-items: center;
-  gap: var(--s-2);
+  gap: var(--sp-2);
 }
 
 .color-picker__native {
@@ -447,7 +447,7 @@ h3 {
 
 .color-picker__actions {
   display: flex;
-  gap: var(--s-2);
+  gap: var(--sp-2);
   justify-content: flex-end;
 }
 
@@ -543,7 +543,7 @@ h3 {
   background: transparent;
   border: 1px dashed var(--border-accent);
   border-radius: var(--radius-md);
-  padding: var(--s-2) var(--s-4);
+  padding: var(--sp-2) var(--sp-4);
   font-family: var(--sans);
   font-size: 14px;
   font-weight: 500;
@@ -568,7 +568,7 @@ h3 {
 /* Textarea (used for short description, quotes) */
 .form-textarea {
   width: 100%;
-  padding: var(--s-2) var(--s-3);
+  padding: var(--sp-2) var(--sp-3);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -605,7 +605,7 @@ h3 {
 /* Form inputs */
 .form-input {
   width: 100%;
-  padding: var(--s-2) var(--s-3);
+  padding: var(--sp-2) var(--sp-3);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -634,8 +634,8 @@ h3 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--s-2);
-  padding: var(--s-2) var(--s-4);
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
   border-radius: var(--radius-md);
   font-family: var(--sans);
   font-size: 14px;
@@ -662,19 +662,19 @@ h3 {
 
 .edit-actions {
   display: flex;
-  gap: var(--s-2);
+  gap: var(--sp-2);
   align-items: center;
 }
 
 .btn--primary {
-  background: var(--primary);
+  background: var(--blue);
   color: var(--text);
-  border-color: var(--primary);
+  border-color: var(--blue);
 }
 
 .btn--primary:hover {
-  background: var(--primary-hover);
-  border-color: var(--primary-hover);
+  background: var(--blue-border);
+  border-color: var(--blue-border);
   transform: translateY(-1px);
 }
 
@@ -691,8 +691,8 @@ h3 {
 .banner {
   display: flex;
   align-items: center;
-  gap: var(--s-3);
-  padding: var(--s-3) var(--s-6);
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-6);
   background: rgba(255, 255, 255, 0.04);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
@@ -729,7 +729,7 @@ h3 {
 .badge {
   display: inline-flex;
   align-items: center;
-  padding: var(--s-1) var(--s-3);
+  padding: var(--sp-1) var(--sp-3);
   border-radius: var(--radius-sm);
   font-family: var(--mono);
   font-size: 10px;
@@ -757,7 +757,7 @@ h3 {
 .count-pill {
   display: inline-flex;
   align-items: center;
-  padding: 2px var(--s-2);
+  padding: 2px var(--sp-2);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.08);
   font-family: var(--mono);
@@ -781,8 +781,8 @@ h3 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--s-2);
-  margin-bottom: var(--s-2);
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
 }
 
 .consumer-card__title {
@@ -801,13 +801,13 @@ h3 {
   font-size: 12px;
   color: var(--text-muted);
   line-height: 18px;
-  margin-bottom: var(--s-2);
+  margin-bottom: var(--sp-2);
 }
 
 .consumer-card__consumers {
   font-size: 11px;
   color: var(--text-muted);
-  margin-bottom: var(--s-2);
+  margin-bottom: var(--sp-2);
 }
 
 .consumer-card__consumers strong {
@@ -843,8 +843,8 @@ h3 {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--s-4);
-  padding: var(--s-3) var(--s-4);
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
   background: var(--surface);
   border: 1px solid var(--border-accent);
   border-radius: var(--radius-md);
@@ -853,7 +853,7 @@ h3 {
 .artifact-item {
   display: flex;
   align-items: center;
-  gap: var(--s-2);
+  gap: var(--sp-2);
   font-size: 12px;
 }
 
@@ -873,8 +873,8 @@ h3 {
 .advisory {
   display: flex;
   align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-3) var(--s-6);
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-6);
   background: rgba(240, 192, 64, 0.06);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
@@ -890,14 +890,14 @@ h3 {
 .source-list {
   display: flex;
   flex-direction: column;
-  gap: var(--s-2);
+  gap: var(--sp-2);
 }
 
 .source-item {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: var(--s-3);
+  padding: var(--sp-3);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -929,7 +929,7 @@ h3 {
 .delta-row {
   display: grid;
   grid-template-columns: 120px 1fr;
-  gap: var(--s-3);
+  gap: var(--sp-3);
   align-items: center;
   font-size: 12px;
 }
@@ -957,8 +957,8 @@ h3 {
 .ai-suggest {
   display: flex;
   align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-3);
+  gap: var(--sp-2);
+  padding: var(--sp-3);
   background: rgba(91, 155, 213, 0.08);
   border: 1px solid rgba(91, 155, 213, 0.3);
   border-radius: var(--radius-md);
@@ -980,7 +980,7 @@ h3 {
   color: var(--text-muted);
   font-size: 14px;
   cursor: pointer;
-  padding: 0 var(--s-1);
+  padding: 0 var(--sp-1);
 }
 
 .ai-suggest__dismiss:hover {
@@ -1004,7 +1004,7 @@ h3 {
   background: transparent;
   color: var(--red);
   border-color: rgba(217, 112, 112, 0.4);
-  padding: var(--s-1) var(--s-3);
+  padding: var(--sp-1) var(--sp-3);
   font-size: 11px;
 }
 
@@ -1027,7 +1027,7 @@ h3 {
 .tile-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: var(--s-2);
+  gap: var(--sp-2);
 }
 
 .tile-grid--two {
@@ -1069,8 +1069,8 @@ button.btn[aria-disabled="true"] {
 .setup-tile__footer {
   display: flex;
   align-items: center;
-  gap: var(--s-1);
-  padding: var(--s-2);
+  gap: var(--sp-1);
+  padding: var(--sp-2);
 }
 
 .setup-tile__id {
@@ -1087,8 +1087,8 @@ button.btn[aria-disabled="true"] {
 }
 
 .setup-tile__footer {
-  gap: var(--s-1);
-  padding-top: var(--s-1);
+  gap: var(--sp-1);
+  padding-top: var(--sp-1);
 }
 
 .setup-tile__spacer {
@@ -1097,7 +1097,7 @@ button.btn[aria-disabled="true"] {
 
 .status-badge {
   display: inline-flex;
-  padding: 2px var(--s-2);
+  padding: 2px var(--sp-2);
   border-radius: var(--radius-sm);
   font-family: var(--sans);
   font-size: 9px;
@@ -1122,7 +1122,7 @@ button.btn[aria-disabled="true"] {
 
 .mini-chip {
   display: inline-flex;
-  padding: 2px var(--s-1);
+  padding: 2px var(--sp-1);
   border-radius: var(--radius-sm);
   font-size: 9px;
   font-weight: 500;
@@ -1141,7 +1141,7 @@ button.btn[aria-disabled="true"] {
 .icon-btn {
   background: none;
   border: none;
-  padding: 0 var(--s-1);
+  padding: 0 var(--sp-1);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
@@ -1193,7 +1193,7 @@ button.btn[aria-disabled="true"] {
 /* Tech/agent badge (NANOBANANA, CLAUDE, PYTHON + FFmpeg) */
 .tech-badge {
   display: inline-flex;
-  padding: 3px var(--s-2);
+  padding: 3px var(--sp-2);
   border-radius: var(--radius-sm);
   font-family: var(--mono);
   font-size: 10px;
@@ -1234,7 +1234,7 @@ button.btn[aria-disabled="true"] {
   font-size: 12px;
   line-height: 20px;
   min-height: 120px;
-  padding: var(--s-4);
+  padding: var(--sp-4);
   flex: 1 0 0;
 }
 
@@ -1246,8 +1246,8 @@ button.btn[aria-disabled="true"] {
 .setup-row {
   display: flex;
   align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-2);
+  gap: var(--sp-2);
+  padding: var(--sp-2);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -1255,7 +1255,7 @@ button.btn[aria-disabled="true"] {
 
 .setup-row__badge {
   display: inline-flex;
-  padding: 2px var(--s-2);
+  padding: 2px var(--sp-2);
   border-radius: var(--radius-sm);
   background: rgba(240, 192, 64, 0.15);
   color: var(--accent);
@@ -1286,7 +1286,7 @@ button.btn[aria-disabled="true"] {
 /* Score group — metric row with label above big value */
 .score-group {
   display: flex;
-  gap: var(--s-6);
+  gap: var(--sp-6);
   flex-wrap: wrap;
 }
 
@@ -1331,7 +1331,7 @@ button.btn[aria-disabled="true"] {
 
 /* Small chip variant (for metadata rows) */
 .chip--sm {
-  padding: var(--s-1) var(--s-3);
+  padding: var(--sp-1) var(--sp-3);
   min-height: 24px;
   font-size: 11px;
   font-weight: 500;
@@ -1353,7 +1353,7 @@ button.btn[aria-disabled="true"] {
 .passport-row {
   display: flex;
   align-items: center;
-  gap: var(--s-2);
+  gap: var(--sp-2);
   flex-wrap: wrap;
 }
 
@@ -1373,7 +1373,7 @@ button.btn[aria-disabled="true"] {
 .metric-row {
   display: flex;
   align-items: center;
-  gap: var(--s-2);
+  gap: var(--sp-2);
   flex-wrap: wrap;
 }
 
@@ -1397,7 +1397,7 @@ button.btn[aria-disabled="true"] {
 /* Word count indicator */
 .word-count {
   display: inline-flex;
-  padding: var(--s-1) var(--s-2);
+  padding: var(--sp-1) var(--sp-2);
   border-radius: var(--radius-sm);
   font-size: 10px;
   font-weight: 600;
@@ -1417,8 +1417,8 @@ button.btn[aria-disabled="true"] {
 .bullet-row {
   display: flex;
   align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-1) var(--s-2);
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
@@ -1438,7 +1438,7 @@ button.btn[aria-disabled="true"] {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: var(--s-3);
+  padding: var(--sp-3);
   font-size: 12px;
   line-height: 20px;
   color: var(--text);
@@ -1461,10 +1461,10 @@ button.btn[aria-disabled="true"] {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: var(--s-3);
+  padding: var(--sp-3);
   display: flex;
   flex-direction: column;
-  gap: var(--s-1);
+  gap: var(--sp-1);
 }
 
 .fact-card__title {
@@ -1481,7 +1481,7 @@ button.btn[aria-disabled="true"] {
 /* Negative item (red, used in anachronism list) */
 .neg-item {
   display: inline-flex;
-  padding: var(--s-2) var(--s-4);
+  padding: var(--sp-2) var(--sp-4);
   border-radius: var(--radius-md);
   background: rgba(217, 112, 112, 0.12);
   color: var(--red);
@@ -1505,7 +1505,7 @@ button.btn[aria-disabled="true"] {
 
 .ref-row {
   display: flex;
-  gap: var(--s-2);
+  gap: var(--sp-2);
   flex-wrap: wrap;
 }
 
@@ -1517,7 +1517,7 @@ button.btn[aria-disabled="true"] {
   font-family: var(--sans);
   font-size: 12px;
   font-weight: 500;
-  padding: var(--s-1) 0;
+  padding: var(--sp-1) 0;
   cursor: pointer;
   align-self: flex-start;
   text-align: left;
@@ -1531,14 +1531,14 @@ button.btn[aria-disabled="true"] {
 .columns-3 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: var(--s-3);
+  gap: var(--sp-3);
   align-items: start;
 }
 
 .columns-2 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: var(--s-3);
+  gap: var(--sp-3);
   align-items: start;
 }
 
@@ -1547,8 +1547,8 @@ button.btn[aria-disabled="true"] {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: var(--s-2);
-  padding: var(--s-2) var(--s-3);
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
   flex-wrap: wrap;
 }
 
@@ -1561,7 +1561,7 @@ button.btn[aria-disabled="true"] {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: var(--s-2);
+  gap: var(--sp-2);
 }
 
 .mini-label {
@@ -1576,27 +1576,27 @@ button.btn[aria-disabled="true"] {
 .input-page {
   display: flex;
   flex-direction: column;
-  gap: var(--s-4);
+  gap: var(--sp-4);
 }
 
 .input-page__columns {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: var(--s-3);
+  gap: var(--sp-3);
   align-items: start;
 }
 
 .input-page__column {
   display: flex;
   flex-direction: column;
-  gap: var(--s-2);
+  gap: var(--sp-2);
   min-width: 0;
 }
 
 .input-page__footer {
   display: flex;
   justify-content: flex-end;
-  padding: var(--s-2) var(--s-3);
+  padding: var(--sp-2) var(--sp-3);
   flex-wrap: wrap;
 }
 
@@ -1605,11 +1605,11 @@ button.btn[aria-disabled="true"] {
 .page-placeholder {
   border: 1px dashed var(--border-accent);
   border-radius: var(--radius-card);
-  padding: var(--s-12);
+  padding: var(--sp-12);
   background: var(--surface);
   display: flex;
   flex-direction: column;
-  gap: var(--s-4);
+  gap: var(--sp-4);
 }
 
 .page-placeholder__label {
@@ -1630,14 +1630,13 @@ button.btn[aria-disabled="true"] {
  *
  * Used in Light State Variations > Mood Configuration > Color Temp.
  * Gradient track maps the slider position to the actual perceived
- * color temperature. Hex values below are REFERENCE ONLY — the
- * gradient below uses the CSS vars, not the inline hex:
- *   left  (1800K, warm tungsten) → --accent  (ref: #f0c040 amber)
- *   mid   (~4150K, neutral)      → --text    (ref: #e8e6e3 off-white)
- *   right (6500K, cool daylight) → --blue    (ref: #5b9bd5 sky blue)
- * Source of truth: tokens.css.
+ * color temperature. The gradient below uses CSS vars only:
+ *   left  (1800K, warm tungsten) → --accent    (palette yellow)
+ *   mid   (~4150K, neutral)      → --text      (palette off-white)
+ *   right (6500K, cool daylight) → --blue      (palette blue)
+ * Source of truth: @filmlanguage/tokens (14-hex palette allowlist).
  *
- * All three colors come from the design-system palette in tokens.css
+ * All three colors come from the canonical @filmlanguage/tokens palette
  * so the slider reads as part of the UI, not a drop-in widget.
  * Cross-browser: we style -webkit-slider-runnable-track and
  * -moz-range-track separately because the two engines don't share

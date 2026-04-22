@@ -214,7 +214,7 @@ export function AnalysisPage() {
 
               {/* Space Description */}
               <div className="field">
-                <span className="field__label" style={{ display: "flex", gap: "var(--s-2)", alignItems: "center" }}>
+                <span className="field__label" style={{ display: "flex", gap: "var(--sp-2)", alignItems: "center" }}>
                   Space Description
                   <span className={`word-count ${overBudget ? "word-count--over" : "word-count--ok"}`}>
                     {a.wordCount} / {a.wordBudget} words
@@ -239,7 +239,7 @@ export function AnalysisPage() {
             <span className="section-header__subtitle">Key Details</span>
           </div>
           <article className="card">
-            <div className="card__body" style={{ gap: "var(--s-3)" }}>
+            <div className="card__body" style={{ gap: "var(--sp-3)" }}>
               <div className="metric-row">
                 <span className="metric-row__label">Primary Source</span>
                 <span className="metric-row__value">Window (west-facing)</span>
@@ -274,7 +274,7 @@ export function AnalysisPage() {
                 <span className="count-pill count-pill--success">6/8</span>
               </div>
 
-              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "var(--s-1)" }}>
+              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "var(--sp-1)" }}>
                 {a.keyDetails.map((d) => (
                   <li key={d} className="bullet-row">
                     <span className="bullet-row__marker" aria-hidden>•</span>
@@ -329,8 +329,8 @@ export function AnalysisPage() {
             aria-live="polite"
             style={{
               flex: 1,
-              marginLeft: "var(--s-3)",
-              marginRight: "var(--s-3)",
+              marginLeft: "var(--sp-3)",
+              marginRight: "var(--sp-3)",
               padding: "8px 14px",
               borderRadius: 8,
               fontSize: 13,

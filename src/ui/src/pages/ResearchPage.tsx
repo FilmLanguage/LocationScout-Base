@@ -105,7 +105,7 @@ export function ResearchPage() {
             <span className="section-header__subtitle">Research Data</span>
           </div>
           <article className="card">
-            <div className="card__body" style={{ gap: "var(--s-2)" }}>
+            <div className="card__body" style={{ gap: "var(--sp-2)" }}>
               {facts.map((f) => (
                 <div key={f.id} className="fact-card">
                   <span className="fact-card__title">{f.title}</span>
@@ -134,7 +134,7 @@ export function ResearchPage() {
             <span className="count-pill">{typicalElements.length}</span>
           </div>
           <article className="card">
-            <div className="card__body" style={{ gap: "var(--s-3)" }}>
+            <div className="card__body" style={{ gap: "var(--sp-3)" }}>
               <div className="chip-group">
                 {typicalElements.map((e) => (
                   <span key={e} className="chip chip--filled">
@@ -161,7 +161,7 @@ export function ResearchPage() {
             <span className="section-header__subtitle">Negative List</span>
           </div>
           <article className="card">
-            <div className="card__body" style={{ gap: "var(--s-2)" }}>
+            <div className="card__body" style={{ gap: "var(--sp-2)" }}>
               <span className="mini-label">
                 min 5 required ({anachronisms.length} present)
               </span>

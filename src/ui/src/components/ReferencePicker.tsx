@@ -163,7 +163,7 @@ function Thumbnail({
         borderRadius: 6,
         overflow: "hidden",
         border: "1px solid var(--border)",
-        background: "var(--img-placeholder)",
+        background: "var(--border)",
         flex: "0 0 auto",
       }}
     >
@@ -229,7 +229,7 @@ function LockedThumbnail({ ref }: { ref: LockedAutoRef }) {
         borderRadius: 6,
         overflow: "hidden",
         border: "1px solid var(--border)",
-        background: "var(--img-placeholder)",
+        background: "var(--border)",
         flex: "0 0 auto",
       }}
     >
@@ -459,7 +459,7 @@ function GalleryModal({
               border: already ? "2px solid var(--accent)" : "1px solid var(--border)",
               borderRadius: 6,
               overflow: "hidden",
-              background: "var(--img-placeholder)",
+              background: "var(--border)",
               cursor: already ? "default" : "pointer",
               opacity: already ? 0.55 : 1,
             }}

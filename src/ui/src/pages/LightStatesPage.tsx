@@ -307,7 +307,7 @@ export function LightStatesPage() {
       */}
       <div className="columns-2">
         {/* ───── Left column: Source Setups + Generated Variations stacked ───── */}
-        <div className="input-page__column" style={{ display: "flex", flexDirection: "column", gap: "var(--s-3)" }}>
+        <div className="input-page__column" style={{ display: "flex", flexDirection: "column", gap: "var(--sp-3)" }}>
           <div className="section-header">
             <span className="section-header__title">Source Setups</span>
             <span className="section-header__subtitle">Select setup</span>
@@ -323,7 +323,7 @@ export function LightStatesPage() {
                     onClick={() => dispatch({ type: "SELECT_LIGHT_SOURCE", id: s.id })}
                     style={{
                       display: "flex",
-                      gap: "var(--s-2)",
+                      gap: "var(--sp-2)",
                       alignItems: "center",
                     }}
                   >
@@ -337,7 +337,7 @@ export function LightStatesPage() {
                           objectFit: "cover",
                           borderRadius: 4,
                           flexShrink: 0,
-                          background: "var(--img-placeholder)",
+                          background: "var(--border)",
                         }}
                         onError={(e) => {
                           (e.currentTarget as HTMLImageElement).style.visibility = "hidden";
@@ -486,7 +486,7 @@ export function LightStatesPage() {
             <span className="section-header__title">Mood Configuration for {activeSource.id}</span>
           </div>
           <article className="card">
-            <div className="card__body" style={{ gap: "var(--s-3)" }}>
+            <div className="card__body" style={{ gap: "var(--sp-3)" }}>
               {/*
                 Preview image — shows the generated mood variation if one exists
                 for the active source, otherwise falls back to the setup image.
@@ -501,7 +501,7 @@ export function LightStatesPage() {
                     style={{
                       width: "100%",
                       borderRadius: 6,
-                      background: "var(--img-placeholder)",
+                      background: "var(--border)",
                       display: "block",
                     }}
                     onError={(e) => {
@@ -516,7 +516,7 @@ export function LightStatesPage() {
                     style={{
                       width: "100%",
                       borderRadius: 6,
-                      background: "var(--img-placeholder)",
+                      background: "var(--border)",
                       display: "block",
                     }}
                     onError={(e) => {

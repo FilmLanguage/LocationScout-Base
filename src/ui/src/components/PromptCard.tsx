@@ -132,7 +132,7 @@ export function PromptCard(props: PromptCardProps) {
   return (
     <div
       className="prompt-card"
-      style={{ display: "flex", flexDirection: "column", gap: "var(--s-2)" }}
+      style={{ display: "flex", flexDirection: "column", gap: "var(--sp-2)" }}
       data-prompt-card={label}
     >
       {/* Collapsible header row (Figma PromptCard/v2 — collapsed state) */}
@@ -204,7 +204,7 @@ export function PromptCard(props: PromptCardProps) {
       )}
 
       {collapsible && collapsed ? null : (
-      <div id={`prompt-card-body-${label}`} style={{ display: "flex", flexDirection: "column", gap: "var(--s-2)" }}>
+      <div id={`prompt-card-body-${label}`} style={{ display: "flex", flexDirection: "column", gap: "var(--sp-2)" }}>
       {/* Version dropdown */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
@@ -254,7 +254,7 @@ export function PromptCard(props: PromptCardProps) {
         <img
           src={previewSrc}
           alt={`${label} preview`}
-          style={{ width: "100%", borderRadius: 8, display: "block", background: "var(--img-placeholder)" }}
+          style={{ width: "100%", borderRadius: 8, display: "block", background: "var(--border)" }}
         />
       ) : (
         <div className="placeholder-box placeholder-box--tall">{statusLine ?? "No image yet"}</div>
