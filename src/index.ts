@@ -48,7 +48,7 @@ app.use((req, res, next) => {
   if (!INTER_AGENT_TOKEN) { next(); return; }
   if (req.path === "/health") { next(); return; }
   const token = req.headers["x-agent-token"];
-  if (token !== INTER_AGENT_TOKEN) {
+  if (token?.trim() !== INTER_AGENT_TOKEN.trim()) {
     res.status(401).json({ error: "unauthorized", message: "Invalid or missing x-agent-token" });
     return;
   }
