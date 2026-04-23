@@ -54,8 +54,22 @@ export async function analyzeWithGeminiVision(input: GeminiVisionInput): Promise
     };
   }
 
-  const imageParts = input.image_urls.map((url) => ({
-    inline_data: { mime_type: "image/png", data: url },
+  const imageParts = await Promise.all(input.image_urls.map(async (url) => {
+    let data: string;
+    let mimeType = "image/png";
+    if (url.startsWith("data:")) {
+      const [header, b64] = url.split(",", 2);
+      mimeType = header.match(/data:([^;]+)/)?.[1] ?? "image/png";
+      data = b64;
+    } else if (url.startsWith("http://") || url.startsWith("https://")) {
+      const res = await fetch(url);
+      const buf = Buffer.from(await res.arrayBuffer());
+      mimeType = res.headers.get("content-type") ?? "image/jpeg";
+      data = buf.toString("base64");
+    } else {
+      data = url;
+    }
+    return { inline_data: { mime_type: mimeType, data } };
   }));
 
   const resp = await fetch(
