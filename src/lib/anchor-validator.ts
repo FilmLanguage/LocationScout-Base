@@ -12,7 +12,7 @@
  * and structured issues. The orchestrator decides whether to retry.
  *
  * Designed to be cheap to run (single Gemini Vision call per attempt) and
- * to degrade gracefully to a mock pass when FAL_AI_API_KEY is not set.
+ * to degrade gracefully to a mock pass when FAL_AI_API_KEY is not set (Gemini via FAL any-llm).
  */
 
 import type { ValidationReport, Issue } from "@filmlanguage/schemas";

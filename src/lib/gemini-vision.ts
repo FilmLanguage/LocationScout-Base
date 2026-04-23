@@ -5,11 +5,9 @@
  * the source Location Bible. Returns structured JSON with score, issues,
  * and observations.
  *
+ * Routes through FAL's any-llm endpoint (fal-ai/any-llm) using FAL_AI_API_KEY.
  * Falls back to a deterministic mock when FAL_AI_API_KEY is not set so
  * the retry loop can be exercised in tests and local dev.
- *
- * NOTE: Gemini access is provided through FAL (fal.ai) which has a
- * Gemini binding. The FAL_AI_API_KEY is used with the Gemini API endpoint.
  */
 
 import { FL_ERRORS, flError } from "./errors.js";
@@ -28,12 +26,16 @@ export interface GeminiVisionOutput {
   model: string;
 }
 
-// FAL provides a Gemini-compatible API key
 const FAL_AI_API_KEY = process.env.FAL_AI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-pro";
 
+/** Map bare model name to FAL model ID (e.g. "gemini-2.5-pro" → "google/gemini-2.5-pro"). */
+function toFalModelId(model: string): string {
+  return model.includes("/") ? model : `google/${model}`;
+}
+
 /**
- * Analyze images via Gemini Vision and return raw text content.
+ * Analyze images via Gemini Vision (routed through FAL any-llm) and return raw text content.
  * Caller is responsible for parsing JSON from the response.
  */
 export async function analyzeWithGeminiVision(input: GeminiVisionInput): Promise<GeminiVisionOutput> {
@@ -54,53 +56,41 @@ export async function analyzeWithGeminiVision(input: GeminiVisionInput): Promise
     };
   }
 
-  const imageParts = await Promise.all(input.image_urls.map(async (url) => {
-    let data: string;
-    let mimeType = "image/png";
-    if (url.startsWith("data:")) {
-      const [header, b64] = url.split(",", 2);
-      mimeType = header.match(/data:([^;]+)/)?.[1] ?? "image/png";
-      data = b64;
-    } else if (url.startsWith("http://") || url.startsWith("https://")) {
-      const res = await fetch(url);
-      const buf = Buffer.from(await res.arrayBuffer());
-      mimeType = res.headers.get("content-type") ?? "image/jpeg";
-      data = buf.toString("base64");
-    } else {
-      data = url;
-    }
-    return { inline_data: { mime_type: mimeType, data } };
+  const imageContentParts = input.image_urls.map((url) => ({
+    type: "image_url",
+    image_url: { url },
   }));
 
-  const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${FAL_AI_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: input.system_prompt }] },
-        contents: [
-          {
-            parts: [...imageParts, { text: input.user_prompt }],
-          },
-        ],
-      }),
+  const resp = await fetch("https://fal.run/fal-ai/any-llm", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Key ${FAL_AI_API_KEY}`,
     },
-  );
+    body: JSON.stringify({
+      model: toFalModelId(GEMINI_MODEL),
+      system: input.system_prompt,
+      messages: [
+        {
+          role: "user",
+          content: [
+            ...imageContentParts,
+            { type: "text", text: input.user_prompt },
+          ],
+        },
+      ],
+    }),
+  });
 
   if (!resp.ok) {
-    throw flError(FL_ERRORS.GENERATION_ERROR, `Gemini Vision error ${resp.status}: ${await resp.text()}`, {
+    throw flError(FL_ERRORS.GENERATION_ERROR, `FAL Gemini Vision error ${resp.status}: ${await resp.text()}`, {
       retryable: true,
-      suggestion: "Check FAL_AI_API_KEY (Gemini access via FAL) and retry.",
+      suggestion: "Check FAL_AI_API_KEY and retry.",
     });
   }
 
-  const data = (await resp.json()) as {
-    candidates: Array<{ content: { parts: Array<{ text: string }> } }>;
-  };
-  const text = data.candidates[0]?.content.parts.map((p) => p.text).join("") ?? "";
-
-  return { content: text, model: GEMINI_MODEL };
+  const data = (await resp.json()) as { output: string; model?: string };
+  return { content: data.output, model: data.model ?? toFalModelId(GEMINI_MODEL) };
 }
 
 /** Strip markdown fences from a JSON-ish string. */
