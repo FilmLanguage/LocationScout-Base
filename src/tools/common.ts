@@ -89,6 +89,7 @@ export function registerCommonTools(server: McpServer) {
             status: task.status,
             progress: task.progress,
             current_step: task.current_step,
+            error: task.error ?? null,
           }),
         }],
       };
