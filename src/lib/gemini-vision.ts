@@ -56,11 +56,6 @@ export async function analyzeWithGeminiVision(input: GeminiVisionInput): Promise
     };
   }
 
-  const imageContentParts = input.image_urls.map((url) => ({
-    type: "image_url",
-    image_url: { url },
-  }));
-
   const resp = await fetch("https://fal.run/fal-ai/any-llm", {
     method: "POST",
     headers: {
@@ -69,16 +64,9 @@ export async function analyzeWithGeminiVision(input: GeminiVisionInput): Promise
     },
     body: JSON.stringify({
       model: toFalModelId(GEMINI_MODEL),
-      system: input.system_prompt,
-      messages: [
-        {
-          role: "user",
-          content: [
-            ...imageContentParts,
-            { type: "text", text: input.user_prompt },
-          ],
-        },
-      ],
+      system_prompt: input.system_prompt,
+      prompt: input.user_prompt,
+      image_url: input.image_urls[0],
     }),
   });
 

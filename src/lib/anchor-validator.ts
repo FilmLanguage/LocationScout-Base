@@ -76,7 +76,7 @@ Bible spec:
 - light direction: ${opts.bible.light_base_state.direction}
 - color_temp_kelvin: ${opts.bible.light_base_state.color_temp_kelvin}
 - shadow_hardness: ${opts.bible.light_base_state.shadow_hardness}
-- key_details: ${opts.bible.key_details.join(" | ")}
+- key_details: ${opts.bible.key_details.map(d => typeof d === "string" ? d : JSON.stringify(d)).join(" | ")}
 - negative_list (must NOT appear): ${negativeList.join(" | ")}
 
 Return JSON only. No markdown fences.`;
