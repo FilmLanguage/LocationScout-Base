@@ -182,9 +182,21 @@ export function registerCommonTools(server: McpServer) {
       recommendation: z.string().describe("Summary of what needs to change"),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    async ({ artifact_uri, issues, recommendation }) => ({
-      content: [{ type: "text" as const, text: JSON.stringify({ artifact_uri, verdict: "rejected", issues_count: issues.length, recommendation }) }],
-    }),
+    async ({ artifact_uri, issues, recommendation }) => {
+      const parsed = parseArtifactUri(artifact_uri);
+      if (parsed) {
+        const artifact = await loadArtifact<Record<string, unknown>>(parsed.type, parsed.id);
+        if (artifact) {
+          artifact.approval_status = "rejected";
+          artifact.rejection_issues = issues;
+          artifact.rejected_at = new Date().toISOString();
+          await saveArtifact(parsed.type, parsed.id, artifact);
+        }
+      }
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ artifact_uri, verdict: "rejected", issues_count: issues.length, recommendation }) }],
+      };
+    },
   );
 
   // 8. request_revision
