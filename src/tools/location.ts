@@ -546,7 +546,7 @@ export function registerLocationTools(server: McpServer) {
 
           updateTask(task_id, { progress: 0.4, current_step: "Spawning Python floorplan renderer (matplotlib)" });
 
-          const pyBin = process.env.PYTHON_BIN ?? "python";
+          const pyBin = process.env.PYTHON_BIN ?? "python3";
           // scripts/floorplan.py lives at repo root; from src/tools/ that is ../../scripts
           const scriptPath = pathResolve(__dirname, "..", "..", "scripts", "floorplan.py");
 
