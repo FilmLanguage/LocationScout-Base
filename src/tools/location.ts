@@ -17,6 +17,7 @@ import { resolve as pathResolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReferenceRefSchema, type ReferenceRef } from "../lib/ref-schema.js";
 import { EditModeSchema, composeEditPrompt, resolveEditBase } from "../lib/edit-mode.js";
+import { readAgentResource } from "../lib/mcp-resource-client.js";
 
 /**
  * Resolve a ReferenceRef to a data URL the image model can ingest. Supports:
@@ -141,12 +142,52 @@ export function registerLocationTools(server: McpServer) {
     "Run full location scouting pipeline: research era, write Bible, generate anchor image, create floorplan. Returns task_id for async tracking. Requires location_brief (from 1AD) and director_vision (from Director agent) as inputs.",
     {
       project_id: z.string().describe("Project GUID"),
-      location_brief: LocationBriefSchema,
-      director_vision: DirectorVisionInputSchema,
+      location_brief: LocationBriefSchema.optional().describe("Location brief from 1AD. Auto-fetched via MCP if omitted and AGENT_1AD_URL is set."),
+      director_vision: DirectorVisionInputSchema.optional().describe("Director vision from Director agent. Auto-fetched via MCP if omitted and AGENT_DIRECTOR_URL is set."),
+      location_name: z.string().optional().describe("Location name hint for brief matching during auto-resolve"),
       priority: z.enum(["low", "normal", "high", "critical"]).default("normal"),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async ({ project_id, location_brief, director_vision }) => {
+    async (rawParams) => {
+      const { project_id, location_name } = rawParams;
+      let resolvedBrief = rawParams.location_brief;
+      let resolvedVision = rawParams.director_vision;
+
+      if (!resolvedBrief && project_id) {
+        const url1AD = process.env.AGENT_1AD_URL;
+        if (url1AD) {
+          const briefs = await readAgentResource(url1AD, `agent://1ad/location-briefs/${project_id}`).catch(() => null);
+          if (briefs && !("error" in (briefs as object))) {
+            const arr = Array.isArray(briefs) ? briefs : ((briefs as Record<string, unknown>).locations as unknown[] ?? []);
+            const match = arr.find((b: unknown) => {
+              const entry = b as Record<string, unknown>;
+              return String(entry.location_name ?? "").toLowerCase().includes((location_name ?? "").toLowerCase());
+            });
+            if (match) resolvedBrief = match as z.infer<typeof LocationBriefSchema>;
+          }
+        }
+      }
+
+      if (!resolvedVision && project_id) {
+        const directorUrl = process.env.AGENT_DIRECTOR_URL;
+        if (directorUrl) {
+          const vision = await readAgentResource(directorUrl, `agent://director/location-vision/${project_id}`).catch(() => null);
+          if (vision && !("error" in (vision as object))) {
+            resolvedVision = vision as z.infer<typeof DirectorVisionInputSchema>;
+          }
+        }
+      }
+
+      if (!resolvedBrief) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ error: "location_brief required: provide inline or set project_id + AGENT_1AD_URL for auto-resolve" }) }],
+          isError: true,
+        };
+      }
+
+      const location_brief = resolvedBrief;
+      const director_vision = resolvedVision ?? { era_style: "" };
+
       const task_id = crypto.randomUUID();
       createTask(task_id, "Starting location scouting pipeline");
 
@@ -203,11 +244,52 @@ export function registerLocationTools(server: McpServer) {
     "research_era",
     "Research historical era for a location. Returns period facts, typical elements, and anachronism list. Long-running: returns task_id for async tracking.",
     {
-      location_brief: LocationBriefSchema,
-      director_vision: DirectorVisionInputSchema,
+      project_id: z.string().optional().describe("Project GUID. When set, location_brief and director_vision are auto-fetched via MCP if omitted."),
+      location_brief: LocationBriefSchema.optional().describe("Location brief from 1AD. Auto-fetched via MCP if omitted and AGENT_1AD_URL is set."),
+      director_vision: DirectorVisionInputSchema.optional().describe("Director vision. Auto-fetched via MCP if omitted and AGENT_DIRECTOR_URL is set."),
+      location_name: z.string().optional().describe("Location name hint for brief matching during auto-resolve"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    async ({ location_brief, director_vision }) => {
+    async (rawParams) => {
+      const { project_id, location_name } = rawParams;
+      let resolvedBrief = rawParams.location_brief;
+      let resolvedVision = rawParams.director_vision;
+
+      if (!resolvedBrief && project_id) {
+        const url1AD = process.env.AGENT_1AD_URL;
+        if (url1AD) {
+          const briefs = await readAgentResource(url1AD, `agent://1ad/location-briefs/${project_id}`).catch(() => null);
+          if (briefs && !("error" in (briefs as object))) {
+            const arr = Array.isArray(briefs) ? briefs : ((briefs as Record<string, unknown>).locations as unknown[] ?? []);
+            const match = arr.find((b: unknown) => {
+              const entry = b as Record<string, unknown>;
+              return String(entry.location_name ?? "").toLowerCase().includes((location_name ?? "").toLowerCase());
+            });
+            if (match) resolvedBrief = match as z.infer<typeof LocationBriefSchema>;
+          }
+        }
+      }
+
+      if (!resolvedVision && project_id) {
+        const directorUrl = process.env.AGENT_DIRECTOR_URL;
+        if (directorUrl) {
+          const vision = await readAgentResource(directorUrl, `agent://director/location-vision/${project_id}`).catch(() => null);
+          if (vision && !("error" in (vision as object))) {
+            resolvedVision = vision as z.infer<typeof DirectorVisionInputSchema>;
+          }
+        }
+      }
+
+      if (!resolvedBrief) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ error: "location_brief required: provide inline or set project_id + AGENT_1AD_URL for auto-resolve" }) }],
+          isError: true,
+        };
+      }
+
+      const location_brief = resolvedBrief;
+      const director_vision = resolvedVision ?? { era_style: "" };
+
       const task_id = crypto.randomUUID();
       createTask(task_id, "Researching era");
 
@@ -240,12 +322,53 @@ export function registerLocationTools(server: McpServer) {
     "write_bible",
     "Generate a Location Bible from location brief, research pack, and director vision. Returns location-bible-v2 JSON. Long-running: returns task_id for async tracking.",
     {
-      location_brief: LocationBriefSchema,
+      project_id: z.string().optional().describe("Project GUID. When set, location_brief and director_vision are auto-fetched via MCP if omitted."),
+      location_brief: LocationBriefSchema.optional().describe("Location brief from 1AD. Auto-fetched via MCP if omitted and AGENT_1AD_URL is set."),
       research_pack_uri: z.string().describe("MCP resource URI of the research pack"),
-      director_vision: DirectorVisionInputSchema,
+      director_vision: DirectorVisionInputSchema.optional().describe("Director vision. Auto-fetched via MCP if omitted and AGENT_DIRECTOR_URL is set."),
+      location_name: z.string().optional().describe("Location name hint for brief matching during auto-resolve"),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async ({ location_brief, research_pack_uri, director_vision }) => {
+    async (rawParams) => {
+      const { project_id, location_name, research_pack_uri } = rawParams;
+      let resolvedBrief = rawParams.location_brief;
+      let resolvedVision = rawParams.director_vision;
+
+      if (!resolvedBrief && project_id) {
+        const url1AD = process.env.AGENT_1AD_URL;
+        if (url1AD) {
+          const briefs = await readAgentResource(url1AD, `agent://1ad/location-briefs/${project_id}`).catch(() => null);
+          if (briefs && !("error" in (briefs as object))) {
+            const arr = Array.isArray(briefs) ? briefs : ((briefs as Record<string, unknown>).locations as unknown[] ?? []);
+            const match = arr.find((b: unknown) => {
+              const entry = b as Record<string, unknown>;
+              return String(entry.location_name ?? "").toLowerCase().includes((location_name ?? "").toLowerCase());
+            });
+            if (match) resolvedBrief = match as z.infer<typeof LocationBriefSchema>;
+          }
+        }
+      }
+
+      if (!resolvedVision && project_id) {
+        const directorUrl = process.env.AGENT_DIRECTOR_URL;
+        if (directorUrl) {
+          const vision = await readAgentResource(directorUrl, `agent://director/location-vision/${project_id}`).catch(() => null);
+          if (vision && !("error" in (vision as object))) {
+            resolvedVision = vision as z.infer<typeof DirectorVisionInputSchema>;
+          }
+        }
+      }
+
+      if (!resolvedBrief) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ error: "location_brief required: provide inline or set project_id + AGENT_1AD_URL for auto-resolve" }) }],
+          isError: true,
+        };
+      }
+
+      const location_brief = resolvedBrief;
+      const director_vision = resolvedVision ?? { era_style: "" };
+
       const task_id = crypto.randomUUID();
       createTask(task_id, "Writing Location Bible");
 
