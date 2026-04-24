@@ -69,9 +69,9 @@ export function getPool(): pg.Pool {
     user:     process.env.YANDEX_DB_USER,
     password: process.env.YANDEX_DB_PASSWORD,
     ssl:      ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: false },
-    max: 4,
+    max: 10,
     idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 5_000,
   });
   pool.on("error", (err) => console.warn("[db] pool error:", err.message));
   return pool;
@@ -323,21 +323,12 @@ export async function saveArtifactToPg(
       );
       const artifactId = insertRes.rows[0].id;
 
-      // Event log entry (v2.events if available; fall back to activity_feed)
-      try {
-        await client.query(
-          `INSERT INTO v2.events (project_id, event_type, entity_type, entity_id, payload, published_by)
-           VALUES ($1, $2, $3, $4, $5::jsonb, $6);`,
-          [projectId, `${type}_saved`, mapping.table, artifactId, JSON.stringify({ artifact_id: artifactId, version: nextVersion }), AGENT_ID]
-        );
-      } catch {
-        // v2.events may not exist yet — fallback to activity_feed.
-        await client.query(
-          `INSERT INTO v2.activity_feed (project_id, event_type, title, agent_id, target_table, target_id)
-           VALUES ($1, $2, $3, $4, $5, $6);`,
-          [projectId, `${type}_saved`, `Saved ${type}: ${id}`, AGENT_ID, `v2.${mapping.table}`, artifactId]
-        );
-      }
+      // Event log entry
+      await client.query(
+        `INSERT INTO v2.events (project_id, event_type, entity_type, entity_id, payload, published_by)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6);`,
+        [projectId, `${type}_saved`, mapping.table, artifactId, JSON.stringify({ artifact_id: artifactId, version: nextVersion }), AGENT_ID]
+      );
 
       await client.query("COMMIT");
       return { artifactId, version: nextVersion };
