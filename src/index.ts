@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
 import { VERSION } from "./lib/version.js";
+import { isDbEnabled, getPool, waitForDatabase, isCircuitOpen } from "./lib/db.js";
 
 import { registerCommonTools } from "./tools/common.js";
 import { registerLocationTools } from "./tools/location.js";
@@ -111,10 +112,29 @@ app.get("/artifacts/:type/:file", async (req, res) => {
 mountSwagger(app);
 
 app.get("/health", (_req, res) => {
+  if (isCircuitOpen()) {
+    res.status(503).json({
+      status: "degraded",
+      reason: "STORAGE_UNAVAILABLE",
+      version: VERSION,
+      uptime_seconds: Math.floor(process.uptime()),
+    });
+    return;
+  }
   res.json({ status: "ok", version: VERSION, uptime_seconds: Math.floor(process.uptime()) });
 });
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-  console.log(`Location Scout MCP server listening on port ${PORT}`);
-});
+
+// Fail-fast DB probe: if DB is configured, ensure connection before accepting traffic.
+if (isDbEnabled()) {
+  waitForDatabase(getPool()).then(() => {
+    app.listen(PORT, () => {
+      console.log(`Location Scout MCP server listening on port ${PORT}`);
+    });
+  });
+} else {
+  app.listen(PORT, () => {
+    console.log(`Location Scout MCP server listening on port ${PORT} (DB disabled)`);
+  });
+}

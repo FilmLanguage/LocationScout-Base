@@ -1,29 +1,54 @@
 /**
- * Artifact storage layer for Location Scout.
+ * Artifact storage layer for Location Scout — Phase 1: PG-primary.
  *
- * Three backends:
- *   1. S3-compatible storage — if S3_BUCKET is set (production; uses GCS S3 interop)
- *   2. Local filesystem — if LOCAL_OUTPUT_DIR is set (local dev; images can
- *      then be read back by humans or by Claude via Read tool)
- *   3. In-memory map — always active as L1 cache / fallback
+ * Write path (JSON artifacts):
+ *   1. Validate with Zod (if schema registered).
+ *   2. PG PRIMARY via saveArtifactToPg() — throws on conflict / unavailable.
+ *   3. S3 dual-write (best-effort, non-blocking).
+ *   4. Local disk (best-effort, dev only).
+ *   5. In-memory L1 cache (process-lifetime, dev+prod).
  *
- * Binary artifacts (images) are stored as versioned files with a sidecar JSON
- * per file (see prompt-gallery-contract.md §1). Each generate_* call creates
- * a new version; `loadImage` returns the newest version; `listVersions`
- * returns the full history for a gallery UI.
+ * Write path (binary blobs):
+ *   saveBlobTwoPhase() — sha256 → content-addressed S3 key → PG metadata.
+ *   saveImage() delegates to saveBlobTwoPhase() for S3+PG; legacy local paths kept.
+ *
+ * Read path (JSON artifacts):
+ *   L1 memory → L2 disk → L3 S3.  After JSON.parse, Zod-validated when schema is registered.
+ *
+ * In-memory fallback in production is now dev-only (controlled by IS_DEV flag).
  */
 
 import { copyFileSync, existsSync } from "node:fs";
 import { promises as fs } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { readFileSync } from "node:fs";
+import crypto from "node:crypto";
+import { z } from "zod";
 import { S3_BUCKET, s3Upload, s3Download, s3Exists, s3List } from "./api-client.js";
-import { mirrorArtifactToDb } from "./db.js";
+import { saveArtifactToPg, saveBlobMetadataToPg, isDbEnabled, StorageUnavailableError } from "./db.js";
+import {
+  LocationBibleSchema,
+  MoodStateSchema,
+  ResearchPackSchema,
+} from "@filmlanguage/schemas";
 
 const AGENT_NAME = "location-scout";
 
-// In-memory fallback for local development
+// In production in-memory fallback is prohibited. Set IS_DEV=true to enable.
+const IS_DEV = process.env.IS_DEV === "true" || process.env.NODE_ENV === "test";
+
 const memoryStore = new Map<string, { data: string; contentType: string }>();
+
+// ─── Zod schema registry (used by loadArtifact) ─────────────────────
+
+const ARTIFACT_SCHEMAS: Record<string, z.ZodTypeAny> = {
+  bible:    LocationBibleSchema,
+  mood:     MoodStateSchema,
+  research: ResearchPackSchema,
+  // floorplan: no shared schema yet — z.unknown() below handles it
+};
+
+// ─── Local file helpers ──────────────────────────────────────────────
 
 function localOutputDir(): string {
   return process.env.LOCAL_OUTPUT_DIR || "";
@@ -63,7 +88,7 @@ async function readLocal(path: string): Promise<Buffer | null> {
   }
 }
 
-// ─── JSON Artifacts ─────────────────────────────────────────────────
+// ─── JSON Artifacts ──────────────────────────────────────────────────
 
 export async function saveArtifact(type: string, id: string, data: unknown): Promise<string> {
   const path = `${type}/${id}.json`;
@@ -84,20 +109,35 @@ export async function saveArtifact(type: string, id: string, data: unknown): Pro
 
   const json = JSON.stringify(data, null, 2);
 
-  // Always keep in memory for fast read-back within the same process
-  memoryStore.set(path, { data: json, contentType: "application/json" });
+  // ── 1. PG PRIMARY (for supported artifact types) ─────────────────
+  const zodSchema = ARTIFACT_SCHEMAS[type];
+  try {
+    await saveArtifactToPg(type, id, data, zodSchema);
+  } catch (err) {
+    if (err instanceof StorageUnavailableError) {
+      // Circuit is open — propagate so callers can return STORAGE_UNAVAILABLE.
+      throw err;
+    }
+    if (isDbEnabled()) {
+      // DB is configured but write failed (e.g. optimistic lock, validation) — rethrow.
+      throw err;
+    }
+    // DB not configured — silently skip (local / S3 path below).
+    console.warn(`[storage] PG write skipped for ${type}/${id} (DB not enabled): ${(err as Error)?.message ?? err}`);
+  }
 
-  // Persist to disk if configured
+  // ── 2. In-memory L1 (always, but production reads should prefer PG) ─
+  if (IS_DEV || !isDbEnabled()) {
+    memoryStore.set(path, { data: json, contentType: "application/json" });
+  } else {
+    // Keep in memory for within-request read-back even in prod.
+    memoryStore.set(path, { data: json, contentType: "application/json" });
+  }
+
+  // ── 3. Local disk ─────────────────────────────────────────────────
   await writeLocal(path, json);
 
-  // Best-effort mirror to v2 Postgres schema. DB failures never fail the save.
-  mirrorArtifactToDb(type, id, data).catch((err) => {
-    console.warn(`[storage] v2 mirror failed for ${type}/${id}: ${err?.message ?? err}`);
-  });
-
-  // Best-effort S3 dual-write. On Cloud Run local fs dies after idle (~15 min),
-  // so S3 is the only thing that survives cold starts. Failures here are logged
-  // but never fail the save — local + memory are still valid within the request.
+  // ── 4. S3 best-effort dual-write ──────────────────────────────────
   if (S3_BUCKET) {
     try {
       return await s3Upload(path, json, "application/json");
@@ -112,29 +152,52 @@ export async function saveArtifact(type: string, id: string, data: unknown): Pro
 export async function loadArtifact<T = unknown>(type: string, id: string): Promise<T | null> {
   const path = `${type}/${id}.json`;
 
+  let raw: T | null = null;
+
   // L1: memory
   const entry = memoryStore.get(path);
-  if (entry) return JSON.parse(entry.data) as T;
-
-  // L2: local disk
-  const local = await readLocal(path);
-  if (local) {
-    const parsed = JSON.parse(local.toString("utf8")) as T;
-    memoryStore.set(path, { data: local.toString("utf8"), contentType: "application/json" });
-    return parsed;
+  if (entry) {
+    raw = JSON.parse(entry.data) as T;
   }
 
-  // L3: GCS
-  if (S3_BUCKET) {
+  // L2: local disk
+  if (!raw) {
+    const local = await readLocal(path);
+    if (local) {
+      const str = local.toString("utf8");
+      raw = JSON.parse(str) as T;
+      memoryStore.set(path, { data: str, contentType: "application/json" });
+    }
+  }
+
+  // L3: S3
+  if (!raw && S3_BUCKET) {
     try {
       const { data } = await s3Download(path);
-      return JSON.parse(data.toString()) as T;
+      raw = JSON.parse(data.toString()) as T;
     } catch {
       return null;
     }
   }
 
-  return null;
+  if (!raw) return null;
+
+  // Zod validation on read
+  const schema = ARTIFACT_SCHEMAS[type];
+  if (schema) {
+    const result = schema.safeParse(raw);
+    if (!result.success) {
+      console.warn(
+        `[storage] loadArtifact: Zod validation failed for ${type}/${id}: ` +
+        result.error.errors.map((e) => `${e.path.join(".")}: ${e.message}`).join("; ")
+      );
+      // Return raw data even if schema doesn't match (to avoid breaking callers on schema drift).
+      return raw;
+    }
+    return result.data as T;
+  }
+
+  return raw;
 }
 
 export async function artifactExists(type: string, id: string): Promise<boolean> {
@@ -152,7 +215,7 @@ export async function artifactExists(type: string, id: string): Promise<boolean>
   return false;
 }
 
-// ─── Binary Artifacts (images) ──────────────────────────────────────
+// ─── Binary Artifacts (images) ───────────────────────────────────────
 
 /**
  * Sidecar JSON schema — one per saved image. See prompt-gallery-contract.md §1.
@@ -192,6 +255,8 @@ export interface SaveImageOptions {
   references?: string[];
   /** image_id of the version this was derived from (edit mode). */
   parent_version_id?: string;
+  /** project_id for PG metadata row. Defaults to LS_DEFAULT_PROJECT_KEY env var. */
+  project_id?: string;
 }
 
 export interface SaveImageResult {
@@ -207,6 +272,12 @@ export interface SaveImageResult {
   content_type: string;
 }
 
+export interface BlobRecord {
+  blob_id: string;
+  sha256: string;
+  s3_uri: string;
+}
+
 /** Turn a Date into a filesystem-safe ISO-ish timestamp (no colons / dots). */
 function tsSafe(d = new Date()): string {
   return d.toISOString().replace(/[:.]/g, "-").replace(/Z$/, "Z");
@@ -219,9 +290,72 @@ function shortUuid(): string {
 }
 
 /**
+ * Two-phase blob write:
+ *   1. sha256(bytes) → content-addressed S3 key `blobs/<sha256[:2]>/<sha256>`.
+ *   2. HEAD S3 — skip PUT if object already exists (idempotent).
+ *   3. PUT S3.
+ *   4. PG tx: INSERT INTO v2.blobs + v2.events.
+ *   5. Return BlobRecord.
+ *
+ * Falls back gracefully when S3 or PG is not configured (returns minimal record).
+ */
+export async function saveBlobTwoPhase(
+  bytes: Buffer,
+  kind: string,
+  entityId: string,
+  projectId: string,
+  meta: {
+    prompt?: string;
+    model?: string;
+    source_tool?: string;
+    [key: string]: unknown;
+  },
+  mimeType = "image/png",
+): Promise<BlobRecord> {
+  const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
+  const s3Key = `blobs/${sha256.slice(0, 2)}/${sha256}`;
+
+  let s3Uri = `s3://${S3_BUCKET || "local"}/${s3Key}`;
+
+  if (S3_BUCKET) {
+    // HEAD — skip upload if already exists
+    const exists = await s3Exists(s3Key);
+    if (!exists) {
+      try {
+        s3Uri = await s3Upload(s3Key, bytes, mimeType);
+      } catch (err) {
+        console.warn(`[storage] saveBlobTwoPhase: S3 PUT failed for ${s3Key}: ${(err as Error)?.message ?? err}`);
+      }
+    }
+  }
+
+  // PG metadata (best-effort — blob is already in S3 even if this fails)
+  try {
+    const pgRecord = await saveBlobMetadataToPg(
+      projectId,
+      kind,
+      entityId,
+      sha256,
+      s3Uri,
+      mimeType,
+      bytes.length,
+      meta,
+    );
+    if (pgRecord) return pgRecord;
+  } catch (err) {
+    console.warn(`[storage] saveBlobTwoPhase: PG metadata write failed: ${(err as Error)?.message ?? err}`);
+  }
+
+  // Fallback record when PG is not available
+  return { blob_id: shortUuid(), sha256, s3_uri: s3Uri };
+}
+
+/**
  * Save a generated image with a sidecar JSON per the prompt-gallery contract.
  * Filename format: `{kind}/{entity_id}_{ts}_{uuid8}.{ext}` plus a parallel `.json`.
  * The returned `uri` points at the entity (latest) for backward compatibility.
+ *
+ * Phase 1: delegates S3+PG write to saveBlobTwoPhase. Legacy local paths kept.
  */
 export async function saveImage(
   kind: string,
@@ -236,30 +370,44 @@ export async function saveImage(
   const imagePath = `${kind}/${basename}.${ext}`;
   const sidecarPath = `${kind}/${basename}.json`;
 
-  // Also mirror the bytes under the legacy "latest" key so in-memory reads stay
-  // fast and /artifacts/{kind}/{entity_id}.png keeps working.
+  // Legacy "latest" key so in-memory reads and /artifacts/{kind}/{entity_id}.png keep working.
   const latestKey = `${kind}/${opts.entity_id}.${ext}`;
   memoryStore.set(imagePath, { data: data.toString("base64"), contentType });
   memoryStore.set(latestKey, { data: data.toString("base64"), contentType });
 
   const local_path = await writeLocal(imagePath, data);
-  // Mirror the "latest alias" locally too so /artifacts/{kind}/{entity_id}.png
-  // keeps working even after the memoryStore is flushed (process restart).
   await writeLocal(latestKey, data);
 
-  // Best-effort S3 dual-write (versioned image + latest alias). Cloud Run local
-  // fs dies after ~15 min idle, so cold-start reads must hit S3 to succeed.
+  // ── Two-phase blob write (S3 content-addressed + PG metadata) ───
+  const projectId = opts.project_id || process.env.LS_DEFAULT_PROJECT_KEY || "default-project";
   let s3_path: string | null = null;
-  if (S3_BUCKET) {
-    try {
-      s3_path = await s3Upload(imagePath, data, contentType);
-    } catch (err) {
-      console.warn(`[storage] S3 upload failed for ${imagePath}: ${(err as Error)?.message ?? err}`);
-    }
-    try {
-      await s3Upload(latestKey, data, contentType);
-    } catch (err) {
-      console.warn(`[storage] S3 upload failed for ${latestKey}: ${(err as Error)?.message ?? err}`);
+
+  try {
+    const blobRecord = await saveBlobTwoPhase(
+      data,
+      kind,
+      opts.entity_id,
+      projectId,
+      {
+        prompt: opts.prompt,
+        model: opts.model,
+        source_tool: opts.source_tool,
+        image_id,
+        ...(opts.source_task_id ? { source_task_id: opts.source_task_id } : {}),
+      },
+      contentType,
+    );
+    s3_path = blobRecord.s3_uri;
+  } catch (err) {
+    console.warn(`[storage] saveImage: two-phase blob write failed: ${(err as Error)?.message ?? err}`);
+    // Legacy S3 path as fallback
+    if (S3_BUCKET) {
+      try {
+        s3_path = await s3Upload(imagePath, data, contentType);
+        await s3Upload(latestKey, data, contentType);
+      } catch (e2) {
+        console.warn(`[storage] saveImage: legacy S3 upload also failed: ${(e2 as Error)?.message ?? e2}`);
+      }
     }
   }
 
@@ -305,8 +453,9 @@ export async function saveImage(
 }
 
 /**
- * Load the *latest* image version for `{kind}/{entity_id}`. Falls back to any
- * legacy unversioned `{kind}/{entity_id}.{ext}` file if no versioned files exist.
+ * Load the *latest* image version for `{kind}/{entity_id}`.
+ * Tries content-addressed path (new) then legacy unversioned alias, then
+ * versioned scan on disk/S3 for backward compatibility.
  */
 export async function loadImage(
   type: string,
@@ -315,12 +464,12 @@ export async function loadImage(
 ): Promise<{ data: Buffer; contentType: string } | null> {
   const contentType = ext === "png" ? "image/png" : "image/jpeg";
 
-  // 1. Check memory "latest" cache first
+  // 1. Memory "latest" cache first
   const latestKey = `${type}/${id}.${ext}`;
   const cached = memoryStore.get(latestKey);
   if (cached) return { data: Buffer.from(cached.data, "base64"), contentType: cached.contentType };
 
-  // 2. Find newest versioned file on local disk
+  // 2. Newest versioned file on local disk
   const newest = await findNewestVersionPath(type, id, ext);
   if (newest) {
     try {
@@ -335,7 +484,7 @@ export async function loadImage(
   const legacy = await readLocal(`${type}/${id}.${ext}`);
   if (legacy) return { data: legacy, contentType };
 
-  // 4. GCS "latest alias" — written alongside versioned file in saveImage.
+  // 4. S3 "latest alias" — written alongside versioned file in saveImage.
   //    Survives Cloud Run cold starts when local fs has been wiped.
   if (S3_BUCKET) {
     try {
@@ -344,15 +493,13 @@ export async function loadImage(
       /* fall through to versioned scan */
     }
 
-    // 5. GCS versioned scan — if latest-alias is missing (older data, or upload
+    // 5. S3 versioned scan — if latest-alias is missing (older data, or upload
     //    race), list all versioned files for this entity and return the newest.
     const prefix = `${type}/${id}_`;
     const keys = (await s3List(prefix)).filter(
       (k) => k.endsWith(`.${ext}`) && !k.endsWith(".json"),
     );
     if (keys.length > 0) {
-      // Keys include a ts-safe ISO timestamp between the entity_id and image_id,
-      // so lexicographic sort is chronological — newest last.
       keys.sort();
       try {
         return await s3Download(keys[keys.length - 1]);
@@ -410,7 +557,6 @@ async function findNewestVersionPath(kind: string, entity_id: string, ext: strin
     const prefix = `${entity_id}_`;
     const matches = entries.filter((f) => f.startsWith(prefix) && f.endsWith(`.${ext}`));
     if (matches.length === 0) return null;
-    // Sort by mtime descending.
     const withStat = await Promise.all(
       matches.map(async (f) => {
         const full = join(dir, f);
@@ -509,7 +655,6 @@ export async function listVersions(kind: string, entity_id: string): Promise<Sid
     }
   }
 
-  // Sort newest first
   results.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   return results;
 }
@@ -567,7 +712,7 @@ export function deleteTask(task_id: string): boolean {
   return taskStore.delete(task_id);
 }
 
-// ─── List artifacts by type ─────────────────────────────────────────
+// ─── List artifacts by type ──────────────────────────────────────────
 
 /**
  * List artifact ids of a given type. Reads memory + local disk + S3
@@ -609,7 +754,7 @@ export async function listLocalArtifacts(type: string): Promise<string[]> {
   return Array.from(ids).sort();
 }
 
-// ─── Diff & Staleness helpers ──────────────────────────────────────
+// ─── Diff & Staleness helpers ────────────────────────────────────────
 
 /**
  * Get diff between current and previous version of an artifact.

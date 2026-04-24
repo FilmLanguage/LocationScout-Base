@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { isDbEnabled, supportedArtifactTypes, artifactTableFor, mirrorArtifactToDb } from "./db.js";
+import { isDbEnabled, supportedArtifactTypes, artifactTableFor, saveArtifactToPg } from "./db.js";
 
 const KEYS = ["YANDEX_DB_HOST", "YANDEX_DB_NAME", "YANDEX_DB_USER", "YANDEX_DB_PASSWORD"] as const;
 
@@ -62,21 +62,22 @@ describe("isDbEnabled", () => {
   });
 });
 
-describe("mirrorArtifactToDb (DB disabled)", () => {
+describe("saveArtifactToPg (DB disabled)", () => {
   const snap = snapshotEnv();
   afterEach(() => restoreEnv(snap));
 
-  it("returns null for unsupported type even with DB enabled", async () => {
+  it("returns null for unsupported type regardless of DB env", async () => {
     process.env.YANDEX_DB_HOST = "h";
     process.env.YANDEX_DB_NAME = "n";
     process.env.YANDEX_DB_USER = "u";
     process.env.YANDEX_DB_PASSWORD = "p";
-    expect(await mirrorArtifactToDb("validation", "v_001", { ok: true })).toBeNull();
+    // "validation" is not in TYPE_MAP → null without hitting the network
+    expect(await saveArtifactToPg("validation", "v_001", { ok: true })).toBeNull();
   });
 
   it("returns null when DB env vars missing", async () => {
     for (const k of KEYS) delete process.env[k];
-    expect(await mirrorArtifactToDb("bible", "loc_001", { bible_id: "loc_001" })).toBeNull();
+    expect(await saveArtifactToPg("bible", "loc_001", { bible_id: "loc_001" })).toBeNull();
   });
 
   it("returns null for non-object payload", async () => {
@@ -84,8 +85,8 @@ describe("mirrorArtifactToDb (DB disabled)", () => {
     process.env.YANDEX_DB_NAME = "n";
     process.env.YANDEX_DB_USER = "u";
     process.env.YANDEX_DB_PASSWORD = "p";
-    expect(await mirrorArtifactToDb("bible", "loc_001", null)).toBeNull();
-    expect(await mirrorArtifactToDb("bible", "loc_001", "string")).toBeNull();
-    expect(await mirrorArtifactToDb("bible", "loc_001", [1, 2, 3])).toBeNull();
+    expect(await saveArtifactToPg("bible", "loc_001", null)).toBeNull();
+    expect(await saveArtifactToPg("bible", "loc_001", "string")).toBeNull();
+    expect(await saveArtifactToPg("bible", "loc_001", [1, 2, 3])).toBeNull();
   });
 });
