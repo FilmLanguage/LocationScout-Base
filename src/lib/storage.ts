@@ -31,6 +31,7 @@ import {
   MoodStateSchema,
   ResearchPackSchema,
 } from "@filmlanguage/schemas";
+import { validatePayload } from "./schema-registry.js";
 
 const AGENT_NAME = "location-scout";
 
@@ -182,22 +183,8 @@ export async function loadArtifact<T = unknown>(type: string, id: string): Promi
 
   if (!raw) return null;
 
-  // Zod validation on read
-  const schema = ARTIFACT_SCHEMAS[type];
-  if (schema) {
-    const result = schema.safeParse(raw);
-    if (!result.success) {
-      console.warn(
-        `[storage] loadArtifact: Zod validation failed for ${type}/${id}: ` +
-        result.error.errors.map((e) => `${e.path.join(".")}: ${e.message}`).join("; ")
-      );
-      // Return raw data even if schema doesn't match (to avoid breaking callers on schema drift).
-      return raw;
-    }
-    return result.data as T;
-  }
-
-  return raw;
+  // Zod validation on read — throws SCHEMA_MISMATCH if payload is stale/corrupt.
+  return validatePayload<T>(type, raw);
 }
 
 export async function artifactExists(type: string, id: string): Promise<boolean> {
