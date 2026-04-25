@@ -1,0 +1,62 @@
+import { z } from "zod";
+export declare const ARTIFACT_TYPE: "mood_states";
+export declare const ARTIFACT_VERSION: "v1";
+export declare const PRODUCED_BY: "location-scout-base";
+export declare const MIME_TYPE: "application/json";
+export declare const URI_PATTERN: "agent://location-scout/mood/{id}";
+export declare const MoodStateSchema: z.ZodObject<{
+    $schema: z.ZodLiteral<"mood-state-v1">;
+    state_id: z.ZodString;
+    bible_id: z.ZodString;
+    scene_ids: z.ZodArray<z.ZodString, "many">;
+    act: z.ZodNumber;
+    time_of_day: z.ZodEnum<["DAY", "NIGHT", "DAWN", "DUSK", "LATE_NIGHT"]>;
+    light_direction: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    weather: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    color_temp_kelvin: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    shadow_hardness: z.ZodOptional<z.ZodNullable<z.ZodEnum<["hard", "soft", "mixed"]>>>;
+    light_change: z.ZodOptional<z.ZodString>;
+    props_change: z.ZodOptional<z.ZodString>;
+    atmosphere_shift: z.ZodOptional<z.ZodString>;
+    clutter_level: z.ZodOptional<z.ZodEnum<["clean", "slight", "messy", "destroyed"]>>;
+    window_state: z.ZodOptional<z.ZodNullable<z.ZodEnum<["open", "closed", "curtains_drawn", "boarded_up"]>>>;
+}, "strip", z.ZodTypeAny, {
+    bible_id: string;
+    $schema: "mood-state-v1";
+    time_of_day: "DAY" | "NIGHT" | "DAWN" | "DUSK" | "LATE_NIGHT";
+    state_id: string;
+    scene_ids: string[];
+    act: number;
+    color_temp_kelvin?: number | null | undefined;
+    shadow_hardness?: "hard" | "soft" | "mixed" | null | undefined;
+    light_direction?: string | null | undefined;
+    weather?: string | null | undefined;
+    light_change?: string | undefined;
+    props_change?: string | undefined;
+    atmosphere_shift?: string | undefined;
+    clutter_level?: "clean" | "slight" | "messy" | "destroyed" | undefined;
+    window_state?: "open" | "closed" | "curtains_drawn" | "boarded_up" | null | undefined;
+}, {
+    bible_id: string;
+    $schema: "mood-state-v1";
+    time_of_day: "DAY" | "NIGHT" | "DAWN" | "DUSK" | "LATE_NIGHT";
+    state_id: string;
+    scene_ids: string[];
+    act: number;
+    color_temp_kelvin?: number | null | undefined;
+    shadow_hardness?: "hard" | "soft" | "mixed" | null | undefined;
+    light_direction?: string | null | undefined;
+    weather?: string | null | undefined;
+    light_change?: string | undefined;
+    props_change?: string | undefined;
+    atmosphere_shift?: string | undefined;
+    clutter_level?: "clean" | "slight" | "messy" | "destroyed" | undefined;
+    window_state?: "open" | "closed" | "curtains_drawn" | "boarded_up" | null | undefined;
+}>;
+export type MoodState = z.infer<typeof MoodStateSchema>;
+export declare const MoodStateJsonSchema: import("zod-to-json-schema").JsonSchema7Type & {
+    $schema?: string | undefined;
+    definitions?: {
+        [key: string]: import("zod-to-json-schema").JsonSchema7Type;
+    } | undefined;
+};
