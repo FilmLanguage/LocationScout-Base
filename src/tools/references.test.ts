@@ -10,7 +10,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ReferenceRefSchema, AGENT_KEY } from "../lib/ref-schema.js";
+import { ReferenceRefSchema } from "@filmlanguage/schemas";
+const AGENT_KEY = "location-scout" as const;
 
 describe("ReferenceRefSchema", () => {
   it("validates a minimal ref", () => {

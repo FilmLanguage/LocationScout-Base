@@ -14,7 +14,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { saveImage, listVersions } from "../lib/storage.js";
-import { AGENT_KEY, type ReferenceRef } from "../lib/ref-schema.js";
+import type { ReferenceRef } from "@filmlanguage/schemas";
+const AGENT_KEY = "location-scout" as const;
 
 export function registerReferenceTools(server: McpServer) {
   server.tool(

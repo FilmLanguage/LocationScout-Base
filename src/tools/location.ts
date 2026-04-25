@@ -15,7 +15,7 @@ import {
 import { spawnSync } from "node:child_process";
 import { resolve as pathResolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ReferenceRefSchema, type ReferenceRef } from "../lib/ref-schema.js";
+import { ReferenceRefSchema, type ReferenceRef } from "@filmlanguage/schemas";
 import { EditModeSchema, composeEditPrompt, resolveEditBase } from "../lib/edit-mode.js";
 import { readAgentResource } from "../lib/mcp-resource-client.js";
 
