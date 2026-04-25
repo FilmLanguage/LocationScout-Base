@@ -33,7 +33,7 @@ function createServer(): McpServer {
 const app = express();
 app.use(express.json());
 
-// CORS for local dev (Vite on :5173 → Express on :8080)
+// CORS for local dev (Vite on :5176 → Express on :8083)
 app.use((_req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -123,7 +123,7 @@ app.get("/health", async (_req, res) => {
   res.json({ status: "ok", version: VERSION, uptime_seconds: Math.floor(process.uptime()) });
 });
 
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 8083;
 
 app.listen(PORT, () => {
   console.log(`Location Scout MCP server listening on port ${PORT}`);

@@ -5,10 +5,10 @@ export default defineConfig({
   plugins: [react()],
   root: ".",
   server: {
-    port: 5173,
+    port: 5176,
     proxy: {
-      "/mcp": { target: "http://localhost:8080", changeOrigin: true },
-      "/health": { target: "http://localhost:8080", changeOrigin: true },
+      "/mcp": { target: "http://localhost:8083", changeOrigin: true },
+      "/health": { target: "http://localhost:8083", changeOrigin: true },
     },
   },
   build: { outDir: "dist-ui" },
