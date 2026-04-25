@@ -16,6 +16,11 @@ import { callTool, pollTask, type TaskStatus } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
 import type { DirectorVision, LocationBrief } from "../state/pipeline";
 
+interface UpstreamGate {
+  director_film_vision: "ready" | "missing" | "unknown";
+  warnings: string[];
+}
+
 // Stable IDs for the demo session — Phase 5 wiring uses fixed values so the
 // backend can be exercised without persistent project state.
 const PROJECT_ID = "demo-project";
@@ -33,6 +38,15 @@ export function InputPage() {
   // tries to advance without making the required selections.
   const passportRef = useRef<HTMLDivElement | null>(null);
   const [flashSelections, setFlashSelections] = useState(false);
+
+  // Upstream gate: check if Director has saved a film vision for this project.
+  const [upstreamGate, setUpstreamGate] = useState<UpstreamGate | null>(null);
+
+  useEffect(() => {
+    callTool<UpstreamGate>("get_upstream_gates", { project_id: PROJECT_ID })
+      .then(({ data }) => { if (data) setUpstreamGate(data); })
+      .catch(() => { /* non-fatal — unknown state, no banner shown */ });
+  }, []);
 
   // Async progress state for the Start Research pipeline call.
   const [taskStatus, setTaskStatus] = useState<TaskStatus | null>(null);
@@ -374,6 +388,20 @@ export function InputPage() {
 
   return (
     <div className="input-page" data-figma-node="306:2">
+      {upstreamGate?.director_film_vision === "missing" && (
+        <div style={{
+          background: "rgba(247, 146, 126, 0.12)",
+          border: "1px solid var(--red)",
+          borderRadius: "6px",
+          padding: "8px 12px",
+          fontSize: "13px",
+          color: "var(--red)",
+          lineHeight: "1.5",
+          marginBottom: "16px",
+        }}>
+          ⚠ Director film vision not yet set — location scouting may not match the intended tone
+        </div>
+      )}
       <div className="input-page__columns">
         {/* ───── Left column: Location Brief ───── */}
         <div className="input-page__column">

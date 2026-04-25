@@ -1894,4 +1894,47 @@ export function registerLocationTools(server: McpServer) {
       }
     },
   );
+
+  // ─── Upstream gates ───────────────────────────────────────────────
+
+  server.tool(
+    "get_upstream_gates",
+    "Check upstream pipeline readiness for a project. Returns director film vision status. Non-blocking — treat 'missing' as a soft warning, not a hard error.",
+    {
+      project_id: z.string().describe("Project ID"),
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    async ({ project_id }) => {
+      const result: {
+        director_film_vision: "ready" | "missing" | "unknown";
+        warnings: string[];
+      } = {
+        director_film_vision: "unknown",
+        warnings: [],
+      };
+
+      const director_url = process.env.AGENT_DIRECTOR_URL ?? "";
+      if (!director_url) {
+        return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
+      }
+
+      try {
+        const dfv = await readAgentResource(
+          director_url,
+          `agent://director/film-vision/${project_id}`,
+        ) as Record<string, unknown> | null;
+
+        result.director_film_vision = dfv ? "ready" : "missing";
+        if (result.director_film_vision === "missing") {
+          result.warnings.push(
+            "⚠ Director film vision not yet set — location scouting may not match the intended tone",
+          );
+        }
+      } catch {
+        // unknown → no warning shown
+      }
+
+      return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
+    },
+  );
 }
