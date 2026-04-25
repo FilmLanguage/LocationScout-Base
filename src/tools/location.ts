@@ -207,7 +207,15 @@ export function registerLocationTools(server: McpServer) {
             [{ role: "user", content: `Location: ${location_brief.location_name}\nEra: ${location_brief.era}\nType: ${location_brief.location_type}\nDirector style: ${director_vision.era_style}` }],
           );
           const researchId = `research_${location_brief.location_id}`;
-          await saveArtifact("research", researchId, JSON.parse(stripCodeFence(research.content)));
+          const llmResearchPipeline = JSON.parse(stripCodeFence(research.content));
+          const researchPipelinePayload = {
+            $schema: "research-pack-v1" as const,
+            research_id: researchId,
+            brief_id: location_brief.location_id,
+            vision_id: `vision_${location_brief.location_id}`,
+            ...llmResearchPipeline,
+          };
+          await saveArtifact("research", researchId, researchPipelinePayload);
           updateTask(task_id, { progress: 0.3, current_step: "Research complete, writing Bible" });
 
           // Step 2: Write Bible
@@ -312,7 +320,15 @@ export function registerLocationTools(server: McpServer) {
             [{ role: "user", content: `Location: ${location_brief.location_name}\nEra: ${location_brief.era}\nType: ${location_brief.location_type}\nStyle: ${director_vision.era_style}` }],
           );
           const researchId = `research_${location_brief.location_id}`;
-          await saveArtifact("research", researchId, JSON.parse(stripCodeFence(result.content)));
+          const llmResearch = JSON.parse(stripCodeFence(result.content));
+          const researchPayload = {
+            $schema: "research-pack-v1" as const,
+            research_id: researchId,
+            brief_id: location_brief.location_id,
+            vision_id: `vision_${location_brief.location_id}`,
+            ...llmResearch,
+          };
+          await saveArtifact("research", researchId, researchPayload);
           updateTask(task_id, {
             status: "completed", progress: 1.0, current_step: "Research complete",
             artifacts: [{ uri: `agent://location-scout/research/${researchId}`, mime_type: "application/json", created_at: new Date().toISOString() }],
