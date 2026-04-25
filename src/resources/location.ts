@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { loadArtifact, loadImage, getTask } from "../lib/storage.js";
+import { S3_BUCKET } from "../lib/api-client.js";
 import {
   LocationBibleJsonSchema,
   MoodStateJsonSchema,
@@ -23,7 +24,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "bible",
-    "agent://location-scout/bible/{bible_id}",
+    "agent://location-scout/bible/{location_id}",
     {
       description: "Location Bible artifact. Returns location-bible-v2 JSON.",
       mimeType: "application/json",
@@ -56,10 +57,10 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "anchor",
-    "agent://location-scout/anchor/{anchor_id}",
+    "agent://location-scout/anchor/{location_id}",
     {
-      description: "Location anchor image. Returns PNG binary as base64.",
-      mimeType: "image/png",
+      description: "Location anchor image metadata. Returns JSON with GCS/S3 URL (not raw bytes).",
+      mimeType: "application/json",
     },
     async (uri) => {
       const id = extractId(uri);
@@ -70,16 +71,17 @@ export function registerResources(server: McpServer) {
           contents: [{
             uri: uri.href,
             mimeType: "application/json",
-            text: JSON.stringify({ error: "not_found", anchor_id: id }),
+            text: JSON.stringify({ error: "not_found", location_id: id }),
           }],
         };
       }
 
+      const url = S3_BUCKET ? `s3://${S3_BUCKET}/anchor/${id}.png` : null;
       return {
         contents: [{
           uri: uri.href,
-          mimeType: image.contentType,
-          blob: image.data.toString("base64"),
+          mimeType: "application/json",
+          text: JSON.stringify({ location_id: id, url, mime_type: "image/png" }),
         }],
       };
     },
@@ -122,10 +124,10 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "floorplan",
-    "agent://location-scout/floorplan/{floorplan_id}",
+    "agent://location-scout/floorplan/{location_id}",
     {
-      description: "Location floorplan image. Returns PNG binary as base64.",
-      mimeType: "image/png",
+      description: "Location floorplan metadata. Returns JSON with GCS/S3 URL (not raw bytes).",
+      mimeType: "application/json",
     },
     async (uri) => {
       const id = extractId(uri);
@@ -136,16 +138,17 @@ export function registerResources(server: McpServer) {
           contents: [{
             uri: uri.href,
             mimeType: "application/json",
-            text: JSON.stringify({ error: "not_found", floorplan_id: id }),
+            text: JSON.stringify({ error: "not_found", location_id: id }),
           }],
         };
       }
 
+      const url = S3_BUCKET ? `s3://${S3_BUCKET}/floorplan/${id}.png` : null;
       return {
         contents: [{
           uri: uri.href,
-          mimeType: image.contentType,
-          blob: image.data.toString("base64"),
+          mimeType: "application/json",
+          text: JSON.stringify({ location_id: id, url, mime_type: "image/png" }),
         }],
       };
     },
@@ -276,7 +279,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "research",
-    "agent://location-scout/research/{research_id}",
+    "agent://location-scout/research/{location_id}",
     {
       description: "Research pack with period facts and anachronisms. Returns research-pack-v1 JSON.",
       mimeType: "application/json",
