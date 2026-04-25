@@ -1,6 +1,6 @@
 import "../src/env.js";
 import { saveArtifact } from "../src/lib/storage.js";
-import { mirrorArtifactToDb, isDbEnabled, closePool } from "../src/lib/db.js";
+import { saveArtifactToPg, isDbEnabled, closePool } from "../src/lib/db.js";
 
 async function main() {
   console.log("isDbEnabled:", isDbEnabled());
@@ -23,9 +23,9 @@ async function main() {
     approval_status: "draft",
   };
 
-  console.log("\n[1] direct mirrorArtifactToDb...");
-  const id = await mirrorArtifactToDb("bible", bibleId, payload);
-  console.log("   artifact UUID:", id);
+  console.log("\n[1] direct saveArtifactToPg...");
+  const result = await saveArtifactToPg("bible", bibleId, payload);
+  console.log("   artifact UUID:", result?.artifactId ?? null);
 
   console.log("\n[2] indirect via saveArtifact (full pipeline)...");
   const bibleId2 = "loc_smoke2_" + Date.now();
