@@ -410,3 +410,23 @@ export function supportedArtifactTypes(): string[] {
 export function artifactTableFor(type: string): string | null {
   return TYPE_MAP[type]?.table ?? null;
 }
+
+export async function upsertGateState(
+  projectId: string,
+  gateName: string,
+  status: "locked" | "open" | "passed" | "failed",
+  details?: object,
+): Promise<void> {
+  if (!isDbEnabled()) return;
+  await getPool().query(
+    `INSERT INTO v2.gate_states (project_id, gate_name, status, last_check_at, details, updated_at)
+     SELECT p.id, $2, $3::v2.gate_status, now(), $4::jsonb, now()
+     FROM v2.projects p WHERE p.legacy_scenario_id = $1
+     ON CONFLICT (project_id, gate_name) DO UPDATE
+       SET status = EXCLUDED.status,
+           last_check_at = EXCLUDED.last_check_at,
+           details = EXCLUDED.details,
+           updated_at = EXCLUDED.updated_at`,
+    [projectId, gateName, status, JSON.stringify(details ?? {})],
+  );
+}

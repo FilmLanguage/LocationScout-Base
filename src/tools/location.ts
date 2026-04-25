@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { ReferenceRefSchema, type ReferenceRef } from "@filmlanguage/schemas";
 import { EditModeSchema, composeEditPrompt, resolveEditBase } from "../lib/edit-mode.js";
 import { readAgentResource } from "../lib/mcp-resource-client.js";
+import { upsertGateState } from "../lib/db.js";
 
 /**
  * Resolve a ReferenceRef to a data URL the image model can ingest. Supports:
@@ -1933,6 +1934,11 @@ export function registerLocationTools(server: McpServer) {
       } catch {
         // unknown → no warning shown
       }
+
+      try {
+        const gateStatus = result.director_film_vision === "ready" ? "open" as const : "locked" as const;
+        await upsertGateState(project_id, "director_film_vision", gateStatus, { warnings: result.warnings });
+      } catch { /* best-effort */ }
 
       return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
     },
