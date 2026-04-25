@@ -523,7 +523,7 @@ export function registerLocationTools(server: McpServer) {
             });
 
             const promptForAttempt = (basePrompt + correctionHint).slice(0, 2000);
-            const resolvedModel = resolveModel("ANCHOR", generation_params?.model);
+            const resolvedModel = resolveModel("ANCHOR", generation_params?.model, imageUrls.length > 0);
             const result = await generateImage({
               prompt: promptForAttempt,
               negative_prompt: negativePrompt || undefined,
@@ -832,7 +832,7 @@ export function registerLocationTools(server: McpServer) {
 
           updateTask(task_id, { progress: 0.3, current_step: editing ? "Sending edit base to FAL for isometric rendering" : "Sending floorplan to FAL for isometric rendering" });
 
-          const resolvedModel = resolveModel("ISOMETRIC", generation_params?.model);
+          const resolvedModel = resolveModel("ISOMETRIC", generation_params?.model, imageUrls.length > 0);
           const result = await generateImage({
             prompt,
             seed: generation_params?.seed,
@@ -1018,7 +1018,6 @@ export function registerLocationTools(server: McpServer) {
                 : fillTemplate(PROMPT_SETUP_TEMPLATE, buildSetupPromptVars(bible, setup)))
             ).slice(0, 2000);
             promptsUsed[setup.id] = prompt;
-            const resolvedModel = resolveModel("SETUP", undefined);
             const setupRefs = reference_images?.[setup.id];
             const imageUrls: string[] = [];
             if (editingSetup && editBase) {
@@ -1028,6 +1027,7 @@ export function registerLocationTools(server: McpServer) {
               if (anchorDataUrl) imageUrls.push(anchorDataUrl);
               imageUrls.push(...extraSetupUrls);
             }
+            const resolvedModel = resolveModel("SETUP", undefined, imageUrls.length > 0);
             const result = await generateImage({
               prompt,
               model: resolvedModel,
@@ -1575,7 +1575,7 @@ export function registerLocationTools(server: McpServer) {
 
           updateTask(task_id, { progress: 0.3, current_step: `Generating variation image${anchorDataUrl ? " (img2img from anchor)" : " (text-only)"}` });
 
-          const resolvedModel = resolveModel("MOOD_VARIANT", undefined);
+          const resolvedModel = resolveModel("MOOD_VARIANT", undefined, !!anchorDataUrl);
           const result = await generateImage({
             prompt: moodParts,
             model: resolvedModel,

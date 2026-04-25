@@ -10,10 +10,12 @@
  *   1. explicit `override` arg (from tool input)
  *   2. env var `FAL_MODEL_<SLOT>` (e.g. FAL_MODEL_ANCHOR)
  *   3. env var `FAL_MODEL_DEFAULT`
- *   4. built-in default: "nano-banana/edit"
+ *   4. auto-select by reference availability:
+ *        hasReferenceImages=true  → nano-banana/edit  (img2img)
+ *        hasReferenceImages=false → nano-banana        (txt2img)
  *
- * Override values may be either a logical name ("flux-pro") or a full FAL
- * endpoint path ("fal-ai/flux-pro/v1.1"). Full paths are passed through as-is.
+ * Override values may be either a logical name ("nano-banana") or a full FAL
+ * endpoint path ("fal-ai/nano-banana/edit"). Full paths are passed through as-is.
  */
 
 export const FAL_MODELS = {
@@ -28,25 +30,25 @@ export type LogicalModel = keyof typeof FAL_MODELS;
 
 export type Slot = "ANCHOR" | "MOOD_VARIANT" | "ISOMETRIC" | "SETUP";
 
-const BUILTIN_DEFAULT: LogicalModel = "flux-schnell";
-
 /**
  * Resolve a slot to a concrete FAL endpoint path (e.g. "fal-ai/nano-banana/edit").
  * The result is ready to append to `https://queue.fal.run/`.
+ *
+ * Pass hasReferenceImages=true when the call site has at least one reference
+ * image — this selects nano-banana/edit (img2img). Without references, falls
+ * back to nano-banana (txt2img).
  */
-export function resolveModel(slot: Slot, override?: string): string {
+export function resolveModel(slot: Slot, override?: string, hasReferenceImages = false): string {
   const raw =
     override ||
     process.env[`FAL_MODEL_${slot}`] ||
-    process.env.FAL_MODEL_DEFAULT ||
-    BUILTIN_DEFAULT;
+    process.env.FAL_MODEL_DEFAULT;
 
-  // If the caller passed a full endpoint path (contains a slash and is not a
-  // known logical alias), use it verbatim.
-  if (raw in FAL_MODELS) {
-    return FAL_MODELS[raw as LogicalModel];
+  if (raw) {
+    return raw in FAL_MODELS ? FAL_MODELS[raw as LogicalModel] : raw;
   }
-  return raw;
+
+  return hasReferenceImages ? FAL_MODELS["nano-banana/edit"] : FAL_MODELS["nano-banana"];
 }
 
 /** List of all known slots — useful for diagnostics / UI dropdowns. */
