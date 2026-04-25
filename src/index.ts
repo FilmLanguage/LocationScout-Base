@@ -111,15 +111,14 @@ app.get("/artifacts/:type/:file", async (req, res) => {
 
 mountSwagger(app);
 
-app.get("/health", (_req, res) => {
-  if (isCircuitOpen()) {
-    res.status(503).json({
-      status: "degraded",
-      reason: "STORAGE_UNAVAILABLE",
-      version: VERSION,
-      uptime_seconds: Math.floor(process.uptime()),
-    });
-    return;
+app.get("/health", async (_req, res) => {
+  if (isDbEnabled()) {
+    try {
+      await getPool().query("SELECT 1");
+    } catch {
+      res.status(503).json({ status: "error", reason: "db_unavailable" });
+      return;
+    }
   }
   res.json({ status: "ok", version: VERSION, uptime_seconds: Math.floor(process.uptime()) });
 });
