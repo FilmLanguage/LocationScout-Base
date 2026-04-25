@@ -165,6 +165,9 @@ export function registerLocationTools(server: McpServer) {
               return String(entry.location_name ?? "").toLowerCase().includes((location_name ?? "").toLowerCase());
             });
             if (match) resolvedBrief = match as z.infer<typeof LocationBriefSchema>;
+            else console.warn(`[scout_location] auto-resolve: no matching brief for location_name="${location_name}" in project ${project_id}`);
+          } else {
+            console.warn(`[scout_location] auto-resolve: agent://1ad/location-briefs/${project_id} returned null or error`);
           }
         }
       }
@@ -175,6 +178,8 @@ export function registerLocationTools(server: McpServer) {
           const vision = await readAgentResource(directorUrl, `agent://director/location-vision/${project_id}`).catch(() => null);
           if (vision && !("error" in (vision as object))) {
             resolvedVision = vision as z.infer<typeof DirectorVisionInputSchema>;
+          } else {
+            console.warn(`[scout_location] auto-resolve: agent://director/location-vision/${project_id} returned null or error`);
           }
         }
       }
@@ -267,6 +272,9 @@ export function registerLocationTools(server: McpServer) {
               return String(entry.location_name ?? "").toLowerCase().includes((location_name ?? "").toLowerCase());
             });
             if (match) resolvedBrief = match as z.infer<typeof LocationBriefSchema>;
+            else console.warn(`[research_era] auto-resolve: no matching brief for location_name="${location_name}" in project ${project_id}`);
+          } else {
+            console.warn(`[research_era] auto-resolve: agent://1ad/location-briefs/${project_id} returned null or error`);
           }
         }
       }
@@ -277,6 +285,8 @@ export function registerLocationTools(server: McpServer) {
           const vision = await readAgentResource(directorUrl, `agent://director/location-vision/${project_id}`).catch(() => null);
           if (vision && !("error" in (vision as object))) {
             resolvedVision = vision as z.infer<typeof DirectorVisionInputSchema>;
+          } else {
+            console.warn(`[research_era] auto-resolve: agent://director/location-vision/${project_id} returned null or error`);
           }
         }
       }
@@ -346,6 +356,9 @@ export function registerLocationTools(server: McpServer) {
               return String(entry.location_name ?? "").toLowerCase().includes((location_name ?? "").toLowerCase());
             });
             if (match) resolvedBrief = match as z.infer<typeof LocationBriefSchema>;
+            else console.warn(`[write_bible] auto-resolve: no matching brief for location_name="${location_name}" in project ${project_id}`);
+          } else {
+            console.warn(`[write_bible] auto-resolve: agent://1ad/location-briefs/${project_id} returned null or error`);
           }
         }
       }
@@ -356,6 +369,8 @@ export function registerLocationTools(server: McpServer) {
           const vision = await readAgentResource(directorUrl, `agent://director/location-vision/${project_id}`).catch(() => null);
           if (vision && !("error" in (vision as object))) {
             resolvedVision = vision as z.infer<typeof DirectorVisionInputSchema>;
+          } else {
+            console.warn(`[write_bible] auto-resolve: agent://director/location-vision/${project_id} returned null or error`);
           }
         }
       }
