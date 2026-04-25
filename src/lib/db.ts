@@ -327,7 +327,7 @@ export async function saveArtifactToPg(
       await client.query(
         `INSERT INTO v2.events (project_id, event_type, entity_type, entity_id, payload, published_by)
          VALUES ($1, $2, $3, $4, $5::jsonb, $6);`,
-        [projectId, `${type}_saved`, mapping.table, artifactId, JSON.stringify({ artifact_id: artifactId, version: nextVersion }), AGENT_ID]
+        [projectId, `${type}_saved`, 'location', locationId, JSON.stringify({ artifact_id: artifactId, version: nextVersion }), AGENT_ID]
       );
 
       await client.query("COMMIT");
@@ -384,20 +384,11 @@ export async function saveBlobMetadataToPg(
       const blobId = blobRes.rows[0].id;
 
       // Event log
-      try {
-        await client.query(
-          `INSERT INTO v2.events (project_id, event_type, entity_type, entity_id, payload, published_by)
-           VALUES ($1, 'blob_generated', 'blob', $2, $3::jsonb, $4);`,
-          [projectId, blobId, JSON.stringify({ sha256, s3_uri: s3Uri, kind, entity_id: entityId, ...meta }), AGENT_ID]
-        );
-      } catch {
-        // v2.events may not exist — fallback to activity_feed
-        await client.query(
-          `INSERT INTO v2.activity_feed (project_id, event_type, title, agent_id, target_table, target_id)
-           VALUES ($1, 'blob_generated', $2, $3, 'v2.blobs', $4);`,
-          [projectId, `Blob ${kind}/${entityId} (${sha256.slice(0, 8)})`, AGENT_ID, blobId]
-        );
-      }
+      await client.query(
+        `INSERT INTO v2.events (project_id, event_type, entity_type, entity_id, payload, published_by)
+         VALUES ($1, 'blob_generated', 'blob', $2, $3::jsonb, $4);`,
+        [projectId, blobId, JSON.stringify({ sha256, s3_uri: s3Uri, kind, entity_id: entityId, ...meta }), AGENT_ID]
+      );
 
       await client.query("COMMIT");
       return { blob_id: blobId, sha256, s3_uri: s3Uri };
