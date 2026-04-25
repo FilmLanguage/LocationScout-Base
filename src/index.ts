@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
 import { VERSION } from "./lib/version.js";
-import { isDbEnabled, getPool, waitForDatabase, isCircuitOpen } from "./lib/db.js";
+import { isDbEnabled, getPool, isCircuitOpen } from "./lib/db.js";
 
 import { registerCommonTools } from "./tools/common.js";
 import { registerLocationTools } from "./tools/location.js";
@@ -125,15 +125,6 @@ app.get("/health", async (_req, res) => {
 
 const PORT = process.env.PORT || 8080;
 
-// Fail-fast DB probe: if DB is configured, ensure connection before accepting traffic.
-if (isDbEnabled()) {
-  waitForDatabase(getPool()).then(() => {
-    app.listen(PORT, () => {
-      console.log(`Location Scout MCP server listening on port ${PORT}`);
-    });
-  });
-} else {
-  app.listen(PORT, () => {
-    console.log(`Location Scout MCP server listening on port ${PORT} (DB disabled)`);
-  });
-}
+app.listen(PORT, () => {
+  console.log(`Location Scout MCP server listening on port ${PORT}`);
+});
