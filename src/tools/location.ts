@@ -225,7 +225,16 @@ export function registerLocationTools(server: McpServer) {
             { maxTokens: 4096 },
           );
           const bibleId = location_brief.location_id;
-          await saveArtifact("bible", bibleId, JSON.parse(stripCodeFence(bible.content)));
+          const llmBiblePipeline = JSON.parse(stripCodeFence(bible.content));
+          const biblePipelinePayload = {
+            $schema: "location-bible-v2" as const,
+            bible_id: bibleId,
+            brief_id: location_brief.location_id,
+            vision_id: `vision_${location_brief.location_id}`,
+            research_id: researchId,
+            ...llmBiblePipeline,
+          };
+          await saveArtifact("bible", bibleId, biblePipelinePayload);
           updateTask(task_id, {
             progress: 1.0,
             status: "completed",
@@ -419,7 +428,16 @@ export function registerLocationTools(server: McpServer) {
             { maxTokens: 4096 },
           );
           const bibleId = location_brief.location_id;
-          await saveArtifact("bible", bibleId, JSON.parse(stripCodeFence(result.content)));
+          const llmBible = JSON.parse(stripCodeFence(result.content));
+          const biblePayload = {
+            $schema: "location-bible-v2" as const,
+            bible_id: bibleId,
+            brief_id: location_brief.location_id,
+            vision_id: `vision_${location_brief.location_id}`,
+            research_id: researchId,
+            ...llmBible,
+          };
+          await saveArtifact("bible", bibleId, biblePayload);
           updateTask(task_id, {
             status: "completed", progress: 1.0, current_step: "Bible written",
             artifacts: [{ uri: `agent://location-scout/bible/${bibleId}`, mime_type: "application/json", created_at: new Date().toISOString() }],
