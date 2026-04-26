@@ -208,12 +208,18 @@ export function registerLocationTools(server: McpServer) {
           );
           const researchId = `research_${location_brief.location_id}`;
           const llmResearchPipeline = JSON.parse(stripCodeFence(research.content));
+          // Coerce period_facts: schema expects array of objects {fact, source?, relevance?}
+          if (Array.isArray(llmResearchPipeline.period_facts)) {
+            llmResearchPipeline.period_facts = llmResearchPipeline.period_facts.map((item: unknown) =>
+              typeof item === "string" ? { fact: item } : item
+            );
+          }
           const researchPipelinePayload = {
-            $schema: "research-pack-v1" as const,
+            ...llmResearchPipeline,                              // LLM content first
+            $schema: "research-pack-v1" as const,               // injected fields win
             research_id: researchId,
             brief_id: location_brief.location_id,
             vision_id: `vision_${location_brief.location_id}`,
-            ...llmResearchPipeline,
           };
           await saveArtifact("research", researchId, researchPipelinePayload);
           updateTask(task_id, { progress: 0.3, current_step: "Research complete, writing Bible" });
@@ -226,13 +232,31 @@ export function registerLocationTools(server: McpServer) {
           );
           const bibleId = location_brief.location_id;
           const llmBiblePipeline = JSON.parse(stripCodeFence(bible.content));
+          // Coerce LLM type mismatches before spreading
+          if (typeof llmBiblePipeline.atmosphere === "object" && llmBiblePipeline.atmosphere !== null) {
+            llmBiblePipeline.atmosphere = JSON.stringify(llmBiblePipeline.atmosphere);
+          }
+          if (typeof llmBiblePipeline.shadow_hardness === "number") {
+            llmBiblePipeline.shadow_hardness = llmBiblePipeline.shadow_hardness <= 0.25 ? "soft" : llmBiblePipeline.shadow_hardness >= 0.75 ? "hard" : "mixed";
+          }
+          if (llmBiblePipeline.light_base_state && typeof (llmBiblePipeline.light_base_state as Record<string, unknown>).shadow_hardness === "number") {
+            const sh = (llmBiblePipeline.light_base_state as Record<string, unknown>).shadow_hardness as number;
+            (llmBiblePipeline.light_base_state as Record<string, unknown>).shadow_hardness = sh <= 0.25 ? "soft" : sh >= 0.75 ? "hard" : "mixed";
+          }
+          if (Array.isArray(llmBiblePipeline.key_details)) {
+            llmBiblePipeline.key_details = llmBiblePipeline.key_details.map((item: unknown) =>
+              typeof item === "object" && item !== null
+                ? ((item as Record<string, unknown>).name ?? (item as Record<string, unknown>).description ?? JSON.stringify(item)) as string
+                : String(item)
+            );
+          }
           const biblePipelinePayload = {
-            $schema: "location-bible-v2" as const,
+            ...llmBiblePipeline,                                 // LLM content first
+            $schema: "location-bible-v2" as const,              // injected fields win
             bible_id: bibleId,
             brief_id: location_brief.location_id,
             vision_id: `vision_${location_brief.location_id}`,
             research_id: researchId,
-            ...llmBiblePipeline,
           };
           await saveArtifact("bible", bibleId, biblePipelinePayload);
           updateTask(task_id, {
@@ -330,12 +354,18 @@ export function registerLocationTools(server: McpServer) {
           );
           const researchId = `research_${location_brief.location_id}`;
           const llmResearch = JSON.parse(stripCodeFence(result.content));
+          // Coerce period_facts: schema expects array of objects {fact, source?, relevance?}
+          if (Array.isArray(llmResearch.period_facts)) {
+            llmResearch.period_facts = llmResearch.period_facts.map((item: unknown) =>
+              typeof item === "string" ? { fact: item } : item
+            );
+          }
           const researchPayload = {
-            $schema: "research-pack-v1" as const,
+            ...llmResearch,                                      // LLM content first
+            $schema: "research-pack-v1" as const,               // injected fields win
             research_id: researchId,
             brief_id: location_brief.location_id,
             vision_id: `vision_${location_brief.location_id}`,
-            ...llmResearch,
           };
           await saveArtifact("research", researchId, researchPayload);
           updateTask(task_id, {
@@ -429,13 +459,31 @@ export function registerLocationTools(server: McpServer) {
           );
           const bibleId = location_brief.location_id;
           const llmBible = JSON.parse(stripCodeFence(result.content));
+          // Coerce LLM type mismatches before spreading
+          if (typeof llmBible.atmosphere === "object" && llmBible.atmosphere !== null) {
+            llmBible.atmosphere = JSON.stringify(llmBible.atmosphere);
+          }
+          if (typeof llmBible.shadow_hardness === "number") {
+            llmBible.shadow_hardness = llmBible.shadow_hardness <= 0.25 ? "soft" : llmBible.shadow_hardness >= 0.75 ? "hard" : "mixed";
+          }
+          if (llmBible.light_base_state && typeof (llmBible.light_base_state as Record<string, unknown>).shadow_hardness === "number") {
+            const sh = (llmBible.light_base_state as Record<string, unknown>).shadow_hardness as number;
+            (llmBible.light_base_state as Record<string, unknown>).shadow_hardness = sh <= 0.25 ? "soft" : sh >= 0.75 ? "hard" : "mixed";
+          }
+          if (Array.isArray(llmBible.key_details)) {
+            llmBible.key_details = llmBible.key_details.map((item: unknown) =>
+              typeof item === "object" && item !== null
+                ? ((item as Record<string, unknown>).name ?? (item as Record<string, unknown>).description ?? JSON.stringify(item)) as string
+                : String(item)
+            );
+          }
           const biblePayload = {
-            $schema: "location-bible-v2" as const,
+            ...llmBible,                                         // LLM content first
+            $schema: "location-bible-v2" as const,              // injected fields win
             bible_id: bibleId,
             brief_id: location_brief.location_id,
             vision_id: `vision_${location_brief.location_id}`,
             research_id: researchId,
-            ...llmBible,
           };
           await saveArtifact("bible", bibleId, biblePayload);
           updateTask(task_id, {
