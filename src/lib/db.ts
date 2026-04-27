@@ -376,8 +376,7 @@ export async function saveBlobMetadataToPg(
            (project_id, kind, entity_id, sha256, s3_uri, mime_type, size_bytes, created_by_agent)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (sha256) DO UPDATE SET
-           entity_id = COALESCE(EXCLUDED.entity_id, v2.blobs.entity_id),
-           updated_at = now()
+           entity_id = COALESCE(EXCLUDED.entity_id, v2.blobs.entity_id)
          RETURNING id;`,
         [projectId, kind, entityId, sha256, s3Uri, mimeType, sizeBytes, AGENT_ID]
       );
