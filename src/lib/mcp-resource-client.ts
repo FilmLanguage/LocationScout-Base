@@ -36,7 +36,7 @@ async function mcpRead(agentBaseUrl: string, uri: string): Promise<McpResponse |
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
-        ...(INTER_AGENT_TOKEN ? { "Authorization": `Bearer ${INTER_AGENT_TOKEN}` } : {}),
+        ...(INTER_AGENT_TOKEN ? { "x-agent-token": INTER_AGENT_TOKEN } : {}),
       },
       body: JSON.stringify({ jsonrpc: "2.0", method: "resources/read", params: { uri }, id: 1 }),
     });
