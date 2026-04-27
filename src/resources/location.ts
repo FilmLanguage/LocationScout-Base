@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { loadArtifact, loadImage, getTask } from "../lib/storage.js";
 import { S3_BUCKET } from "../lib/api-client.js";
 import {
@@ -24,7 +24,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "bible",
-    "agent://location-scout/bible/{location_id}",
+    new ResourceTemplate("agent://location-scout/bible/{location_id}", { list: undefined }),
     {
       description: "Location Bible artifact. Returns location-bible-v2 JSON.",
       mimeType: "application/json",
@@ -57,7 +57,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "anchor",
-    "agent://location-scout/anchor/{location_id}",
+    new ResourceTemplate("agent://location-scout/anchor/{location_id}", { list: undefined }),
     {
       description: "Location anchor image metadata. Returns JSON with GCS/S3 URL (not raw bytes).",
       mimeType: "application/json",
@@ -91,7 +91,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "mood",
-    "agent://location-scout/mood/{state_id}",
+    new ResourceTemplate("agent://location-scout/mood/{state_id}", { list: undefined }),
     {
       description: "Mood state delta. Returns mood-state-v1 JSON.",
       mimeType: "application/json",
@@ -124,7 +124,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "floorplan",
-    "agent://location-scout/floorplan/{location_id}",
+    new ResourceTemplate("agent://location-scout/floorplan/{location_id}", { list: undefined }),
     {
       description: "Location floorplan metadata. Returns JSON with GCS/S3 URL (not raw bytes).",
       mimeType: "application/json",
@@ -158,7 +158,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "isometric",
-    "agent://location-scout/isometric/{iso_id}",
+    new ResourceTemplate("agent://location-scout/isometric/{iso_id}", { list: undefined }),
     {
       description: "Isometric 3D reference image for a location. Returns PNG binary as base64.",
       mimeType: "image/png",
@@ -191,7 +191,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "comparison",
-    "agent://location-scout/comparison/{report_id}",
+    new ResourceTemplate("agent://location-scout/comparison/{report_id}", { list: undefined }),
     {
       description: "Setup vs anchor comparison report produced by compare_with_anchor. Returns JSON.",
       mimeType: "application/json",
@@ -213,7 +213,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "setup",
-    "agent://location-scout/setup/{setup_id}",
+    new ResourceTemplate("agent://location-scout/setup/{setup_id}", { list: undefined }),
     {
       description: "Per-scene camera setup extraction. Returns JSON.",
       mimeType: "application/json",
@@ -246,7 +246,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "task",
-    "agent://location-scout/task/{task_id}",
+    new ResourceTemplate("agent://location-scout/task/{task_id}", { list: undefined }),
     {
       description: "Async task status. Returns task state, progress, and artifacts.",
       mimeType: "application/json",
@@ -279,7 +279,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "research",
-    "agent://location-scout/research/{location_id}",
+    new ResourceTemplate("agent://location-scout/research/{location_id}", { list: undefined }),
     {
       description: "Research pack with period facts and anachronisms. Returns research-pack-v1 JSON.",
       mimeType: "application/json",
@@ -318,7 +318,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "schema",
-    "agent://location-scout/schema/{type}",
+    new ResourceTemplate("agent://location-scout/schema/{type}", { list: undefined }),
     {
       description: "JSON Schema for agent's artifact types. Supported: location-bible, mood-state, research-pack.",
       mimeType: "application/json",
