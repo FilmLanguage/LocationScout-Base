@@ -34,13 +34,7 @@ export function registerResources(server: McpServer) {
       const bible = await loadArtifact("bible", id);
 
       if (!bible) {
-        return {
-          contents: [{
-            uri: uri.href,
-            mimeType: "application/json",
-            text: JSON.stringify({ error: "not_found", bible_id: id }),
-          }],
-        };
+        return { contents: [] };
       }
 
       return {
@@ -67,13 +61,7 @@ export function registerResources(server: McpServer) {
       const image = await loadImage("anchor", id);
 
       if (!image) {
-        return {
-          contents: [{
-            uri: uri.href,
-            mimeType: "application/json",
-            text: JSON.stringify({ error: "not_found", location_id: id }),
-          }],
-        };
+        return { contents: [] };
       }
 
       const url = S3_BUCKET ? `s3://${S3_BUCKET}/anchor/${id}.png` : null;
@@ -101,13 +89,7 @@ export function registerResources(server: McpServer) {
       const mood = await loadArtifact("mood", id);
 
       if (!mood) {
-        return {
-          contents: [{
-            uri: uri.href,
-            mimeType: "application/json",
-            text: JSON.stringify({ error: "not_found", state_id: id }),
-          }],
-        };
+        return { contents: [] };
       }
 
       return {
@@ -134,13 +116,7 @@ export function registerResources(server: McpServer) {
       const image = await loadImage("floorplan", id);
 
       if (!image) {
-        return {
-          contents: [{
-            uri: uri.href,
-            mimeType: "application/json",
-            text: JSON.stringify({ error: "not_found", location_id: id }),
-          }],
-        };
+        return { contents: [] };
       }
 
       const url = S3_BUCKET ? `s3://${S3_BUCKET}/floorplan/${id}.png` : null;
@@ -168,13 +144,7 @@ export function registerResources(server: McpServer) {
       const image = await loadImage("isometric", id);
 
       if (!image) {
-        return {
-          contents: [{
-            uri: uri.href,
-            mimeType: "application/json",
-            text: JSON.stringify({ error: "not_found", iso_id: id }),
-          }],
-        };
+        return { contents: [] };
       }
 
       return {
@@ -199,11 +169,12 @@ export function registerResources(server: McpServer) {
     async (uri) => {
       const id = extractId(uri);
       const report = await loadArtifact("comparison", id);
+      if (!report) return { contents: [] };
       return {
         contents: [{
           uri: uri.href,
           mimeType: "application/json",
-          text: report ? JSON.stringify(report) : JSON.stringify({ error: "not_found", report_id: id }),
+          text: JSON.stringify(report),
         }],
       };
     },
@@ -223,13 +194,7 @@ export function registerResources(server: McpServer) {
       const setup = await loadArtifact("setup", id);
 
       if (!setup) {
-        return {
-          contents: [{
-            uri: uri.href,
-            mimeType: "application/json",
-            text: JSON.stringify({ error: "not_found", setup_id: id }),
-          }],
-        };
+        return { contents: [] };
       }
 
       return {
@@ -256,13 +221,7 @@ export function registerResources(server: McpServer) {
       const task = getTask(id);
 
       if (!task) {
-        return {
-          contents: [{
-            uri: uri.href,
-            mimeType: "application/json",
-            text: JSON.stringify({ error: "not_found", task_id: id }),
-          }],
-        };
+        return { contents: [] };
       }
 
       return {
@@ -289,13 +248,7 @@ export function registerResources(server: McpServer) {
       const research = await loadArtifact("research", id);
 
       if (!research) {
-        return {
-          contents: [{
-            uri: uri.href,
-            mimeType: "application/json",
-            text: JSON.stringify({ error: "not_found", research_id: id }),
-          }],
-        };
+        return { contents: [] };
       }
 
       return {
