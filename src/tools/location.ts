@@ -159,7 +159,10 @@ export function registerLocationTools(server: McpServer) {
       if (!resolvedBrief && project_id) {
         const url1AD = process.env.AGENT_1AD_URL;
         if (url1AD) {
-          const briefs = await readAgentResource(url1AD, `agent://1ad/location-briefs/${project_id}`).catch(() => null);
+          const briefs = await readAgentResource(url1AD, `agent://1ad/location-briefs/${project_id}`).catch((e) => {
+            console.warn(`[scout_location] MCP read failed for agent://1ad/location-briefs/${project_id}:`, e instanceof Error ? e.message : e);
+            return null;
+          });
           if (briefs && !("error" in (briefs as object))) {
             const arr = Array.isArray(briefs) ? briefs : ((briefs as Record<string, unknown>).locations as unknown[] ?? []);
             const match = arr.find((b: unknown) => {
@@ -177,7 +180,10 @@ export function registerLocationTools(server: McpServer) {
       if (!resolvedVision && project_id) {
         const directorUrl = process.env.AGENT_DIRECTOR_URL;
         if (directorUrl) {
-          const vision = await readAgentResource(directorUrl, `agent://director/location-vision/${project_id}`).catch(() => null);
+          const vision = await readAgentResource(directorUrl, `agent://director/location-vision/${project_id}`).catch((e) => {
+            console.warn(`[scout_location] MCP read failed for agent://director/location-vision/${project_id}:`, e instanceof Error ? e.message : e);
+            return null;
+          });
           if (vision && !("error" in (vision as object))) {
             resolvedVision = vision as z.infer<typeof DirectorVisionInputSchema>;
           } else {
@@ -307,7 +313,10 @@ export function registerLocationTools(server: McpServer) {
       if (!resolvedBrief && project_id) {
         const url1AD = process.env.AGENT_1AD_URL;
         if (url1AD) {
-          const briefs = await readAgentResource(url1AD, `agent://1ad/location-briefs/${project_id}`).catch(() => null);
+          const briefs = await readAgentResource(url1AD, `agent://1ad/location-briefs/${project_id}`).catch((e) => {
+            console.warn(`[research_era] MCP read failed for agent://1ad/location-briefs/${project_id}:`, e instanceof Error ? e.message : e);
+            return null;
+          });
           if (briefs && !("error" in (briefs as object))) {
             const arr = Array.isArray(briefs) ? briefs : ((briefs as Record<string, unknown>).locations as unknown[] ?? []);
             const match = arr.find((b: unknown) => {
@@ -325,7 +334,10 @@ export function registerLocationTools(server: McpServer) {
       if (!resolvedVision && project_id) {
         const directorUrl = process.env.AGENT_DIRECTOR_URL;
         if (directorUrl) {
-          const vision = await readAgentResource(directorUrl, `agent://director/location-vision/${project_id}`).catch(() => null);
+          const vision = await readAgentResource(directorUrl, `agent://director/location-vision/${project_id}`).catch((e) => {
+            console.warn(`[research_era] MCP read failed for agent://director/location-vision/${project_id}:`, e instanceof Error ? e.message : e);
+            return null;
+          });
           if (vision && !("error" in (vision as object))) {
             resolvedVision = vision as z.infer<typeof DirectorVisionInputSchema>;
           } else {
@@ -405,7 +417,10 @@ export function registerLocationTools(server: McpServer) {
       if (!resolvedBrief && project_id) {
         const url1AD = process.env.AGENT_1AD_URL;
         if (url1AD) {
-          const briefs = await readAgentResource(url1AD, `agent://1ad/location-briefs/${project_id}`).catch(() => null);
+          const briefs = await readAgentResource(url1AD, `agent://1ad/location-briefs/${project_id}`).catch((e) => {
+            console.warn(`[write_bible] MCP read failed for agent://1ad/location-briefs/${project_id}:`, e instanceof Error ? e.message : e);
+            return null;
+          });
           if (briefs && !("error" in (briefs as object))) {
             const arr = Array.isArray(briefs) ? briefs : ((briefs as Record<string, unknown>).locations as unknown[] ?? []);
             const match = arr.find((b: unknown) => {
@@ -423,7 +438,10 @@ export function registerLocationTools(server: McpServer) {
       if (!resolvedVision && project_id) {
         const directorUrl = process.env.AGENT_DIRECTOR_URL;
         if (directorUrl) {
-          const vision = await readAgentResource(directorUrl, `agent://director/location-vision/${project_id}`).catch(() => null);
+          const vision = await readAgentResource(directorUrl, `agent://director/location-vision/${project_id}`).catch((e) => {
+            console.warn(`[write_bible] MCP read failed for agent://director/location-vision/${project_id}:`, e instanceof Error ? e.message : e);
+            return null;
+          });
           if (vision && !("error" in (vision as object))) {
             resolvedVision = vision as z.infer<typeof DirectorVisionInputSchema>;
           } else {

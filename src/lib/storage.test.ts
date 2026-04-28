@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -46,17 +46,18 @@ describe("artifact CRUD (memory mode, no GCS)", () => {
 });
 
 describe("task store", () => {
-  it("creates and retrieves a task", () => {
+  it("creates and retrieves a task", async () => {
     const task = createTask("task-1", "starting");
     expect(task.task_id).toBe("task-1");
     expect(task.status).toBe("accepted");
     expect(task.progress).toBe(0);
+    expect(task.tool_name).toBe("");
 
-    const retrieved = getTask("task-1");
+    const retrieved = await getTask("task-1");
     expect(retrieved).toEqual(task);
   });
 
-  it("updates a task", () => {
+  it("updates a task", async () => {
     createTask("task-2", "init");
     const updated = updateTask("task-2", { status: "completed", progress: 100 });
     expect(updated).not.toBeNull();
@@ -68,14 +69,63 @@ describe("task store", () => {
     expect(updateTask("nonexistent", { progress: 50 })).toBeNull();
   });
 
-  it("deletes a task", () => {
+  it("deletes a task", async () => {
     createTask("task-3", "temp");
     expect(deleteTask("task-3")).toBe(true);
-    expect(getTask("task-3")).toBeNull();
+    expect(await getTask("task-3")).toBeNull();
   });
 
   it("returns false when deleting nonexistent task", () => {
     expect(deleteTask("nonexistent")).toBe(false);
+  });
+
+  it("passes tool_name through when provided", () => {
+    const task = createTask("task-4", "step", "create_mood_states");
+    expect(task.tool_name).toBe("create_mood_states");
+  });
+});
+
+describe("task store v2.tasks dual-write", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("createTask attempts persistTask (best-effort — DB warn on failure)", async () => {
+    const dbModule = await import("./db.js");
+    const spy = vi.spyOn(dbModule, "persistTask").mockRejectedValue(new Error("db down"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    createTask("task-persist-1", "step", "create_mood_states");
+
+    // Let the fire-and-forget promise settle.
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(spy).toHaveBeenCalledWith(
+      "task-persist-1",
+      "create_mood_states",
+      "accepted",
+      expect.objectContaining({ task_id: "task-persist-1", status: "accepted" }),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[storage] DB createTask failed:"),
+      "db down",
+    );
+  });
+
+  it("updateTask attempts persistTask with updated status", async () => {
+    const dbModule = await import("./db.js");
+    const spy = vi.spyOn(dbModule, "persistTask").mockResolvedValue(undefined);
+
+    createTask("task-persist-2", "step", "write_bible");
+    updateTask("task-persist-2", { status: "completed", progress: 1 });
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    const calls = spy.mock.calls;
+    const updateCall = calls.find((c) => c[2] === "completed");
+    expect(updateCall).toBeDefined();
+    expect(updateCall![0]).toBe("task-persist-2");
+    expect(updateCall![1]).toBe("write_bible");
   });
 });
 

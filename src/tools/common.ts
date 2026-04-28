@@ -71,7 +71,7 @@ export function registerCommonTools(server: McpServer) {
     { task_id: z.string().describe("GUID of the task to check") },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     async ({ task_id }) => {
-      const task = getTask(task_id);
+      const task = await getTask(task_id);
       if (!task) {
         return {
           content: [{
@@ -103,7 +103,7 @@ export function registerCommonTools(server: McpServer) {
     { task_id: z.string().describe("GUID of the completed task") },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     async ({ task_id }) => {
-      const task = getTask(task_id);
+      const task = await getTask(task_id);
       if (!task) {
         return {
           content: [{ type: "text" as const, text: JSON.stringify({ error: "not_found", task_id }) }],
@@ -131,7 +131,7 @@ export function registerCommonTools(server: McpServer) {
     { task_id: z.string().describe("GUID of the task to cancel") },
     { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     async ({ task_id }) => {
-      const task = getTask(task_id);
+      const task = await getTask(task_id);
       if (task && (task.status === "accepted" || task.status === "processing")) {
         updateTask(task_id, { status: "failed", error: "cancelled" });
       }

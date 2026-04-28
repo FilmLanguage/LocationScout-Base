@@ -400,6 +400,44 @@ export async function saveBlobMetadataToPg(
   });
 }
 
+// ─── Task persistence (v2.tasks dual-write) ─────────────────────────
+
+const _TERMINAL_STATUSES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"]);
+
+export async function persistTask(
+  taskId: string,
+  toolName: string,
+  status: string,
+  payload: unknown,
+): Promise<void> {
+  if (!isDbEnabled()) return;
+  await getPool().query(
+    `INSERT INTO v2.tasks (task_id, agent, tool_name, status, payload, finished_at)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+     ON CONFLICT (task_id) DO UPDATE
+       SET status      = EXCLUDED.status,
+           payload     = EXCLUDED.payload,
+           finished_at = EXCLUDED.finished_at`,
+    [
+      taskId, AGENT_ID, toolName, status,
+      JSON.stringify(payload),
+      _TERMINAL_STATUSES.has(status) ? new Date().toISOString() : null,
+    ],
+  );
+}
+
+export async function fetchTask(taskId: string): Promise<Record<string, unknown> | null> {
+  if (!isDbEnabled()) return null;
+  const r = await getPool().query<{ status: string; payload: unknown }>(
+    `SELECT status, payload FROM v2.tasks WHERE task_id = $1`,
+    [taskId],
+  );
+  if (!r.rows[0]) return null;
+  const { status, payload } = r.rows[0];
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  return { ...(payload as Record<string, unknown>), status };
+}
+
 // ─── Introspection helpers (for tests / debug) ──────────────────────
 
 export function supportedArtifactTypes(): string[] {

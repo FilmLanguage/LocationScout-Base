@@ -25,7 +25,7 @@ import { readFileSync } from "node:fs";
 import crypto from "node:crypto";
 import { z } from "zod";
 import { S3_BUCKET, s3Upload, s3Download, s3Exists, s3List } from "./api-client.js";
-import { saveArtifactToPg, saveBlobMetadataToPg, isDbEnabled, StorageUnavailableError } from "./db.js";
+import { saveArtifactToPg, saveBlobMetadataToPg, isDbEnabled, StorageUnavailableError, persistTask, fetchTask } from "./db.js";
 import {
   LocationBibleSchema,
   MoodStateSchema,
@@ -650,6 +650,7 @@ export async function listVersions(kind: string, entity_id: string): Promise<Sid
 
 interface TaskEntry {
   task_id: string;
+  tool_name: string;
   status: "accepted" | "processing" | "completed" | "failed";
   progress: number;
   current_step: string;
@@ -666,10 +667,11 @@ interface TaskEntry {
 
 const taskStore = new Map<string, TaskEntry>();
 
-export function createTask(task_id: string, step: string): TaskEntry {
+export function createTask(task_id: string, step: string, tool_name = ""): TaskEntry {
   const now = new Date().toISOString();
   const entry: TaskEntry = {
     task_id,
+    tool_name,
     status: "accepted",
     progress: 0,
     current_step: step,
@@ -678,6 +680,9 @@ export function createTask(task_id: string, step: string): TaskEntry {
     updated_at: now,
   };
   taskStore.set(task_id, entry);
+  persistTask(task_id, tool_name, "accepted", entry).catch((e) =>
+    console.warn("[storage] DB createTask failed:", e instanceof Error ? e.message : e),
+  );
   return entry;
 }
 
@@ -688,11 +693,23 @@ export function updateTask(
   const entry = taskStore.get(task_id);
   if (!entry) return null;
   Object.assign(entry, update, { updated_at: new Date().toISOString() });
+  persistTask(task_id, entry.tool_name, entry.status, entry).catch((e) =>
+    console.warn("[storage] DB updateTask failed:", e instanceof Error ? e.message : e),
+  );
   return entry;
 }
 
-export function getTask(task_id: string): TaskEntry | null {
-  return taskStore.get(task_id) ?? null;
+export async function getTask(task_id: string): Promise<TaskEntry | null> {
+  const inMemory = taskStore.get(task_id);
+  if (inMemory) return inMemory;
+  try {
+    const row = await fetchTask(task_id);
+    if (!row) return null;
+    return row as unknown as TaskEntry;
+  } catch (e) {
+    console.warn("[storage] DB getTask failed:", e instanceof Error ? e.message : e);
+    return null;
+  }
 }
 
 export function deleteTask(task_id: string): boolean {

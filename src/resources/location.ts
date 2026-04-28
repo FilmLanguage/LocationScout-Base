@@ -218,7 +218,7 @@ export function registerResources(server: McpServer) {
     },
     async (uri) => {
       const id = extractId(uri);
-      const task = getTask(id);
+      const task = await getTask(id);
 
       if (!task) {
         return { contents: [] };

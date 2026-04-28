@@ -121,10 +121,10 @@ describe("create_mood_states", () => {
     globalThis.fetch = originalFetch;
   });
 
-  async function waitForTask(taskId: string, timeoutMs = 5_000): Promise<ReturnType<typeof getTask>> {
+  async function waitForTask(taskId: string, timeoutMs = 5_000): Promise<Awaited<ReturnType<typeof getTask>>> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const t = getTask(taskId);
+      const t = await getTask(taskId);
       if (t && (t.status === "completed" || t.status === "failed")) return t;
       await new Promise((r) => setTimeout(r, 25));
     }
