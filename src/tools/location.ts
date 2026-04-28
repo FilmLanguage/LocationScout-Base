@@ -15,7 +15,7 @@ import {
 import { spawnSync } from "node:child_process";
 import { resolve as pathResolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ReferenceRefSchema, type ReferenceRef } from "@filmlanguage/schemas";
+import { ReferenceRefSchema, type ReferenceRef, MoodStateSchema } from "@filmlanguage/schemas";
 import { EditModeSchema, composeEditPrompt, resolveEditBase } from "../lib/edit-mode.js";
 import { readAgentResource } from "../lib/mcp-resource-client.js";
 import { upsertGateState } from "../lib/db.js";
@@ -70,6 +70,8 @@ const PROMPT_RESEARCH_ERA = loadPrompt(import.meta.url, "research-era-system");
 const PROMPT_WRITE_BIBLE_PIPELINE = loadPrompt(import.meta.url, "write-bible-pipeline-system");
 const PROMPT_WRITE_BIBLE = loadPrompt(import.meta.url, "write-bible-system");
 const PROMPT_SETUP_PLANNER = loadPrompt(import.meta.url, "setup-planner-system");
+const PROMPT_MOOD_STATE_SYSTEM = loadPrompt(import.meta.url, "mood-state-system");
+const PROMPT_MOOD_STATE_USER = loadPrompt(import.meta.url, "mood-state-user");
 const PROMPT_CHECK_ANACHRONISMS = loadPrompt(import.meta.url, "check-anachronisms-system");
 const PROMPT_CHECK_CONSISTENCY = loadPrompt(import.meta.url, "check-consistency-system");
 const PROMPT_CHECK_ANCHOR_VISUAL = loadPrompt(import.meta.url, "check-anchor-visual-system");
@@ -716,27 +718,144 @@ export function registerLocationTools(server: McpServer) {
   // Mood states (hard-gated: requires approved Bible)
   server.tool(
     "create_mood_states",
-    "Generate mood state deltas for each scene group from an approved Location Bible. Hard-gated: requires Bible with approval_status='approved'. Returns array of mood-state-v1 objects.",
+    "Generate mood state deltas for each scene group from an approved Location Bible. Hard-gated: requires Bible with approval_status='approved'. For each scene group, calls Claude with the bible + scene context, parses a mood-state-v1 delta JSON, and saves it as `agent://location-scout/mood/{state_id}`. Returns task_id; final task envelope carries mood_state_ids and per-state artifact URIs.",
     {
       bible_uri: z.string().describe("MCP resource URI of the approved Location Bible"),
       scene_groups: z.array(z.object({
-        scene_ids: z.array(z.string()),
+        scene_ids: z.array(z.string()).min(1),
         act: z.number().int(),
         time_of_day: z.string(),
         context: z.string().optional().describe("Scene context for mood derivation"),
       })).describe("Scene groups to generate mood states for"),
+      user_notes: z.string().optional().describe("Optional director/user notes appended to every per-scene prompt."),
+      prompt_override: z.string().optional().describe("Custom user-prompt template. If provided, replaces the Cat-1 mood-state-user template before {{var}} substitution. Useful for per-generation tweaks via PromptEditor UI."),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async ({ bible_uri, scene_groups }) => {
+    async ({ bible_uri, scene_groups, user_notes, prompt_override }) => {
       const task_id = crypto.randomUUID();
       createTask(task_id, "Creating mood states");
       (async () => {
         try {
-          await requireApprovedBible(bible_uri);
+          updateTask(task_id, { status: "processing", progress: 0.05, current_step: "Checking Bible approval gate" });
+          const bible = await requireApprovedBible(bible_uri);
+          const bibleId = bible_uri.includes("/") ? (bible_uri.split("/").pop() ?? "") : bible_uri;
+
+          // Compact, prompt-friendly bible projection (avoid stuffing the entire bible
+          // into the LLM context; the system prompt only needs spaces + base light).
+          const biblePayload = {
+            bible_id: bible.bible_id,
+            spaces: bible.spaces,
+            space_description: typeof bible.space_description === "string"
+              ? bible.space_description.slice(0, 800)
+              : undefined,
+            era: bible.era,
+            negative_list: bible.negative_list,
+          };
+          const lightBaseState = bible.light_base_state ?? null;
+
+          const userTemplate = (prompt_override ?? "").trim().length > 0
+            ? prompt_override!
+            : PROMPT_MOOD_STATE_USER;
+
+          const validTimes = new Set(["DAY", "NIGHT", "DAWN", "DUSK", "LATE_NIGHT"]);
+          const moodArtifacts: Array<{
+            uri: string;
+            mime_type: string;
+            created_at: string;
+          }> = [];
+          const moodStateIds: string[] = [];
+          const moodStates: Array<{
+            state_id: string;
+            uri: string;
+            scene_ids: string[];
+          }> = [];
+          const promptsUsed: Record<string, string> = {};
+
+          for (let i = 0; i < scene_groups.length; i++) {
+            const group = scene_groups[i];
+            const seq = String(i + 1).padStart(2, "0");
+            const stateId = `mood_${bibleId}_${seq}`;
+            const progress = 0.1 + 0.8 * (i / Math.max(scene_groups.length, 1));
+            updateTask(task_id, {
+              progress,
+              current_step: `Generating mood state ${i + 1}/${scene_groups.length} (${stateId})`,
+            });
+
+            const tod = group.time_of_day.toUpperCase();
+            const normalizedTod = (validTimes.has(tod) ? tod : "DAY") as
+              "DAY" | "NIGHT" | "DAWN" | "DUSK" | "LATE_NIGHT";
+
+            const sceneDescription = [
+              `Scene IDs: ${group.scene_ids.join(", ")}`,
+              `Act: ${group.act}`,
+              `Time of day: ${normalizedTod}`,
+              group.context ? `Context: ${group.context}` : null,
+            ].filter(Boolean).join("\n");
+
+            const renderedUserPrompt = fillTemplate(userTemplate, {
+              bible: JSON.stringify(biblePayload),
+              light_base_state: JSON.stringify(lightBaseState),
+              scene_description: sceneDescription,
+              user_notes: (user_notes ?? "").trim(),
+            });
+            promptsUsed[stateId] = renderedUserPrompt;
+
+            const llmResult = await llmComplete(
+              PROMPT_MOOD_STATE_SYSTEM,
+              [{ role: "user", content: renderedUserPrompt }],
+              { maxTokens: 1024, temperature: 0.6 },
+            );
+
+            let delta: Record<string, unknown>;
+            try {
+              const parsed = JSON.parse(stripCodeFence(llmResult.content));
+              if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+                throw flError(FL_ERRORS.LLM_ERROR, "LLM did not return a JSON object", {
+                  retryable: true,
+                  suggestion: "Re-run create_mood_states; check that ANTHROPIC_API_KEY targets a model that follows JSON-only instructions.",
+                });
+              }
+              delta = parsed as Record<string, unknown>;
+            } catch (err) {
+              throw flError(FL_ERRORS.LLM_ERROR, `Mood state parse error for ${stateId}: ${err instanceof Error ? err.message : String(err)}`, {
+                retryable: true,
+                suggestion: "Re-run create_mood_states.",
+              });
+            }
+
+            // Strip caller-stamped fields if the LLM emitted them despite the rule.
+            for (const k of ["state_id", "bible_id", "scene_ids", "act", "time_of_day", "$schema"]) {
+              if (k in delta) delete (delta as Record<string, unknown>)[k];
+            }
+
+            const moodPayload = {
+              $schema: "mood-state-v1" as const,
+              state_id: stateId,
+              bible_id: typeof bible.bible_id === "string" ? bible.bible_id : bibleId,
+              scene_ids: group.scene_ids,
+              act: group.act,
+              time_of_day: normalizedTod,
+              ...delta,
+            };
+
+            // Validate before saving — saveArtifact also runs the schema, but
+            // catching here gives a clearer per-scene error message.
+            const validated = MoodStateSchema.parse(moodPayload);
+
+            await saveArtifact("mood", stateId, validated);
+            const uri = `agent://location-scout/mood/${stateId}`;
+            const created_at = new Date().toISOString();
+            moodArtifacts.push({ uri, mime_type: "application/json", created_at });
+            moodStateIds.push(stateId);
+            moodStates.push({ state_id: stateId, uri, scene_ids: group.scene_ids });
+          }
+
           updateTask(task_id, {
             status: "completed",
             progress: 1.0,
-            current_step: `Mood states created for ${scene_groups.length} scene groups`,
+            current_step: `${moodStateIds.length} mood states saved`,
+            artifacts: moodArtifacts,
+            prompts_used: promptsUsed,
           });
         } catch (err) {
           updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) });

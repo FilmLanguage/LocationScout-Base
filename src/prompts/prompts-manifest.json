@@ -124,6 +124,26 @@
       "ui_location": "SetupsPage → Setup Detail → Prompt card",
       "editable_without_deploy": true,
       "template_vars": ["space_description", "scene", "mood", "camera"]
+    },
+    {
+      "id": "mood-state-system",
+      "file": "mood-state-system.md",
+      "category": "system",
+      "visible_to_user": false,
+      "description": "System prompt: instructs Claude to produce mood-state-v1 JSON delta from location bible + scene context. Caller stamps state_id/bible_id/scene_ids/act/time_of_day deterministically.",
+      "used_by": ["create_mood_states tool"],
+      "editable_without_deploy": false
+    },
+    {
+      "id": "mood-state-user",
+      "file": "mood-state-user.md",
+      "category": "user",
+      "visible_to_user": true,
+      "description": "User-visible prompt template: rendered per scene_group inside create_mood_states. Vars: {{bible}}, {{light_base_state}}, {{scene_description}}, {{user_notes}}. Editable per generation.",
+      "used_by": ["create_mood_states tool"],
+      "ui_location": "Mood States panel → Generation prompt field",
+      "editable_without_deploy": true,
+      "template_vars": ["bible", "light_base_state", "scene_description", "user_notes"]
     }
   ]
 }
