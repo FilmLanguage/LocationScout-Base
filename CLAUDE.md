@@ -40,11 +40,16 @@ All 20 domain tools + 9 common tools (29 total) + 8 resources are implemented.
 4. **Error handling**: `src/lib/errors.ts` — Film Language error codes
 5. **Swagger/OpenAPI**: `src/swagger.ts` — auto-generated docs
 
+## Tests
+
+Unit tests run via `npm test` (default vitest). Inter-tool name parity runs via `npm run test:integration` (the existing `tool-names` suite). Integration tests against real Postgres live at `src/integration/*.test.ts` and run via `npm run test:integration:pg` — they require Docker (testcontainers spins up `postgres:16-alpine`, applies workspace `db/v2-schema.sql`, exercises the canonical chain `saveArtifact("research") → saveArtifact("bible") → saveBlobTwoPhase("anchor")`, and asserts `v2.location_research_packs`, `v2.location_bibles`, `v2.blobs`, and `v2.events` rows). Excluded from the default `npm test` run because container startup is ~30 s.
+
 <!-- WORKSPACE-DOCS-START -->
 ## Workspace docs
 
 All shared documentation lives in `../ai-stanislavsky-workspace/docs/`. Full docs index with descriptions → workspace `CLAUDE.md` (canonical).
 <!-- WORKSPACE-DOCS-END -->
+
 ## Development
 
 ```bash

@@ -9,9 +9,10 @@
     "dev": "tsx watch src/index.ts",
     "check-env": "bash check-env.sh",
     "inspect": "npx @modelcontextprotocol/inspector",
-    "test": "vitest run --exclude '**/tool-names.test.ts'",
+    "test": "vitest run --exclude '**/tool-names.test.ts' --exclude 'src/integration/**'",
     "test:integration": "vitest run tool-names",
-    "test:all": "vitest run",
+    "test:integration:pg": "vitest run src/integration --testTimeout=180000",
+    "test:all": "vitest run --exclude 'src/integration/**'",
     "test:watch": "vitest",
     "dev:ui": "vite",
     "build:ui": "tsc -p tsconfig.ui.json",
@@ -34,6 +35,7 @@
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "11.14.0",
     "@types/express": "^4.17.21",
     "@types/node": "^22.0.0",
     "@types/pg": "^8.20.0",
