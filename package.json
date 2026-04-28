@@ -1,6 +1,6 @@
 {
   "name": "fl-location-scout-base",
-  "version": "1.0.24",
+  "version": "1.0.25",
   "type": "module",
   "scripts": {
     "build": "tsc && node -e \"require('fs').cpSync('src/prompts','dist/prompts',{recursive:true})\"",
