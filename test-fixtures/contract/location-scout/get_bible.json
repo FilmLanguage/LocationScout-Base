@@ -1,0 +1,47 @@
+{
+  "meta": {
+    "fixture_id": "location-scout.get_bible.v1",
+    "agent": "location-scout",
+    "tool": "get_bible",
+    "version_added": "v1.0.24",
+    "adapted_on_replit": "2026-04-28",
+    "regression_guard": "Sync read-path tool — returns the full location-bible-v2 JSON directly inside `result.content[0].text` (a JSON string), NOT wrapped in another envelope. Miss path returns `{error:\"not_found\", bible_id}` JSON-in-200 (NOT MCP error) — clients distinguish hit/miss by presence of `bible_id` vs `$schema`. Mirrors the MCP resource at `agent://location-scout/bible/{location_id}` but is callable as a tool for clients that read tools-only. Drift signal: if `$schema` ever stops being `location-bible-v2`, every downstream consumer (ArtDirector, Cinematographer, ShotGeneration) loses its bible parser."
+  },
+  "request_template": {
+    "method": "tools/call",
+    "params": {
+      "name": "get_bible",
+      "arguments": {
+        "bible_id": "loc_001"
+      }
+    }
+  },
+  "async": false,
+  "response_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "oneOf": [
+      {
+        "type": "object",
+        "required": ["$schema", "bible_id", "passport", "approval_status"],
+        "properties": {
+          "$schema": { "const": "location-bible-v2" },
+          "bible_id": { "type": "string", "minLength": 1 },
+          "passport": { "type": "object" },
+          "approval_status": {
+            "type": "string",
+            "enum": ["draft", "pending_review", "approved", "rejected"]
+          }
+        }
+      },
+      {
+        "type": "object",
+        "required": ["error", "bible_id"],
+        "properties": {
+          "error": { "const": "not_found" },
+          "bible_id": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    ]
+  }
+}

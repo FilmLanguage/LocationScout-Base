@@ -1,0 +1,35 @@
+{
+  "meta": {
+    "fixture_id": "location-scout.assemble_anchor_prompt.v1",
+    "agent": "location-scout",
+    "tool": "assemble_anchor_prompt",
+    "version_added": "v1.0.24",
+    "adapted_on_replit": "2026-04-28",
+    "regression_guard": "Sync preview tool — must return `prompt` (filled template, ≤2000 chars) plus `approved` boolean reflecting Bible.approval_status. Tolerant of draft bibles: returns `approved:false` instead of throwing so the UI can warn (vs. generate_anchor which hard-gates). If `prompt` ever comes back empty for an approved Bible, the ✦ Auto-fill button silently writes blank into the textarea — UI cannot distinguish blank-because-no-template from blank-because-failure. `sources` array tells the UI which Bible fields fed the prompt; absence breaks provenance display."
+  },
+  "request_template": {
+    "method": "tools/call",
+    "params": {
+      "name": "assemble_anchor_prompt",
+      "arguments": {
+        "bible_uri": "agent://location-scout/bible/loc_001"
+      }
+    }
+  },
+  "async": false,
+  "response_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "required": ["prompt", "approved", "bible_id", "sources"],
+    "properties": {
+      "prompt": { "type": "string", "minLength": 1, "maxLength": 2000 },
+      "approved": { "type": "boolean" },
+      "bible_id": { "type": "string", "minLength": 1 },
+      "sources": {
+        "type": "array",
+        "items": { "type": "string" },
+        "minItems": 1
+      }
+    }
+  }
+}
