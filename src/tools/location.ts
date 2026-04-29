@@ -568,9 +568,15 @@ export function registerLocationTools(server: McpServer) {
             negative_list: negativeListRaw ?? [],
           };
 
-          const negativePrompt = Array.isArray(negativeListRaw)
+          const negativeListStr = Array.isArray(negativeListRaw)
             ? negativeListRaw.map((n) => (typeof n === "string" ? n : n.item)).join(", ")
             : "";
+          // run-019 I5: anchor uses the isometric.png as img2img conditioning, which
+          // tends to bleed isometric/3D-illustration aesthetics into the result. Add
+          // explicit negatives for those styles so the photoreal prompt dominates.
+          const ANCHOR_STYLE_NEGATIVES =
+            "isometric, isometric projection, axonometric, 3D illustration, 3D render, schematic, architectural diagram, blueprint, top-down view, bird's-eye view, cartoon, illustration, video game render, CAD model, low-poly";
+          const negativePrompt = [negativeListStr, ANCHOR_STYLE_NEGATIVES].filter(Boolean).join(", ");
           const editing = edit_mode?.enabled === true;
           const userChange = (prompt_override ?? "").trim();
           if (editing && userChange.length === 0) {
@@ -641,13 +647,18 @@ export function registerLocationTools(server: McpServer) {
 
             const promptForAttempt = (basePrompt + correctionHint).slice(0, 2000);
             const resolvedModel = resolveModel("ANCHOR", generation_params?.model, imageUrls.length > 0);
+            // Ref-strength policy for anchor (run-019 I5): the isometric is attached
+            // as a SPATIAL LAYOUT GUIDE only — prompt must dominate so the output
+            // reads as a photoreal eye-level photograph, not an isometric illustration.
+            // Edit mode keeps the high strength so iterations preserve the prior version.
+            const refStrength = editing ? 0.85 : 0.35;
             const result = await generateImage({
               prompt: promptForAttempt,
               negative_prompt: negativePrompt || undefined,
               seed: generation_params?.seed != null ? generation_params.seed + (attempt - 1) : undefined,
               model: resolvedModel,
               image_urls: imageUrls,
-              ...(editing ? { image_ref_strength: 0.85 } : {}),
+              image_ref_strength: refStrength,
             });
 
             if (result.images.length === 0) {
@@ -1144,9 +1155,10 @@ export function registerLocationTools(server: McpServer) {
     {
       floorplan_uri: z.string().describe("MCP resource URI of the floorplan"),
       mood_state_uris: z.array(z.string()).describe("MCP resource URIs of mood states"),
+      project_id: z.string().optional().describe("Project ID — when set and AGENT_EDITOR_URL is configured, DoP shot specs are fetched from the Editor's shot breakdown and used to anchor setup angles"),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
-    async ({ floorplan_uri, mood_state_uris }) => {
+    async ({ floorplan_uri, mood_state_uris, project_id }) => {
       const task_id = crypto.randomUUID();
       createTask(task_id, "Extracting camera setups");
       (async () => {
@@ -1165,12 +1177,48 @@ export function registerLocationTools(server: McpServer) {
 
           updateTask(task_id, { progress: 0.3, current_step: "Generating setup plan via LLM" });
           const passport = (bible.passport as Record<string, unknown> | undefined) ?? {};
+
+          // Fetch DoP shot specs from Editor if project_id and AGENT_EDITOR_URL are available.
+          // Filters EDL shots to only those belonging to this location's scenes, then groups
+          // unique (angle, movement, shot_size, lens) combos per scene for the setup planner.
+          let dopShotSection = "";
+          const editorUrl = process.env.AGENT_EDITOR_URL;
+          if (project_id && editorUrl) {
+            const edl = await readAgentResource(editorUrl, `agent://editor/edl/${project_id}`).catch(() => null);
+            if (edl && !("error" in (edl as object))) {
+              const shots = ((edl as Record<string, unknown>).shots as Record<string, unknown>[] | undefined) ?? [];
+              const sceneIds = new Set<string>((passport.scenes as string[] | undefined) ?? []);
+              const byScene: Record<string, Set<string>> = {};
+              for (const shot of shots) {
+                const sid = shot.scene_id as string | undefined;
+                if (!sid || !sceneIds.has(sid)) continue;
+                const parts = [
+                  shot.camera_angle && `angle:${shot.camera_angle}`,
+                  shot.camera_movement && `movement:${shot.camera_movement}`,
+                  shot.shot_size && `size:${shot.shot_size}`,
+                  shot.lens && `lens:${shot.lens}`,
+                ].filter(Boolean).join(", ");
+                if (!parts) continue;
+                if (!byScene[sid]) byScene[sid] = new Set();
+                byScene[sid].add(parts);
+              }
+              const lines = Object.entries(byScene).map(
+                ([sid, specs]) => `SCENE ${sid}:\n${[...specs].map((s) => `  - ${s}`).join("\n")}`,
+              );
+              if (lines.length > 0) {
+                dopShotSection = `\n\nDoP Shot Requirements (from Editor shot breakdown):\n${lines.join("\n")}`;
+              }
+            } else {
+              console.warn(`[extract_setups] Editor EDL not available for project ${project_id} — proceeding without DoP shot requirements`);
+            }
+          }
+
           // Schema lives in the system prompt (setup-planner-system.md) so prompt
           // caching can reuse it across requests. User message carries only the
-          // variable Bible + mood state data.
+          // variable Bible + mood state data (+ optional DoP shot requirements).
           const llmResult = await llmComplete(
             PROMPT_SETUP_PLANNER,
-            [{ role: "user", content: `Location Bible:\n${JSON.stringify({ bible_id: bible.bible_id, spaces: bible.spaces, space_description: (bible.space_description as string | undefined)?.slice(0, 600), scenes: passport.scenes, light_base_state: bible.light_base_state })}\n\nMood States:\n${JSON.stringify(moodStates)}` }],
+            [{ role: "user", content: `Location Bible:\n${JSON.stringify({ bible_id: bible.bible_id, spaces: bible.spaces, space_description: (bible.space_description as string | undefined)?.slice(0, 600), scenes: passport.scenes, light_base_state: bible.light_base_state })}\n\nMood States:\n${JSON.stringify(moodStates)}${dopShotSection}` }],
             { maxTokens: 4096, temperature: 0.6 },
           );
 

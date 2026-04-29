@@ -77,9 +77,12 @@ describe("buildSetupPromptVars", () => {
 describe("template fills — end-to-end preview", () => {
   it("anchor template renders the space description inline", () => {
     const prompt = fillTemplate(ANCHOR_TPL, buildAnchorPromptVars(mockBible));
-    expect(prompt).toBe(
-      "Cinematic film location photograph. A dimly-lit suburban living room with mustard couch and CRT TV",
-    );
+    expect(prompt).toContain("Cinematic film location photograph");
+    expect(prompt).toContain("A dimly-lit suburban living room with mustard couch and CRT TV");
+    // run-019 I5: anchor must read as photoreal eye-level photo, not isometric.
+    expect(prompt).toContain("photorealistic");
+    expect(prompt).toContain("eye-level");
+    expect(prompt).toContain("no isometric projection");
   });
 
   it("isometric template includes location name and era", () => {
