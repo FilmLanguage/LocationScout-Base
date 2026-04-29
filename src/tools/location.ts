@@ -137,6 +137,41 @@ function stripCodeFence(text: string): string {
   return match ? match[1].trim() : trimmed;
 }
 
+/**
+ * Build a one-sentence layout hint string from a Location Bible to inject
+ * into the anchor prompt as a spatial guide. Replaces the old isometric.png
+ * image-reference path that bled isometric aesthetics into nano-banana
+ * outputs (run-019 Bug D). Pure text — eye-level photoreal generation.
+ */
+function buildLayoutHintFromBible(bible: Record<string, unknown>): string {
+  const passport = (bible.passport ?? {}) as Record<string, unknown>;
+  const spaces = (bible.spaces as unknown[] | undefined) ?? [];
+  const parts: string[] = [];
+
+  const dim =
+    (passport.dimensions as string | undefined) ??
+    (passport.size as string | undefined) ??
+    (passport.area as string | undefined);
+  if (dim) parts.push(`approximate dimensions ${dim}`);
+
+  if (Array.isArray(spaces) && spaces.length > 0) {
+    const spaceNames = spaces
+      .map((s) => (s && typeof s === "object" ? ((s as Record<string, unknown>).name as string | undefined) : undefined))
+      .filter((s): s is string => typeof s === "string" && s.length > 0);
+    if (spaceNames.length > 0) {
+      parts.push(`comprises ${spaceNames.slice(0, 4).join(", ")}`);
+    }
+  }
+
+  const features =
+    (passport.features as string | undefined) ??
+    (passport.openings as string | undefined) ??
+    (passport.layout as string | undefined);
+  if (features) parts.push(features);
+
+  return parts.length > 0 ? parts.join("; ") : "";
+}
+
 export function registerLocationTools(server: McpServer) {
 
   // Composite pipeline tool
@@ -597,39 +632,36 @@ export function registerLocationTools(server: McpServer) {
             }
           }
 
-          const basePrompt = (editing
+          const rawPrompt = editing
             ? composeEditPrompt(userChange)
             : (prompt_override
               ? prompt_override
-              : fillTemplate(PROMPT_ANCHOR_TEMPLATE, buildAnchorPromptVars(bible)))
-          ).slice(0, 2000);
+              : fillTemplate(PROMPT_ANCHOR_TEMPLATE, buildAnchorPromptVars(bible)));
 
-          // Assemble img2img inputs. Edit mode: base version only; otherwise
-          // isometric chain ref + any user-supplied refs.
-          updateTask(task_id, { progress: 0.08, current_step: editing ? "Loading edit base image" : "Loading reference images for img2img" });
+          // run-019/020 D: Drop the isometric.png image input. nano-banana
+          // ignores `image_ref_strength` below ~0.5 — when the only image
+          // reference IS the isometric, the output bleeds isometric/3D
+          // aesthetics regardless of prompt + negatives. We now derive the
+          // spatial layout from the bible (passport dimensions + spaces +
+          // floorplan-described layout) as TEXT and run text-to-image.
+          // Edit mode and explicit user reference_images still attach images.
+          updateTask(task_id, { progress: 0.08, current_step: editing ? "Loading edit base image" : "Composing layout text from bible" });
           const imageUrls: string[] = [];
+          let layoutHint = "";
           if (editing && editBase) {
             imageUrls.push(editBase.dataUrl);
           } else {
             if (auto_resolve !== false) {
-              const isometricImage = await loadImage("isometric", bibleId);
-              if (!isometricImage) {
-                throw flError(FL_ERRORS.MISSING_DEPENDENCY, `Isometric reference not found for ${bibleId}. Generate floorplan and isometric first.`, {
-                  retryable: false,
-                  suggestion: "Run create_floorplan then generate_isometric_reference before generating the anchor, or pass explicit reference_images with auto_resolve=false.",
-                });
-              }
-              imageUrls.push(`data:image/png;base64,${isometricImage.data.toString("base64")}`);
+              layoutHint = buildLayoutHintFromBible(bible);
             }
             const extraRefs = await resolveReferenceImages(reference_images);
             imageUrls.push(...extraRefs);
-            if (imageUrls.length === 0) {
-              throw flError(FL_ERRORS.MISSING_DEPENDENCY, `No reference images available for anchor generation of ${bibleId}.`, {
-                retryable: false,
-                suggestion: "Either run create_floorplan + generate_isometric_reference first, or pass reference_images with auto_resolve=false.",
-              });
-            }
+            // text-to-image is fine here: the prompt + layoutHint carry the
+            // spatial spec. We no longer require imageUrls to be non-empty.
           }
+          const basePrompt = (
+            layoutHint ? `${rawPrompt}\n\nLayout (spatial guide, not visible elements): ${layoutHint}` : rawPrompt
+          ).slice(0, 2000);
 
           let lastImageUrl: string | null = null;
           let lastReport: import("@filmlanguage/schemas").ValidationReport | null = null;
@@ -642,7 +674,7 @@ export function registerLocationTools(server: McpServer) {
             const progressStep = 0.1 + 0.7 * ((attempt - 1) / maxAttempts);
             updateTask(task_id, {
               progress: progressStep,
-              current_step: `Generation attempt ${attempt}/${validationEnabled ? maxAttempts : 1} (img2img from isometric)`,
+              current_step: `Generation attempt ${attempt}/${validationEnabled ? maxAttempts : 1} (${imageUrls.length === 0 ? "text-to-image" : "img2img"})`,
             });
 
             const promptForAttempt = (basePrompt + correctionHint).slice(0, 2000);
