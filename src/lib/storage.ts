@@ -32,6 +32,7 @@ import {
   ResearchPackSchema,
 } from "@filmlanguage/schemas";
 import { validatePayload } from "./schema-registry.js";
+import { log } from "./log.js";
 
 const AGENT_NAME = "location-scout";
 
@@ -92,6 +93,8 @@ async function readLocal(path: string): Promise<Buffer | null> {
 // ─── JSON Artifacts ──────────────────────────────────────────────────
 
 export async function saveArtifact(type: string, id: string, data: unknown): Promise<string> {
+  const start = Date.now();
+  const destinations: string[] = [];
   const path = `${type}/${id}.json`;
 
   // Save previous version for diff (one backup only)
@@ -114,40 +117,54 @@ export async function saveArtifact(type: string, id: string, data: unknown): Pro
   const zodSchema = ARTIFACT_SCHEMAS[type];
   try {
     await saveArtifactToPg(type, id, data, zodSchema);
+    destinations.push("db");
   } catch (err) {
     if (err instanceof StorageUnavailableError) {
       // Circuit is open — propagate so callers can return STORAGE_UNAVAILABLE.
+      log({ category: "error", action: `data_write:${type}`, status: "error", details: { from_category: "data", type, id, dest: "db", error_message: "STORAGE_UNAVAILABLE" } });
       throw err;
     }
     if (isDbEnabled()) {
       // DB is configured but write failed (e.g. optimistic lock, validation) — rethrow.
+      log({ category: "error", action: `data_write:${type}`, status: "error", details: { from_category: "data", type, id, dest: "db", error_message: String((err as Error)?.message ?? err).slice(0, 500) } });
       throw err;
     }
     // DB not configured — silently skip (local / S3 path below).
-    console.warn(`[storage] PG write skipped for ${type}/${id} (DB not enabled): ${(err as Error)?.message ?? err}`);
   }
 
-  // ── 2. In-memory L1 (always, but production reads should prefer PG) ─
-  if (IS_DEV || !isDbEnabled()) {
-    memoryStore.set(path, { data: json, contentType: "application/json" });
-  } else {
-    // Keep in memory for within-request read-back even in prod.
-    memoryStore.set(path, { data: json, contentType: "application/json" });
-  }
+  // ── 2. In-memory L1 ─────────────────────────────────────────────
+  memoryStore.set(path, { data: json, contentType: "application/json" });
+  destinations.push("memory");
 
   // ── 3. Local disk ─────────────────────────────────────────────────
   await writeLocal(path, json);
+  destinations.push("local");
 
   // ── 4. S3 best-effort dual-write ──────────────────────────────────
+  let result = `mem://${path}`;
   if (S3_BUCKET) {
     try {
-      return await s3Upload(path, json, "application/json");
+      result = await s3Upload(path, json, "application/json");
+      destinations.push("s3");
     } catch (err) {
-      console.warn(`[storage] S3 upload failed for ${path}: ${(err as Error)?.message ?? err}`);
+      log({
+        category: "error",
+        action: `data_write:${type}`,
+        status: "error",
+        details: { from_category: "data", type, id, dest: "s3", error_message: String((err as Error)?.message ?? err).slice(0, 500) },
+      });
     }
   }
 
-  return `mem://${path}`;
+  log({
+    category: "data",
+    action: `data_write:${type}`,
+    status: "completed",
+    duration_ms: Date.now() - start,
+    details: { type, id, bytes: Buffer.byteLength(json, "utf8"), destinations },
+  });
+
+  return result;
 }
 
 export async function loadArtifact<T = unknown>(type: string, id: string): Promise<T | null> {
@@ -696,9 +713,15 @@ export function createTask(task_id: string, step: string, tool_name = ""): TaskE
     updated_at: now,
   };
   taskStore.set(task_id, entry);
-  persistTask(task_id, tool_name, "accepted", entry).catch((e) =>
-    console.warn("[storage] DB createTask failed:", e instanceof Error ? e.message : e),
-  );
+  log({
+    category: "task",
+    action: `task_create:${tool_name || "unknown"}`,
+    status: "started",
+    details: { task_id, tool_name, current_step: step },
+  });
+  persistTask(task_id, tool_name, "accepted", entry).catch((e) => {
+    log({ category: "error", action: `task_create:${tool_name}`, status: "error", details: { from_category: "task", task_id, error_message: String(e instanceof Error ? e.message : e).slice(0, 500) } });
+  });
   return entry;
 }
 
@@ -709,9 +732,23 @@ export function updateTask(
   const entry = taskStore.get(task_id);
   if (!entry) return null;
   Object.assign(entry, update, { updated_at: new Date().toISOString() });
-  persistTask(task_id, entry.tool_name, entry.status, entry).catch((e) =>
-    console.warn("[storage] DB updateTask failed:", e instanceof Error ? e.message : e),
-  );
+  const isTerminal = entry.status === "completed" || entry.status === "failed";
+  log({
+    category: "task",
+    action: `task_${isTerminal ? entry.status : "update"}:${entry.tool_name || "unknown"}`,
+    status: isTerminal ? (entry.status === "completed" ? "completed" : "error") : "started",
+    details: {
+      task_id,
+      tool_name: entry.tool_name,
+      progress: entry.progress,
+      current_step: entry.current_step,
+      task_status: entry.status,
+      ...(entry.error ? { error_message: String(entry.error).slice(0, 500) } : {}),
+    },
+  });
+  persistTask(task_id, entry.tool_name, entry.status, entry).catch((e) => {
+    log({ category: "error", action: `task_update:${entry.tool_name}`, status: "error", details: { from_category: "task", task_id, error_message: String(e instanceof Error ? e.message : e).slice(0, 500) } });
+  });
   return entry;
 }
 

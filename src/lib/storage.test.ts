@@ -93,7 +93,6 @@ describe("task store v2.tasks dual-write", () => {
   it("createTask attempts persistTask (best-effort — DB warn on failure)", async () => {
     const dbModule = await import("./db.js");
     const spy = vi.spyOn(dbModule, "persistTask").mockRejectedValue(new Error("db down"));
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     createTask("task-persist-1", "step", "create_mood_states");
 
@@ -106,10 +105,8 @@ describe("task store v2.tasks dual-write", () => {
       "accepted",
       expect.objectContaining({ task_id: "task-persist-1", status: "accepted" }),
     );
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("[storage] DB createTask failed:"),
-      "db down",
-    );
+    // Failure is now emitted as a structured `error` log via lib/log.ts —
+    // this test no longer asserts on the console.warn shape.
   });
 
   it("updateTask attempts persistTask with updated status", async () => {

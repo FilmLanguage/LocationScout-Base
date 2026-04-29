@@ -10,6 +10,7 @@
  */
 
 import { getCached, setCached } from "./mcp-cache.js";
+import { log } from "./log.js";
 
 const INTER_AGENT_TOKEN = process.env.INTER_AGENT_TOKEN ?? "";
 
@@ -28,8 +29,13 @@ interface McpResponse {
 async function mcpRead(agentBaseUrl: string, uri: string): Promise<McpResponse | null> {
   const cacheKey = `${agentBaseUrl}::${uri}`;
   const cached = getCached<McpResponse>(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    log({ category: "mcp_out", action: `resource_read:${uri}`, status: "skipped", details: { agent: agentBaseUrl, reason: "cache_hit" } });
+    return cached;
+  }
 
+  const start = Date.now();
+  log({ category: "mcp_out", action: `resource_read:${uri}`, status: "started", details: { agent: agentBaseUrl } });
   try {
     const res = await fetch(`${agentBaseUrl}/mcp`, {
       method: "POST",
@@ -40,7 +46,10 @@ async function mcpRead(agentBaseUrl: string, uri: string): Promise<McpResponse |
       },
       body: JSON.stringify({ jsonrpc: "2.0", method: "resources/read", params: { uri }, id: 1 }),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      log({ category: "mcp_out", action: `resource_read:${uri}`, status: "error", duration_ms: Date.now() - start, details: { agent: agentBaseUrl, http_status: res.status } });
+      return null;
+    }
 
     const contentType = res.headers.get("content-type") ?? "";
     let parsed: McpResponse | null = null;
@@ -60,8 +69,11 @@ async function mcpRead(agentBaseUrl: string, uri: string): Promise<McpResponse |
     }
 
     if (parsed) setCached(cacheKey, parsed);
+    log({ category: "mcp_out", action: `resource_read:${uri}`, status: "completed", duration_ms: Date.now() - start, details: { agent: agentBaseUrl, parsed: parsed != null } });
     return parsed;
-  } catch {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log({ category: "error", action: `resource_read:${uri}`, status: "error", duration_ms: Date.now() - start, details: { from_category: "mcp_out", agent: agentBaseUrl, error_message: message.slice(0, 500) } });
     return null;
   }
 }

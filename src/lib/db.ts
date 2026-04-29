@@ -17,6 +17,7 @@ import { z } from "zod";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
+import { log } from "./log.js";
 
 const { Pool } = pg;
 
@@ -298,6 +299,8 @@ export async function saveArtifactToPg(
 
   return withDb(async (p) => {
     const client = await p.connect();
+    const dbStart = Date.now();
+    log({ category: "db", action: `save:${mapping.table}`, status: "started", details: { id, type, project_key: projectKey, location_key: locationKey } });
     try {
       await client.query("BEGIN");
       const projectId = await ensureProject(client, projectKey, projectTitle);
@@ -376,9 +379,24 @@ export async function saveArtifactToPg(
       );
 
       await client.query("COMMIT");
+      log({
+        category: "db",
+        action: `save:${mapping.table}`,
+        status: "completed",
+        duration_ms: Date.now() - dbStart,
+        details: { id, type, project_key: projectKey, location_key: locationKey, artifact_id: artifactId, version: nextVersion, table: `v2.${mapping.table}` },
+      });
       return { artifactId, version: nextVersion };
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});
+      const message = err instanceof Error ? err.message : String(err);
+      log({
+        category: "error",
+        action: `save:${mapping.table}`,
+        status: "error",
+        duration_ms: Date.now() - dbStart,
+        details: { from_category: "db", id, type, error_message: message.slice(0, 500) },
+      });
       throw err;
     } finally {
       client.release();

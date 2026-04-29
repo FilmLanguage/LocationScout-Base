@@ -5,6 +5,7 @@
 
 import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { flError, FL_ERRORS } from "./errors.js";
+import { log } from "./log.js";
 
 // ─── Environment ────────────────────────────────────────────────────
 
@@ -153,6 +154,21 @@ export async function generateImage(params: ImageGenParams): Promise<ImageGenRes
   }
 
   // Submit to FAL.ai queue
+  const start = Date.now();
+  log({
+    category: "fal",
+    action: `${modelPath}:submit`,
+    status: "started",
+    details: {
+      model: modelPath,
+      prompt_chars: params.prompt.length,
+      ref_count: params.image_urls?.length ?? 0,
+      image_ref_strength: params.image_ref_strength,
+      width: params.width,
+      height: params.height,
+      seed: params.seed,
+    },
+  });
   const submitRes = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -163,6 +179,13 @@ export async function generateImage(params: ImageGenParams): Promise<ImageGenRes
   });
 
   if (!submitRes.ok) {
+    log({
+      category: "fal",
+      action: `${modelPath}:submit`,
+      status: "error",
+      duration_ms: Date.now() - start,
+      details: { model: modelPath, http_status: submitRes.status },
+    });
     const body = await submitRes.text();
     throw flError(FL_ERRORS.GENERATION_ERROR, `FAL.ai submit error: ${submitRes.status} (model=${modelPath})`, {
       retryable: submitRes.status >= 500,
@@ -171,6 +194,13 @@ export async function generateImage(params: ImageGenParams): Promise<ImageGenRes
       body,
     });
   }
+  log({
+    category: "fal",
+    action: `${modelPath}:submit`,
+    status: "completed",
+    duration_ms: Date.now() - start,
+    details: { model: modelPath, http_status: submitRes.status },
+  });
 
   const submitData = await submitRes.json() as { request_id: string; status_url: string; response_url: string };
 

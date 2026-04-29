@@ -1,7 +1,9 @@
 import "./env.js";
+process.env.AGENT_NAME ??= "location-scout";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
+import { randomUUID } from "node:crypto";
 import { VERSION } from "./lib/version.js";
 import { isDbEnabled, getPool, isCircuitOpen } from "./lib/db.js";
 
@@ -10,6 +12,7 @@ import { registerLocationTools } from "./tools/location.js";
 import { registerReferenceTools } from "./tools/references.js";
 import { registerResources } from "./resources/location.js";
 import { mountSwagger } from "./swagger.js";
+import { log, withRequestContext } from "./lib/log.js";
 
 
 // PERF: McpServer is created per-request to avoid the SDK's
@@ -42,6 +45,23 @@ app.use((_req, res, next) => {
   next();
 });
 
+// http_in middleware — register before auth so 401 responses are also logged.
+app.use((req, res, next) => {
+  const start = Date.now();
+  const method = req.method;
+  const path = req.originalUrl.split("?")[0];
+  res.on("finish", () => {
+    log({
+      category: "http_in",
+      action: `${method} ${path}`,
+      status: res.statusCode < 400 ? "ok" : "error",
+      duration_ms: Date.now() - start,
+      details: { status: res.statusCode, content_length: res.get("content-length") },
+    });
+  });
+  next();
+});
+
 // Inter-agent auth: if INTER_AGENT_TOKEN is set, require x-agent-token header.
 // Skip auth when token is empty (dev mode) or for health check.
 const INTER_AGENT_TOKEN = process.env.INTER_AGENT_TOKEN || "";
@@ -58,12 +78,30 @@ app.use((req, res, next) => {
 });
 
 app.post("/mcp", async (req, res) => {
-  const server = createServer();
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined, // stateless
+  const request_id = randomUUID();
+  const body = req.body as { method?: string; params?: { name?: string; uri?: string } } | undefined;
+  const rpcMethod = body?.method ?? "unknown";
+  const tool = body?.params?.name;
+  const uri = body?.params?.uri;
+  const action = tool ? `tool:${tool}` : uri ? `resource_read:${uri}` : `mcp:${rpcMethod}`;
+
+  await withRequestContext(request_id, tool, async () => {
+    const start = Date.now();
+    log({ category: "mcp_in", action, status: "started" });
+    try {
+      const server = createServer();
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined, // stateless
+      });
+      await server.connect(transport);
+      await transport.handleRequest(req, res, body);
+      log({ category: "mcp_in", action, status: "completed", duration_ms: Date.now() - start });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log({ category: "error", action, status: "error", duration_ms: Date.now() - start, details: { from_category: "mcp_in", error_message: message.slice(0, 500) } });
+      throw err;
+    }
   });
-  await server.connect(transport);
-  await transport.handleRequest(req, res, req.body);
 });
 
 // Serve a specific image version by its short image_id — used by PromptCard
