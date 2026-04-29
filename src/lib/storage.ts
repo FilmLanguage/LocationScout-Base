@@ -385,6 +385,17 @@ export async function saveImage(
       contentType,
     );
     s3_path = blobRecord.s3_uri;
+    // run-019 fix: mirror bytes to S3 latest-alias path so /artifacts/{kind}/{id}.png
+    // and loadImage step-4 work after Cloud Run cold-start (ephemeral local FS).
+    // saveBlobTwoPhase writes blobs/<sha>/<sha> (content-addressed) only, so
+    // setup PNGs were 404ing in run-019 organize-results.
+    if (S3_BUCKET) {
+      try {
+        await s3Upload(latestKey, data, contentType);
+      } catch (e) {
+        console.warn(`[storage] saveImage: latest-alias S3 upload failed for ${latestKey}: ${(e as Error)?.message ?? e}`);
+      }
+    }
   } catch (err) {
     console.warn(`[storage] saveImage: two-phase blob write failed: ${(err as Error)?.message ?? err}`);
     // Legacy S3 path as fallback
