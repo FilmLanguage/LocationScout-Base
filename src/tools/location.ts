@@ -868,12 +868,28 @@ export function registerLocationTools(server: McpServer) {
             moodStates.push({ state_id: stateId, uri, scene_ids: group.scene_ids });
           }
 
+          // Build a flat scene→state map so consumers (ShotGeneration
+          // assemble_prompt) can resolve mood_state_id from a scene_id without
+          // having to enumerate all mood-state artifacts. Each mood state may
+          // span multiple scenes; we emit one entry per (scene_id, state_id)
+          // pair. e2e scenarios reference this as
+          // `${step.X._submit.scene_to_state_map[<scene_id>]}` or just
+          // `${step.X._submit.mood_state_ids[0]}` for the single-scene case.
+          const scene_to_state_map: Record<string, string> = {};
+          for (const ms of moodStates) {
+            for (const sid of ms.scene_ids) {
+              scene_to_state_map[sid] = ms.state_id;
+            }
+          }
+
           updateTask(task_id, {
             status: "completed",
             progress: 1.0,
             current_step: `${moodStateIds.length} mood states saved`,
             artifacts: moodArtifacts,
             prompts_used: promptsUsed,
+            mood_state_ids: moodStateIds,
+            scene_to_state_map,
           });
         } catch (err) {
           updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) });
@@ -1166,9 +1182,27 @@ export function registerLocationTools(server: McpServer) {
 
           updateTask(task_id, { progress: 0.7, current_step: `Saving ${setups.length} setups` });
           const artifacts: Array<{ uri: string; mime_type: string; created_at: string }> = [];
-          for (const setup of setups) {
+          for (let i = 0; i < setups.length; i++) {
+            const setup = setups[i];
             const sid = (setup.setup_id as string | undefined) ?? `setup_${bibleId}_${crypto.randomUUID().slice(0, 8)}`;
             setup.setup_id = sid;
+            // Ensure setup_name is always populated — v2.location_setups.setup_name is NOT NULL.
+            // Order of preference: explicit LLM field → composition snippet → scene_id+setup_id → "Setup A/B/...".
+            const existingName = typeof setup.setup_name === "string" ? setup.setup_name.trim() : "";
+            if (existingName.length === 0) {
+              const composition = typeof setup.composition === "string" ? setup.composition.trim() : "";
+              const sceneId = typeof setup.scene_id === "string" ? setup.scene_id : "";
+              if (composition.length > 0) {
+                setup.setup_name = composition.slice(0, 80);
+              } else if (sceneId) {
+                setup.setup_name = `${sceneId} — ${sid}`.slice(0, 200);
+              } else {
+                const letter = String.fromCharCode(65 + (i % 26)); // A, B, C, …
+                setup.setup_name = `Setup ${letter}`;
+              }
+            } else {
+              setup.setup_name = existingName.slice(0, 200);
+            }
             await saveArtifact("setup", sid, setup);
             artifacts.push({ uri: `agent://location-scout/setup/${sid}`, mime_type: "application/json", created_at: new Date().toISOString() });
           }

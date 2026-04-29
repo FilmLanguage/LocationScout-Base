@@ -661,6 +661,11 @@ interface TaskEntry {
   prompt_used?: string;
   /** Per-setup prompts for multi-image tools like generate_setup_images. */
   prompts_used?: Record<string, string>;
+  /** create_mood_states: array of state_ids in the order produced. */
+  mood_state_ids?: string[];
+  /** create_mood_states: scene_id → state_id flat lookup so consumers can
+   *  resolve mood_state_id from scene_id without listing all artifacts. */
+  scene_to_state_map?: Record<string, string>;
   created_at: string;
   updated_at: string;
 }
@@ -688,7 +693,7 @@ export function createTask(task_id: string, step: string, tool_name = ""): TaskE
 
 export function updateTask(
   task_id: string,
-  update: Partial<Pick<TaskEntry, "status" | "progress" | "current_step" | "artifacts" | "error" | "setup_map" | "prompt_used" | "prompts_used">>,
+  update: Partial<Pick<TaskEntry, "status" | "progress" | "current_step" | "artifacts" | "error" | "setup_map" | "prompt_used" | "prompts_used" | "mood_state_ids" | "scene_to_state_map">>,
 ): TaskEntry | null {
   const entry = taskStore.get(task_id);
   if (!entry) return null;

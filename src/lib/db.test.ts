@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { isDbEnabled, supportedArtifactTypes, artifactTableFor, saveArtifactToPg } from "./db.js";
+import { isDbEnabled, supportedArtifactTypes, artifactTableFor, saveArtifactToPg, deriveSetupName } from "./db.js";
 
 const KEYS = ["YANDEX_DB_HOST", "YANDEX_DB_NAME", "YANDEX_DB_USER", "YANDEX_DB_PASSWORD"] as const;
 
@@ -88,5 +88,43 @@ describe("saveArtifactToPg (DB disabled)", () => {
     expect(await saveArtifactToPg("bible", "loc_001", null)).toBeNull();
     expect(await saveArtifactToPg("bible", "loc_001", "string")).toBeNull();
     expect(await saveArtifactToPg("bible", "loc_001", [1, 2, 3])).toBeNull();
+  });
+});
+
+describe("deriveSetupName (location_setups.setup_name NOT NULL)", () => {
+  it("returns explicit setup_name when present", () => {
+    expect(deriveSetupName("setup_S1_A", { setup_name: "Wide kitchen establish" })).toBe("Wide kitchen establish");
+  });
+
+  it("trims and caps explicit setup_name to 200 chars", () => {
+    const long = "  " + "x".repeat(300) + "  ";
+    const out = deriveSetupName("setup_S1_A", { setup_name: long });
+    expect(out.length).toBe(200);
+    expect(out.startsWith("x")).toBe(true);
+  });
+
+  it("falls back to composition snippet (80 chars)", () => {
+    const composition = "Low-angle from doorway, foreground table dressed with letters";
+    expect(deriveSetupName("setup_S1_A", { composition })).toBe(composition);
+  });
+
+  it("falls back to scene_id + setup_id when no name/composition", () => {
+    expect(deriveSetupName("setup_S1_A", { scene_id: "S1", setup_id: "setup_S1_A" })).toBe("S1 — setup_S1_A");
+  });
+
+  it("falls back to setup_id alone when no scene_id", () => {
+    expect(deriveSetupName("setup_xyz", { setup_id: "setup_xyz" })).toBe("setup_xyz");
+  });
+
+  it("falls back to id when payload is empty", () => {
+    expect(deriveSetupName("setup_fallback", {})).toBe("setup_fallback");
+  });
+
+  it("never returns empty string", () => {
+    expect(deriveSetupName("", {})).toBe("Untitled setup");
+  });
+
+  it("ignores non-string setup_name", () => {
+    expect(deriveSetupName("setup_xyz", { setup_name: 42, setup_id: "setup_xyz" })).toBe("setup_xyz");
   });
 });

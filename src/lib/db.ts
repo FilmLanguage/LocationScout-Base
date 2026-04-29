@@ -28,6 +28,25 @@ interface ArtifactTypeConfig {
   table: string;               // v2.<table>
   entityColumn: "location_id"; // which FK column to populate
   schemaVersion: string;
+  /**
+   * Extra NOT-NULL columns this table requires beyond the standard
+   * (project_id, entityColumn, version, is_current, schema_version, payload).
+   * Each entry maps a column name to a function that derives the value from
+   * (id, payload). Returning undefined falls through to a generated default
+   * — never null (the underlying column is NOT NULL by definition).
+   */
+  extraColumns?: Record<string, (id: string, payload: Record<string, unknown>) => string>;
+}
+
+export function deriveSetupName(id: string, payload: Record<string, unknown>): string {
+  const explicit = typeof payload.setup_name === "string" ? payload.setup_name.trim() : "";
+  if (explicit.length > 0) return explicit.slice(0, 200);
+  const composition = typeof payload.composition === "string" ? payload.composition.trim() : "";
+  if (composition.length > 0) return composition.slice(0, 80);
+  const sceneId = typeof payload.scene_id === "string" ? payload.scene_id : "";
+  const setupId = typeof payload.setup_id === "string" ? payload.setup_id : id;
+  if (sceneId) return `${sceneId} — ${setupId}`.slice(0, 200);
+  return setupId || "Untitled setup";
 }
 
 const TYPE_MAP: Record<string, ArtifactTypeConfig> = {
@@ -35,7 +54,12 @@ const TYPE_MAP: Record<string, ArtifactTypeConfig> = {
   research:  { table: "location_research_packs", entityColumn: "location_id", schemaVersion: "research-pack-v1" },
   mood:      { table: "mood_states",             entityColumn: "location_id", schemaVersion: "mood-state-v1" },
   floorplan: { table: "floorplans",              entityColumn: "location_id", schemaVersion: "floorplan-v1" },
-  setup:     { table: "location_setups",         entityColumn: "location_id", schemaVersion: "location-setup-v1" },
+  setup:     {
+    table: "location_setups",
+    entityColumn: "location_id",
+    schemaVersion: "location-setup-v1",
+    extraColumns: { setup_name: deriveSetupName },
+  },
 };
 
 // ─── Pool singleton ─────────────────────────────────────────────────
@@ -313,13 +337,34 @@ export async function saveArtifactToPg(
         [projectId, locationId]
       );
 
-      // Insert new version
+      // Insert new version (optionally with table-specific extra NOT-NULL columns)
+      const baseColumns = ["project_id", mapping.entityColumn, "version", "is_current", "schema_version", "payload"];
+      const baseValues: Array<string | number | boolean> = [projectId, locationId, nextVersion, true, mapping.schemaVersion, JSON.stringify(payload)];
+      const baseTypes = ["", "", "", "", "", "::jsonb"];
+
+      const extra = mapping.extraColumns ?? {};
+      const extraNames = Object.keys(extra);
+      for (const colName of extraNames) {
+        const derived = extra[colName](id, payload);
+        if (typeof derived !== "string" || derived.length === 0) {
+          throw new Error(`[db] saveArtifactToPg: derived value for required column ${mapping.table}.${colName} is empty for ${type}/${id}`);
+        }
+        baseColumns.push(colName);
+        baseValues.push(derived);
+        baseTypes.push("");
+      }
+
+      const placeholders = baseColumns.map((_, idx) => {
+        // is_current is the literal TRUE — emit boolean directly via $idx
+        return `$${idx + 1}${baseTypes[idx]}`;
+      });
+
       const insertRes = await client.query<{ id: string }>(
         `INSERT INTO v2.${mapping.table}
-           (project_id, ${mapping.entityColumn}, version, is_current, schema_version, payload)
-         VALUES ($1, $2, $3, TRUE, $4, $5::jsonb)
+           (${baseColumns.join(", ")})
+         VALUES (${placeholders.join(", ")})
          RETURNING id;`,
-        [projectId, locationId, nextVersion, mapping.schemaVersion, JSON.stringify(payload)]
+        baseValues
       );
       const artifactId = insertRes.rows[0].id;
 

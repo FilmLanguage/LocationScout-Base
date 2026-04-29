@@ -118,6 +118,10 @@ export function registerCommonTools(server: McpServer) {
             status: task.status,
             artifacts: task.artifacts,
             error: task.error,
+            // Tool-specific result fields (only present for the producing tool):
+            ...(task.mood_state_ids ? { mood_state_ids: task.mood_state_ids } : {}),
+            ...(task.scene_to_state_map ? { scene_to_state_map: task.scene_to_state_map } : {}),
+            ...(task.setup_map ? { setup_map: task.setup_map } : {}),
           }),
         }],
       };
