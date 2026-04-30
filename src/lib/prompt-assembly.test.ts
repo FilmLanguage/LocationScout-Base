@@ -13,6 +13,7 @@ import {
   buildAnchorPromptVars,
   buildIsometricPromptVars,
   buildSetupPromptVars,
+  stripPersonTokens,
 } from "./prompt-assembly.js";
 import { fillTemplate, loadPrompt } from "./prompt-loader.js";
 
@@ -100,5 +101,44 @@ describe("template fills — end-to-end preview", () => {
     expect(prompt).toContain("dusk");
     expect(prompt).toContain("35mm wide");
     expect(prompt).not.toContain("{{");
+  });
+
+  // run-021 P0.3: setup images must be empty/unstaged — no people, no
+  // figures, no characters, even when scenario passes person-words.
+  it("setup template emits empty-room language and never includes person-words", () => {
+    const setup = {
+      id: "S1-A",
+      scene: "Overhead shot, two figures on white floor, absolute stillness",
+      mood: "clinical, lit by fluorescents over the people",
+      camera: "12mm wide overhead",
+    };
+    const prompt = fillTemplate(SETUP_TPL, buildSetupPromptVars(mockBible, setup));
+
+    // Empty room language present
+    expect(prompt).toMatch(/empty|no people|no figures/i);
+
+    // Person tokens from input MUST NOT appear as ENTITIES IN THE SCENE.
+    // The template intentionally repeats "no people, no figures, no characters"
+    // as explicit anti-instructions (these are RGB-style negation cues that
+    // diffusion models honor) and lists banned tokens in the NEGATIVE section.
+    // What we forbid is the input scene's "two figures on white floor" reaching
+    // FAL as a positive ENTITY — verified by grepping for the input's noun
+    // phrase (e.g. "two figures") rather than the word "figure".
+    expect(prompt).not.toContain("two figures");
+    expect(prompt).not.toMatch(/\b(?:figures|people|persons|humans|characters)\s+on\s+/i);
+    expect(prompt).not.toMatch(/lit by fluorescents over the people/i);
+  });
+});
+
+describe("stripPersonTokens", () => {
+  it("removes figure/figures/people/person/character tokens", () => {
+    expect(stripPersonTokens("two figures on white floor")).not.toMatch(/figures?/i);
+    expect(stripPersonTokens("a person walks")).not.toMatch(/person/i);
+    expect(stripPersonTokens("crowd of humans")).not.toMatch(/humans?|crowd/i);
+  });
+
+  it("does not break room descriptors", () => {
+    expect(stripPersonTokens("white minimalist room")).toBe("white minimalist room");
+    expect(stripPersonTokens("12mm wide overhead")).toBe("12mm wide overhead");
   });
 });

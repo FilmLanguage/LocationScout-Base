@@ -61,16 +61,40 @@ export function buildIsometricPromptVars(
  * `spaceDescription` is clamped to 300 chars in the generator to keep the
  * final FAL prompt under 2000 — we keep that behaviour here too so the
  * preview the user sees matches what the backend would actually send.
+ *
+ * run-021 P0.3: Setup images are empty/unstaged spatial reference frames —
+ * same room, same furniture as anchor, but NEVER people/figures. The scene
+ * field is sanitized to strip person/figure/character tokens so even if a
+ * scenario accidentally writes "two figures on white floor", the resulting
+ * FAL prompt does not include figure-mentions.
  */
+const PERSON_TOKENS_REGEX = /\b(?:figures?|people|persons?|humans?|characters?|men|women|man|woman|girls?|boys?|children|crowd|actors?|subjects?|extras?)\b/gi;
+
+export function stripPersonTokens(text: string): string {
+  if (!text) return "";
+  // Replace each whole-word match with a marker, then collapse phrases.
+  let out = text.replace(PERSON_TOKENS_REGEX, "");
+  // Clean up "two ", "the ", "a/an " articles/determiners left dangling.
+  out = out.replace(/\b(?:two|three|four|five|six|seven|eight|nine|ten|several|many|few|the|a|an|some)\s+(?=[,.;]|$|\s+(?:on|in|at|by|near))/gi, "");
+  // Collapse extra whitespace and orphan punctuation
+  out = out.replace(/\s+([,.;])/g, "$1").replace(/\s{2,}/g, " ").trim();
+  // Drop dangling " on white floor" / " walking" type fragments at start
+  out = out.replace(/^[,.;\s]+/, "");
+  return out;
+}
+
 export function buildSetupPromptVars(
   bible: LocationBibleLike,
   setup: SetupLike,
 ): Record<string, string> {
   const spaceDesc = ((bible.space_description as string | undefined) ?? "").slice(0, 300);
+  // Sanitize the scene + mood text so figure-mentions cannot reach FAL.
+  const scene = stripPersonTokens(setup.scene ?? "");
+  const mood = stripPersonTokens(setup.mood ?? "");
   return {
     space_description: spaceDesc,
-    scene: setup.scene ?? "",
-    mood: setup.mood ?? "",
+    scene,
+    mood,
     camera: setup.camera ?? "",
   };
 }

@@ -1,1 +1,1 @@
-Cinematic film still, {{space_description}}. Scene {{scene}}, {{mood}} mood. {{camera}}. Photorealistic interior photography.
+Empty unstaged spatial reference photograph of the location: {{space_description}}. Camera setup {{scene}}, {{mood}} mood. {{camera}}. Photorealistic interior photography, eye-level real photograph, no people, no figures, no characters, no action — pure empty room used as a spatial frame. NEGATIVE: people, figures, person, human, character, action, staged, posed subjects, multiple bodies, crowd.
