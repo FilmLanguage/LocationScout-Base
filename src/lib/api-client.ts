@@ -122,7 +122,7 @@ export async function generateImage(params: ImageGenParams): Promise<ImageGenRes
   }
 
   // Default to nano-banana/edit if caller didn't pass anything.
-  const modelPath = params.model ?? "fal-ai/nano-banana/edit";
+  const modelPath = params.model ?? "fal-ai/nano-banana-pro/edit";
   const endpoint = modelPath.startsWith("fal-ai/")
     ? `https://queue.fal.run/${modelPath}`
     : `https://queue.fal.run/fal-ai/${modelPath}`;
@@ -204,10 +204,18 @@ export async function generateImage(params: ImageGenParams): Promise<ImageGenRes
 
   const submitData = await submitRes.json() as { request_id: string; status_url: string; response_url: string };
 
-  // Poll for completion
-  const maxAttempts = 60;
+  // Poll for completion. run-022 P0.4: bump cap from 60 (120s) to 120 (240s).
+  const maxAttempts = 120;
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((r) => setTimeout(r, 2000));
+    if (i === 60) {
+      log({
+        category: "fal",
+        action: `${modelPath}:slow`,
+        status: "started",
+        details: { elapsed_s: 120, model: modelPath, ref_count: params.image_urls?.length ?? 0 },
+      });
+    }
 
     const statusRes = await fetch(submitData.status_url, {
       headers: { "Authorization": `Key ${FAL_AI_API_KEY}` },

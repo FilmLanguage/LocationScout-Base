@@ -19,6 +19,11 @@
  */
 
 export const FAL_MODELS = {
+  // run-022 P0.1: Nano Banana Pro is the canonical default for all LS slots.
+  // /edit variant supports multi-ref `image_urls` (anchor, isometric, setup).
+  "nano-banana-pro": "fal-ai/nano-banana-pro",
+  "nano-banana-pro/edit": "fal-ai/nano-banana-pro/edit",
+  // Legacy registrations preserved for explicit overrides — no slot defaults to them.
   "nano-banana": "fal-ai/nano-banana",
   "nano-banana/edit": "fal-ai/nano-banana/edit",
   "flux-pro": "fal-ai/flux-pro/v1.1",
@@ -31,12 +36,12 @@ export type LogicalModel = keyof typeof FAL_MODELS;
 export type Slot = "ANCHOR" | "MOOD_VARIANT" | "ISOMETRIC" | "SETUP";
 
 /**
- * Resolve a slot to a concrete FAL endpoint path (e.g. "fal-ai/nano-banana/edit").
+ * Resolve a slot to a concrete FAL endpoint path (e.g. "fal-ai/nano-banana-pro/edit").
  * The result is ready to append to `https://queue.fal.run/`.
  *
  * Pass hasReferenceImages=true when the call site has at least one reference
- * image — this selects nano-banana/edit (img2img). Without references, falls
- * back to nano-banana (txt2img).
+ * image — this selects nano-banana-pro/edit (img2img). Without references,
+ * falls back to nano-banana-pro (t2i).
  */
 export function resolveModel(slot: Slot, override?: string, hasReferenceImages = false): string {
   const raw =
@@ -48,7 +53,7 @@ export function resolveModel(slot: Slot, override?: string, hasReferenceImages =
     return raw in FAL_MODELS ? FAL_MODELS[raw as LogicalModel] : raw;
   }
 
-  return hasReferenceImages ? FAL_MODELS["nano-banana/edit"] : FAL_MODELS["nano-banana"];
+  return hasReferenceImages ? FAL_MODELS["nano-banana-pro/edit"] : FAL_MODELS["nano-banana-pro"];
 }
 
 /** List of all known slots — useful for diagnostics / UI dropdowns. */
