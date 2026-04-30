@@ -1,6 +1,6 @@
 {
   "name": "fl-location-scout-base",
-  "version": "1.0.25",
+  "version": "1.0.26",
   "type": "module",
   "scripts": {
     "build": "tsc && node -e \"require('fs').cpSync('src/prompts','dist/prompts',{recursive:true})\"",
@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1028.0",
+    "@filmlanguage/observability": "file:./_observability",
     "@filmlanguage/schemas": "file:./_schemas",
     "@filmlanguage/tokens": "file:./_tokens",
     "@modelcontextprotocol/sdk": "^1.12.0",
