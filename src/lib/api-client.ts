@@ -121,8 +121,8 @@ export async function generateImage(params: ImageGenParams): Promise<ImageGenRes
     });
   }
 
-  // Default to nano-banana/edit if caller didn't pass anything.
-  const modelPath = params.model ?? "fal-ai/nano-banana-pro/edit";
+  // Default to nano-banana-2/edit if caller didn't pass anything.
+  const modelPath = params.model ?? "fal-ai/nano-banana-2/edit";
   const endpoint = modelPath.startsWith("fal-ai/")
     ? `https://queue.fal.run/${modelPath}`
     : `https://queue.fal.run/fal-ai/${modelPath}`;
