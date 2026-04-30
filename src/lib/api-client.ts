@@ -204,8 +204,10 @@ export async function generateImage(params: ImageGenParams): Promise<ImageGenRes
 
   const submitData = await submitRes.json() as { request_id: string; status_url: string; response_url: string };
 
-  // Poll for completion. run-022 P0.4: bump cap from 60 (120s) to 120 (240s).
-  const maxAttempts = 120;
+  // run-022 P0.4: 240s cap insufficient — FAL i2i probe took 334s.
+  // Bumped to 360s (180 × 2s). Fire-and-forget task queue allows waits
+  // past Cloud Run's 300s HTTP budget.
+  const maxAttempts = 180;
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((r) => setTimeout(r, 2000));
     if (i === 60) {
