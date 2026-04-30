@@ -31,11 +31,14 @@ export { DirectorFilmVisionSchema, type DirectorFilmVision, CharacterEnergySchem
 export { DoPFilmVisionSchema, type DoPFilmVision, DoPFilmVisionJsonSchema } from "./artifacts/dop-film-vision-v1.js";
 export { DirectorSceneVisionSchema, type DirectorSceneVision, DirectorSceneVisionJsonSchema, type DiegeticMusic } from "./artifacts/director-scene-vision-v1.js";
 export { DoPSceneVisionSchema, type DoPSceneVision, DoPSceneVisionJsonSchema } from "./artifacts/dop-scene-vision-v1.js";
+export { DoPShotVisionSchema, type DoPShotVision, DoPShotVisionJsonSchema } from "./artifacts/dop-shot-vision-v1.js";
 export {
   ShotSchema, type Shot, ShotSizeEnum, AudioTransitionEnum, ShotJsonSchema,
   CameraAngleEnum, CameraMovementEnum, CameraRigEnum, CompositionEnum, FrameBalanceEnum,
 } from "./artifacts/shot-v1.js";
 export { EdlSchema, type Edl, EdlRowSchema, type EdlRow, EdlJsonSchema, PacingMapSchema, type PacingMap, PacingMapJsonSchema } from "./artifacts/edl-v1.js";
+export { MultishotGenerationSchema, type MultishotGeneration, MultishotSegmentSchema, type MultishotSegment, MultiPromptItemSchema, type MultiPromptItem, MultishotElementSchema, type MultishotElement, MultishotStatusEnum, type MultishotStatus, MultishotGenerationJsonSchema } from "./artifacts/multishot-generation-v1.js";
+export { ShotTakeSchema, type ShotTake, ShotTakeListSchema, type ShotTakeList, ShotTakeListJsonSchema } from "./artifacts/shot-take-v1.js";
 export { ComposerFilmVisionSchema, type ComposerFilmVision, ComposerFilmVisionJsonSchema } from "./artifacts/composer-film-vision-v1.js";
 export { ComposerSceneVisionSchema, type ComposerSceneVision, ComposerSceneVisionJsonSchema, type ScoreCue, type DiegeticCue, type ElevenLabsPayload, type DuckTrigger } from "./artifacts/composer-scene-vision-v1.js";
 

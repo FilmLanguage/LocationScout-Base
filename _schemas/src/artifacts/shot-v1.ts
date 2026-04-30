@@ -62,7 +62,7 @@ export const ShotSchema = z.object({
   frame_balance: FrameBalanceEnum.optional(),
 
   // Added by montage step
-  duration: z.number().int().optional().describe("Duration in whole seconds"),
+  duration: z.number().optional().describe("Actual duration in seconds. Integer for ungenerated/single-shot rows (montage rule, Kling rule); fractional for multishot rows (PySceneDetect cut points)."),
 });
 
 export type Shot = z.infer<typeof ShotSchema>;

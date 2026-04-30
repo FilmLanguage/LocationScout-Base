@@ -20,6 +20,45 @@ export const EdlRowSchema = ShotSchema.extend({
   location: z.string().default(""),
   time: z.string().default(""),
   shot_id: z.string().describe("Derived: `${scene_id}_s${shot_number:03d}`"),
+
+  // ── Video source ─────────────────────────────────────────────
+  source_type: z.enum(["ungenerated", "single", "multishot"]).default("ungenerated"),
+  multishot_group_id: z.string().nullable().default(null),
+  /**
+   * The actual playable asset for this row, materialised when a take is applied/selected.
+   * `start`/`end` are coordinates inside the parent multishot video (for debug/trim);
+   * `video_url`/`thumbnail_url`/`duration` describe the standalone sliced asset for UI playback.
+   * Null until apply_multishot_takes runs (or for ungenerated rows).
+   */
+  source_segment: z
+    .object({
+      generation_id: z.string().describe("MultishotGeneration.id this segment came from."),
+      segment_index: z.number().int().min(0).describe("Index inside MultishotGeneration.segments[]."),
+      video_url: z.string().url().describe("Direct playable URL of the sliced segment."),
+      thumbnail_url: z.string().url().describe("First-frame JPEG of the segment."),
+      duration: z.number().describe("Actual segment duration (seconds, fractional)."),
+      start: z.number().describe("Start time inside the parent multishot video."),
+      end: z.number().describe("End time inside the parent multishot video."),
+    })
+    .nullable()
+    .default(null)
+    .describe("Materialised sliced segment for the active take. Null if no take is applied yet."),
+  selected_take_id: z.string().nullable().default(null).describe("MultishotGeneration.id of the active take. Drives the Editor UI dropdown."),
+  /**
+   * True when auto-slicing failed to match the expected shot count (detect_cuts fallback).
+   * The active take covers the whole multishot video unsplit. UI shows a warning + Regenerate.
+   */
+  slicing_failed: z.boolean().default(false),
+  /**
+   * Original duration assigned by the montage step (whole seconds). Frozen at apply time
+   * so UI can show "planned 5s / actual 4.7s" when Kling generates off-target.
+   */
+  planned_duration: z
+    .number()
+    .int()
+    .nullable()
+    .default(null)
+    .describe("Pacing-map duration captured at apply time. Survives take switches; `duration` follows the active take."),
 });
 
 export type EdlRow = z.infer<typeof EdlRowSchema>;
@@ -37,13 +76,15 @@ export type Edl = z.infer<typeof EdlSchema>;
 export const EdlJsonSchema = zodToJsonSchema(EdlSchema);
 
 /**
- * Pacing map — the montage step's output, keyed by a `${scene_id}:${shot_number}`
- * composite so scenes processed independently don't collide.
+ * Pacing map — derived projection of `EdlRow.duration` keyed by `${scene_id}:${shot_number}`.
+ * Auto-rebuilt by every tool that writes edl.json (create_pacing_map, apply_multishot_takes,
+ * update_edl). Holds the *current* timeline: integer seconds for ungenerated/single-shot rows,
+ * fractional for multishot rows. The frozen "plan" lives in `EdlRow.planned_duration`, not here.
  */
 export const PacingMapSchema = z.object({
   $schema: z.literal("pacing-map-v1"),
   project_id: z.string(),
-  durations: z.record(z.string(), z.number().int()),
+  durations: z.record(z.string(), z.number()),
   _meta: ArtifactMetaSchema.optional().describe("Set by update_* tools when a user manually edits"),
 });
 

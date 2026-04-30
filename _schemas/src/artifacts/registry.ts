@@ -30,6 +30,9 @@ import { ARTIFACT_TYPE as SCENE_STYLE, URI_PATTERN as SCENE_STYLE_URI, PRODUCED_
 import { ARTIFACT_TYPE as VALIDATION_REPORT, URI_PATTERN as VALIDATION_REPORT_URI, PRODUCED_BY as VALIDATION_REPORT_PRODUCER, MIME_TYPE as VALIDATION_REPORT_MIME } from "./validation-report-v1.js";
 import { ARTIFACT_TYPE as CHARACTER_BRIEFS, URI_PATTERN as CHARACTER_BRIEFS_URI, PRODUCED_BY as CHARACTER_BRIEFS_PRODUCER, MIME_TYPE as CHARACTER_BRIEFS_MIME } from "./character-briefs-v1.js";
 import { ARTIFACT_TYPE as LOCATION_BRIEFS, URI_PATTERN as LOCATION_BRIEFS_URI, PRODUCED_BY as LOCATION_BRIEFS_PRODUCER, MIME_TYPE as LOCATION_BRIEFS_MIME } from "./location-briefs-v1.js";
+import { ARTIFACT_TYPE as MULTISHOT_GENERATION, URI_PATTERN as MULTISHOT_GENERATION_URI, PRODUCED_BY as MULTISHOT_GENERATION_PRODUCER, MIME_TYPE as MULTISHOT_GENERATION_MIME } from "./multishot-generation-v1.js";
+import { ARTIFACT_TYPE as DOP_SHOT_VISION, URI_PATTERN as DOP_SHOT_VISION_URI, PRODUCED_BY as DOP_SHOT_VISION_PRODUCER, MIME_TYPE as DOP_SHOT_VISION_MIME } from "./dop-shot-vision-v1.js";
+import { ARTIFACT_TYPE as SHOT_TAKE, URI_PATTERN as SHOT_TAKE_URI, PRODUCED_BY as SHOT_TAKE_PRODUCER, MIME_TYPE as SHOT_TAKE_MIME } from "./shot-take-v1.js";
 
 export const ARTIFACT_REGISTRY = {
   [FILM_IR]: { uriPattern: FILM_IR_URI, producedBy: FILM_IR_PRODUCER, mimeType: FILM_IR_MIME },
@@ -52,6 +55,7 @@ export const ARTIFACT_REGISTRY = {
   [DIRECTOR_SCENE_VISION]: { uriPattern: DIRECTOR_SCENE_VISION_URI, producedBy: DIRECTOR_SCENE_VISION_PRODUCER, mimeType: DIRECTOR_SCENE_VISION_MIME },
   [DOP_FILM_VISION]:   { uriPattern: DOP_FILM_VISION_URI, producedBy: DOP_FILM_VISION_PRODUCER, mimeType: DOP_FILM_VISION_MIME },
   [DOP_SCENE_VISION]:  { uriPattern: DOP_SCENE_VISION_URI, producedBy: DOP_SCENE_VISION_PRODUCER, mimeType: DOP_SCENE_VISION_MIME },
+  [DOP_SHOT_VISION]:   { uriPattern: DOP_SHOT_VISION_URI, producedBy: DOP_SHOT_VISION_PRODUCER, mimeType: DOP_SHOT_VISION_MIME },
 
   // Director — stub tool, live MCP resource in Director-Base (resources/domain.ts).
   // Retained without a Zod body until create_casting_philosophy is implemented.
@@ -67,6 +71,10 @@ export const ARTIFACT_REGISTRY = {
 
   // ShotGeneration — binary output referenced by shot-validator.ts; no Zod body.
   shot_image:          { uriPattern: "agent://shot-generation/shot/{id}" as const, producedBy: "shot-generation-base" as const, mimeType: "image/png" as const },
+
+  // ShotGeneration — Kling multishot generation record (input + output + cut points).
+  [MULTISHOT_GENERATION]: { uriPattern: MULTISHOT_GENERATION_URI, producedBy: MULTISHOT_GENERATION_PRODUCER, mimeType: MULTISHOT_GENERATION_MIME },
+  [SHOT_TAKE]:            { uriPattern: SHOT_TAKE_URI, producedBy: SHOT_TAKE_PRODUCER, mimeType: SHOT_TAKE_MIME },
 
   [COMPOSER_FILM_VISION]: { uriPattern: COMPOSER_FILM_VISION_URI, producedBy: COMPOSER_FILM_VISION_PRODUCER, mimeType: COMPOSER_FILM_VISION_MIME },
   [COMPOSER_SCENE_VISION]: { uriPattern: COMPOSER_SCENE_VISION_URI, producedBy: COMPOSER_SCENE_VISION_PRODUCER, mimeType: COMPOSER_SCENE_VISION_MIME },
