@@ -204,10 +204,12 @@ export async function generateImage(params: ImageGenParams): Promise<ImageGenRes
 
   const submitData = await submitRes.json() as { request_id: string; status_url: string; response_url: string };
 
-  // run-022 P0.4: 240s cap insufficient — FAL i2i probe took 334s.
-  // Bumped to 360s (180 × 2s). Fire-and-forget task queue allows waits
-  // past Cloud Run's 300s HTTP budget.
-  const maxAttempts = 180;
+  // run-025 A1: 360s cap insufficient for multi-ref overhead generations.
+  // Bumped to 600s (300 × 2s). Fire-and-forget task queue allows waits
+  // past Cloud Run's 300s HTTP budget. Slow warnings at i=60 (120s) and
+  // i=180 (360s) make tail-latency visible in gcloud logs.
+  const MAX_POLL_ITERATIONS = 300;
+  const maxAttempts = MAX_POLL_ITERATIONS;
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((r) => setTimeout(r, 2000));
     if (i === 60) {
@@ -216,6 +218,14 @@ export async function generateImage(params: ImageGenParams): Promise<ImageGenRes
         action: `${modelPath}:slow`,
         status: "started",
         details: { elapsed_s: 120, model: modelPath, ref_count: params.image_urls?.length ?? 0 },
+      });
+    }
+    if (i === 180) {
+      log({
+        category: "fal",
+        action: `${modelPath}:slow`,
+        status: "started",
+        details: { elapsed_s: 360, model: modelPath, ref_count: params.image_urls?.length ?? 0 },
       });
     }
 
