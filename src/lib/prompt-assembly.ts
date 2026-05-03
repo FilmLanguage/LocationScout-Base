@@ -83,6 +83,15 @@ export function stripPersonTokens(text: string): string {
   return out;
 }
 
+/**
+ * Returns true when the camera string specifies an overhead angle.
+ * Matches "overhead", "top-down", "top down", "bird's eye", "birds eye",
+ * "90°", "90 degree" (case-insensitive).
+ */
+export function isOverheadCamera(camera: string): boolean {
+  return /overhead|top[- ]down|bird['']?s?[- ]?eye|90\s*°|90[- ]degree/i.test(camera);
+}
+
 export function buildSetupPromptVars(
   bible: LocationBibleLike,
   setup: SetupLike,
@@ -91,11 +100,29 @@ export function buildSetupPromptVars(
   // Sanitize the scene + mood text so figure-mentions cannot reach FAL.
   const scene = stripPersonTokens(setup.scene ?? "");
   const mood = stripPersonTokens(setup.mood ?? "");
+  const camera = setup.camera ?? "";
+
+  // run-025 B7: surface camera angle as the FIRST directive in the prompt so
+  // the diffusion model weights it at maximum priority. For overhead shots we
+  // also inject an explicit "no eye-level" guard and strip the hardcoded
+  // "eye-level" phrase from the photorealism clause.
+  const overhead = isOverheadCamera(camera);
+  const cameraDirective = camera
+    ? overhead
+      ? `CAMERA ANGLE: ${camera} — this is mandatory. The image MUST be shot from this exact angle. Do NOT default to eye-level. Composition is strictly top-down, looking straight down from the ceiling at a flat 90° angle. NO eye-level perspective. NO oblique angles. `
+      : `CAMERA ANGLE: ${camera} — this is mandatory. The image MUST be shot from this exact angle. `
+    : "";
+  const photorealismClause = overhead
+    ? "top-down real photograph — NO eye-level perspective"
+    : "eye-level real photograph";
+
   return {
     space_description: spaceDesc,
     scene,
     mood,
-    camera: setup.camera ?? "",
+    camera,
+    camera_directive: cameraDirective,
+    photorealism_clause: photorealismClause,
   };
 }
 

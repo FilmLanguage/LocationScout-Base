@@ -14,6 +14,7 @@ import {
   buildIsometricPromptVars,
   buildSetupPromptVars,
   stripPersonTokens,
+  isOverheadCamera,
 } from "./prompt-assembly.js";
 import { fillTemplate, loadPrompt } from "./prompt-loader.js";
 
@@ -128,6 +129,58 @@ describe("template fills — end-to-end preview", () => {
     expect(prompt).not.toMatch(/\b(?:figures|people|persons|humans|characters)\s+on\s+/i);
     expect(prompt).not.toMatch(/lit by fluorescents over the people/i);
   });
+});
+
+// run-025 B7: camera directive must appear at the TOP of the setup prompt
+// so the diffusion model weights it at maximum priority.
+describe("setup camera directive — run-025 B7", () => {
+  it("places camera directive at top of setup prompt for overhead shots", () => {
+    const setup = { id: "S2", scene: "Absolute stillness", mood: "sterile", camera: "overhead, crane, wide" };
+    const prompt = fillTemplate(SETUP_TPL, buildSetupPromptVars(mockBible, setup));
+    expect(prompt.slice(0, 200).toLowerCase()).toMatch(/overhead|top-down|90°/);
+  });
+
+  it("emits no eye-level fallback for explicit overhead camera", () => {
+    const setup = { id: "S2", scene: "Absolute stillness", mood: "sterile", camera: "overhead, crane, wide" };
+    const prompt = fillTemplate(SETUP_TPL, buildSetupPromptVars(mockBible, setup));
+    // The positive photorealism clause must not describe the shot as eye-level.
+    expect(prompt).not.toContain("eye-level real photograph");
+    // The overhead photorealism clause must be used instead.
+    expect(prompt).toContain("top-down real photograph");
+  });
+
+  it("retains eye-level phrasing for non-overhead setups", () => {
+    const setup = { id: "S1", scene: "Wide entry shot", mood: "clinical", camera: "wide, eye-level" };
+    const prompt = fillTemplate(SETUP_TPL, buildSetupPromptVars(mockBible, setup));
+    expect(prompt).toContain("eye-level real photograph");
+  });
+
+  it("injects CAMERA ANGLE directive before room description", () => {
+    const setup = { id: "S2", scene: "Still", mood: "sterile", camera: "overhead, crane, wide" };
+    const prompt = fillTemplate(SETUP_TPL, buildSetupPromptVars(mockBible, setup));
+    const cameraPos = prompt.indexOf("CAMERA ANGLE");
+    const roomPos = prompt.indexOf("Empty unstaged");
+    expect(cameraPos).toBeGreaterThanOrEqual(0);
+    expect(cameraPos).toBeLessThan(roomPos);
+  });
+
+  it("omits camera_directive prefix when camera is empty", () => {
+    const setup = { id: "S1", scene: "Wide shot", mood: "daylight" };
+    const prompt = fillTemplate(SETUP_TPL, buildSetupPromptVars(mockBible, setup));
+    expect(prompt).not.toContain("CAMERA ANGLE");
+    // Should still start with room description
+    expect(prompt.trimStart()).toMatch(/^Empty unstaged/);
+  });
+});
+
+describe("isOverheadCamera", () => {
+  it("detects 'overhead'", () => expect(isOverheadCamera("overhead, crane, wide")).toBe(true));
+  it("detects 'top-down'", () => expect(isOverheadCamera("top-down shot")).toBe(true));
+  it("detects 'top down'", () => expect(isOverheadCamera("top down view")).toBe(true));
+  it("detects '90°'", () => expect(isOverheadCamera("90° angle")).toBe(true));
+  it("detects 'bird's eye'", () => expect(isOverheadCamera("bird's eye view")).toBe(true));
+  it("returns false for eye-level", () => expect(isOverheadCamera("wide, eye-level")).toBe(false));
+  it("returns false for empty string", () => expect(isOverheadCamera("")).toBe(false));
 });
 
 describe("stripPersonTokens", () => {
