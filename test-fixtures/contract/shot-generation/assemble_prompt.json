@@ -5,7 +5,7 @@
     "tool": "assemble_prompt",
     "version_added": "v1.0.13",
     "adapted_on_replit": "2026-04-22",
-    "regression_guard": "Renamed from `prompt` to avoid prompt-gallery contract collision (docs/prompt-gallery-contract.md). Top-level `prompt` must NOT exist in v1.0.13+. Replit-agent client reads `image_prompt ?? prompt ?? ''` with legacy fallback for safety, but presence of `prompt` again would mask the breakage and let stale clients keep limping along."
+    "regression_guard": "Renamed from `prompt` to avoid prompt-gallery contract collision (docs/canonical/prompt-gallery-contract.md). Top-level `prompt` must NOT exist in v1.0.13+. Replit-agent client reads `image_prompt ?? prompt ?? ''` with legacy fallback for safety, but presence of `prompt` again would mask the breakage and let stale clients keep limping along."
   },
   "request_template": {
     "method": "tools/call",
