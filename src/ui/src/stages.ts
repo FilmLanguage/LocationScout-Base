@@ -19,11 +19,10 @@ export interface Stage {
   figmaNodeId: string;
 }
 
-// BETA: 3 active stages.
+// BETA: 2 visible stages — Input is auto-fired in the background by BetaAutoBoot.
 // Full order preserved: input → research → analysis → references → setups → light-states → outputs
 // See ROLLOUT.md for restoration steps.
 export const STAGES: readonly Stage[] = [
-  { id: "input",      label: "Input",      path: "/",           figmaNodeId: "306:2" },
-  { id: "references", label: "References", path: "/references", figmaNodeId: "433:26" },
-  { id: "setups",     label: "Setups",     path: "/setups",     figmaNodeId: "436:33" },
+  { id: "references", label: "References", path: "/",        figmaNodeId: "433:26" },
+  { id: "setups",     label: "Setups",     path: "/setups",  figmaNodeId: "436:33" },
 ] as const;

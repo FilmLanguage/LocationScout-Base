@@ -120,4 +120,44 @@ The marginal anchor validation score (0.50 on attempt 3) is noise from the under
 
 ---
 
+## 11. Iteration 2 — drop Input screen, 2 screens visible
+
+After the first PASS the spec changed: Input must also be hidden; the only visible screens are References and Setups. Brief/vision now auto-fed by a fixture, scout_location fired in the background on app mount.
+
+### Additional changes
+
+| File | Change |
+|------|--------|
+| `src/ui/src/components/BetaAutoBoot.tsx` (new) | Wraps `<Routes>`. On first mount checks `state.statuses.input`; if not approved, fires `scout_location` with the noir Marlowe fixture, polls until terminal, dispatches `APPROVE_STAGE("input")`. Renders splash `"Building location bible…"` (or current step) while running, error banner if it fails. |
+| `src/ui/src/stages.ts` | `STAGES` cut to 2: `references` (now `path: "/"`), `setups`. |
+| `src/ui/src/App.tsx` | `InputPage` import commented out; `PAGES` has 2 entries; `<Routes>` wrapped in `<BetaAutoBoot>`; added `<Route path="*" element={<Navigate to="/" replace />} />`. |
+| `package.json` (root) | Removed extraneous root-level `react`, `react-dom`, `react-router-dom`, `@types/react-router-dom` from `dependencies` — they were causing Vite to load React 19 at runtime (split with React 18 in `src/ui/`), which silently produced a 0-children mount. Pre-existing on `main`; surfaced because BETA navigates straight to References. |
+| `package-lock.json` (root) | Regenerated (`npm install`); 10 transitive packages dropped. |
+| `vite.config.ts` | Proxy targets `localhost:8083` → `localhost:8080` (matches actual backend port). Added `configure` hook injecting `x-agent-token` from `INTER_AGENT_TOKEN` (.env) so browser UI authenticates against the dev backend without per-request wiring. Dev-only — production agents still use header-based auth as before. |
+| `src/ui/src/components/ReferencePicker.tsx` | Renamed prop `ref` → `refData` on internal `Thumbnail` and `LockedThumbnail` components. `ref` is reserved by React; the components used it as data, which on React 18.3+ silently strips it (`undefined` access → component crash, which the StageGuard tree caught and unmounted the page). Pre-existing `main` bug; surfaced because BETA renders References on first paint. |
+| `.claude/launch.json` (repo) | `agent-ui` → `location-scout-ui`, port `5173` → `5176` to match `vite.config.ts`. |
+| `ROLLOUT.md` | Added "Input screen" row with restoration steps. |
+
+### Browser verification (Iteration 2)
+
+Local run (production mode, real Claude + FAL.ai):
+
+| Step | Result |
+|------|--------|
+| Backend up on :8080 | ✓ |
+| Vite dev on :5176 (preview_start) | ✓ |
+| First snapshot | Splash `"Building location bible"` visible, both nav stages shown as 🔒 |
+| Auto-boot completes (`scout_location` ~25-40 s) | ✓ — `dispatch(APPROVE_STAGE("input"))` fired |
+| References renders | ✓ — Header: `References > 🔒 Setups`; page shows GATE 3 banner, Floorplan + Light Map, Isometric Reference (with locked auto-ref tile, proves `LockedThumbnail` rename), Setup Extraction, Anchor Image with VLM stats, Regenerate/Approve buttons |
+| Console errors (post-fix) | Only stale buffer entries from before HMR re-render; current source clean |
+| Screenshot captured | ✓ |
+
+### Verdict (Iteration 2)
+
+**PASS.** Browser-verified end-to-end: app boots, fires the hidden Bible pipeline, lands the user directly on References. No Input form visible. Setups tab will unlock after References is approved (existing `STAGE_ORDER` gate semantics). Sending from Setups still goes through the auto-approve `handleSend` from Iteration 1.
+
+Three pre-existing main bugs were uncovered and fixed minimally as part of this iteration (root React deps drift, Vite proxy port, `ref`-named prop). All three would also crash the original Input → Research → … → References flow on `main` once a user reaches References — they were latent because the manual flow takes longer to reach that screen.
+
+---
+
 Branch left local for review. To resume in a fresh session: `git checkout experiment/beta-2-screens` in `LocationScout-Base/`.

@@ -145,17 +145,19 @@ function kindBadge(kind: ReferenceKind): string {
 }
 
 function Thumbnail({
-  ref,
+  refData,
   onRemove,
   disabled,
 }: {
-  ref: ReferenceRef;
+  // BETA: prop renamed from `ref` to `refData` — `ref` is reserved by React and
+  // gets stripped from props (silent crash on access). See ROLLOUT.md.
+  refData: ReferenceRef;
   onRemove: () => void;
   disabled?: boolean;
 }) {
   return (
     <div
-      title={ref.prompt ?? `${ref.kind} · ${ref.source_agent}`}
+      title={refData.prompt ?? `${refData.kind} · ${refData.source_agent}`}
       style={{
         width: 90,
         height: 90,
@@ -168,8 +170,8 @@ function Thumbnail({
       }}
     >
       <img
-        src={previewUrl(ref)}
-        alt={ref.kind}
+        src={previewUrl(refData)}
+        alt={refData.kind}
         style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
       />
       <span
@@ -186,7 +188,7 @@ function Thumbnail({
           letterSpacing: 0.3,
         }}
       >
-        {kindBadge(ref.kind)}
+        {kindBadge(refData.kind)}
       </span>
       {!disabled && (
         <button
@@ -216,12 +218,13 @@ function Thumbnail({
   );
 }
 
-function LockedThumbnail({ ref }: { ref: LockedAutoRef }) {
-  const tooltip = `Auto-resolved from ${ref.parentLabel}. Toggle off auto-resolve to remove.`;
+function LockedThumbnail({ refData }: { refData: LockedAutoRef }) {
+  // BETA: prop renamed from `ref` (reserved by React). See ROLLOUT.md.
+  const tooltip = `Auto-resolved from ${refData.parentLabel}. Toggle off auto-resolve to remove.`;
   return (
     <div
       title={tooltip}
-      data-locked-auto-ref={ref.parentLabel}
+      data-locked-auto-ref={refData.parentLabel}
       style={{
         width: 90,
         height: 90,
@@ -234,8 +237,8 @@ function LockedThumbnail({ ref }: { ref: LockedAutoRef }) {
       }}
     >
       <img
-        src={ref.imageUrl}
-        alt={`${ref.parentLabel} (locked auto-ref)`}
+        src={refData.imageUrl}
+        alt={`${refData.parentLabel} (locked auto-ref)`}
         style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
       />
       <span
@@ -252,7 +255,7 @@ function LockedThumbnail({ ref }: { ref: LockedAutoRef }) {
           letterSpacing: 0.3,
         }}
       >
-        {kindBadge(ref.kind)}
+        {kindBadge(refData.kind)}
       </span>
       {/* 🔒 locked badge — replaces the × close button used by user refs */}
       <span
@@ -608,13 +611,13 @@ export function ReferencePicker({
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-start" }}>
         {lockedAutoRefs?.map((r, i) => (
-          <LockedThumbnail key={`locked-${r.parentLabel}-${i}`} ref={r} />
+          <LockedThumbnail key={`locked-${r.parentLabel}-${i}`} refData={r} />
         ))}
         {autoCascadeHint?.map((hint) => <AutoHintTile key={`hint-${hint}`} label={hint} />)}
         {value.map((ref, i) => (
           <Thumbnail
             key={`${ref.image_id}-${i}`}
-            ref={ref}
+            refData={ref}
             onRemove={() => handleRemove(i)}
             disabled={disabled}
           />
