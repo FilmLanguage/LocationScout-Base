@@ -243,13 +243,15 @@ export function registerLocationTools(server: McpServer) {
       // Run pipeline async (fire and forget)
       (async () => {
         try {
-          // Step 1: Research
-          updateTask(task_id, { status: "processing", progress: 0.1, current_step: "Researching era" });
+          // BETA: Step 1 (Research) disabled — see ROLLOUT.md for restoration steps.
+          // researchId retained because LocationBible v2 schema requires `research_id`.
+          updateTask(task_id, { status: "processing", progress: 0.1, current_step: "Building location bible" });
+          const researchId = `research_${location_brief.location_id}`;
+          /* BETA: research disabled — see ROLLOUT.md
           const research = await llmComplete(
             PROMPT_RESEARCH_PIPELINE,
             [{ role: "user", content: `Location: ${location_brief.location_name}\nEra: ${location_brief.era}\nType: ${location_brief.location_type}\nDirector style: ${director_vision.era_style}` }],
           );
-          const researchId = `research_${location_brief.location_id}`;
           const llmResearchPipeline = JSON.parse(stripCodeFence(research.content));
           // Coerce period_facts: schema expects array of objects {fact, source?, relevance?}
           if (Array.isArray(llmResearchPipeline.period_facts)) {
@@ -266,11 +268,12 @@ export function registerLocationTools(server: McpServer) {
           };
           await saveArtifact("research", researchId, researchPipelinePayload);
           updateTask(task_id, { progress: 0.3, current_step: "Research complete, writing Bible" });
+          */
 
           // Step 2: Write Bible
           const bible = await llmComplete(
             PROMPT_WRITE_BIBLE_PIPELINE,
-            [{ role: "user", content: `Location: ${JSON.stringify(location_brief)}\nDirector vision: ${JSON.stringify(director_vision)}\nResearch: ${research.content}` }],
+            [{ role: "user", content: `Location: ${JSON.stringify(location_brief)}\nDirector vision: ${JSON.stringify(director_vision)}\nResearch: (not available — write from general knowledge of the period: ${location_brief.era})` }],
             { maxTokens: 4096 },
           );
           const bibleId = location_brief.location_id;
@@ -300,6 +303,7 @@ export function registerLocationTools(server: McpServer) {
             brief_id: location_brief.location_id,
             vision_id: `vision_${location_brief.location_id}`,
             research_id: researchId,
+            approval_status: "approved" as const,                // BETA: auto-approve (Bible review screen hidden) — see ROLLOUT.md
           };
           await saveArtifact("bible", bibleId, biblePipelinePayload);
           updateTask(task_id, {
@@ -307,7 +311,6 @@ export function registerLocationTools(server: McpServer) {
             status: "completed",
             current_step: "Pipeline complete",
             artifacts: [
-              { uri: `agent://location-scout/research/${researchId}`, mime_type: "application/json", created_at: new Date().toISOString() },
               { uri: `agent://location-scout/bible/${bibleId}`, mime_type: "application/json", created_at: new Date().toISOString() },
             ],
           });

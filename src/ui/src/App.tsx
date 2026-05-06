@@ -2,12 +2,13 @@ import type { FC } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Header } from "./components/Header";
 import { StagePlaceholder } from "./components/StagePlaceholder";
-import { AnalysisPage } from "./pages/AnalysisPage";
+// BETA: only Input/References/Setups pages active. See ROLLOUT.md for restoration.
+// import { AnalysisPage } from "./pages/AnalysisPage";
+// import { LightStatesPage } from "./pages/LightStatesPage";
+// import { OutputsPage } from "./pages/OutputsPage";
+// import { ResearchPage } from "./pages/ResearchPage";
 import { InputPage } from "./pages/InputPage";
-import { LightStatesPage } from "./pages/LightStatesPage";
-import { OutputsPage } from "./pages/OutputsPage";
 import { ReferencesPage } from "./pages/ReferencesPage";
-import { ResearchPage } from "./pages/ResearchPage";
 import { SetupsPage } from "./pages/SetupsPage";
 import { STAGES, type StageId } from "./stages";
 import { usePipeline } from "./state/PipelineContext";
@@ -15,12 +16,8 @@ import { isStageAccessible } from "./state/pipeline";
 
 const PAGES: Partial<Record<string, FC>> = {
   input: InputPage,
-  research: ResearchPage,
-  analysis: AnalysisPage,
   references: ReferencesPage,
   setups: SetupsPage,
-  "light-states": LightStatesPage,
-  outputs: OutputsPage,
 };
 
 /**

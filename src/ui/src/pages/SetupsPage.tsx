@@ -12,7 +12,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+// BETA: useNavigate no longer used (handleSend doesn't navigate). See ROLLOUT.md.
+// import { useNavigate } from "react-router-dom";
 import { callTool, pollTask, type TaskStatus } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
 import type { SetupTile } from "../state/pipeline";
@@ -48,7 +49,6 @@ type BatchState =
 
 export function SetupsPage() {
   const { state, dispatch } = usePipeline();
-  const navigate = useNavigate();
   const { tiles, selectedId } = state.setups;
   const selected = tiles.find((t) => t.id === selectedId) ?? tiles[0];
   const approvedCount = tiles.filter((t) => t.status === "approved").length;
@@ -335,9 +335,36 @@ export function SetupsPage() {
     }
   };
 
-  const handleAdvance = () => {
-    dispatch({ type: "APPROVE_STAGE", stage: "setups" });
-    navigate("/light-states");
+  // BETA: replace navigate→/light-states with direct "Send to Pipeline".
+  // Auto-approves any draft setups and the outputs gate, then shows confirmation.
+  // See ROLLOUT.md for restoration steps.
+  const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+
+  const handleSend = async () => {
+    setSending(true);
+    setSendError(null);
+    try {
+      const drafts = tiles.filter((t) => t.status === "draft");
+      dispatch({ type: "APPROVE_ALL_SETUPS" });
+      for (const t of drafts) {
+        await callTool("approve_artifact", {
+          artifact_uri: setupUri(t.id),
+          notes: "Auto-approve on send",
+        });
+      }
+      await callTool("approve_artifact", {
+        artifact_uri: `agent://location-scout/outputs/${LOCATION_ID}`,
+        notes: "Setups sent to Shot Generation",
+      });
+      dispatch({ type: "APPROVE_STAGE", stage: "setups" });
+      setSent(true);
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSending(false);
+    }
   };
 
   const isBatchBusy = batch.kind === "checking" || batch.kind === "generating";
@@ -550,10 +577,36 @@ export function SetupsPage() {
         <span className="mini-label" style={{ marginRight: "var(--sp-2)" }}>
           {approvedCount} / {tiles.length} approved
         </span>
-        <button type="button" className="btn btn--primary" onClick={handleAdvance}>
-          View Outputs
-          <span className="btn__arrow" aria-hidden>→</span>
-        </button>
+        {sent ? (
+          <span
+            role="status"
+            style={{
+              // BETA: confirmation banner. #A6F77E is one of the 14 palette-locked hexes.
+              backgroundColor: "#A6F77E",
+              color: "#111111",
+              padding: "var(--sp-2) var(--sp-3)",
+              borderRadius: 4,
+              fontWeight: 600,
+            }}
+          >
+            ✓ Sent to Shot Generation
+          </span>
+        ) : (
+          <>
+            {sendError && (
+              <span style={{ color: "#F7927E", marginRight: "var(--sp-2)" }}>{sendError}</span>
+            )}
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={handleSend}
+              disabled={isBatchBusy || sending || sent}
+            >
+              {sending ? "Sending…" : "Send to Pipeline"}
+              <span className="btn__arrow" aria-hidden>→</span>
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

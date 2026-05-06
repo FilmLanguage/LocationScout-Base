@@ -21,11 +21,30 @@ import { log, withRequestContext } from "./lib/log.js";
 // but should be replaced with a pooling or session-based approach
 // once the MCP SDK supports multiple transports on a single server.
 // See CHANGELOG.md [PERF-001].
+// BETA: ENABLED_TOOLS allow-list. Set via env (comma-separated tool names, "*" = all).
+// Hides tools that the BETA UI does not need; preserves source code for restoration.
+// See ROLLOUT.md.
+const ENABLED = new Set(
+  (process.env.ENABLED_TOOLS ?? "*").split(",").map((s) => s.trim()).filter(Boolean),
+);
+const isToolEnabled = (name: string) => ENABLED.has("*") || ENABLED.has(name);
+
 function createServer(): McpServer {
   const server = new McpServer({
     name: "location-scout-base",
     version: VERSION,
   });
+  // Wrap server.tool to filter by ENABLED_TOOLS allow-list.
+  const originalTool = server.tool.bind(server);
+  (server as unknown as { tool: (name: string, ...rest: unknown[]) => unknown }).tool = (
+    name: string,
+    ...rest: unknown[]
+  ) => {
+    if (!isToolEnabled(name)) {
+      return undefined;
+    }
+    return (originalTool as unknown as (name: string, ...rest: unknown[]) => unknown)(name, ...rest);
+  };
   registerCommonTools(server);
   registerLocationTools(server);
   registerReferenceTools(server);

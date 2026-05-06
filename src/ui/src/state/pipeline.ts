@@ -331,17 +331,11 @@ export type PipelineAction =
   | { type: "SET_ANALYSIS"; patch: Partial<AnalysisState> };
 
 /**
- * The 7-stage pipeline order. Used by APPROVE_STAGE to unlock the next stage.
+ * BETA: 3-stage pipeline order. Used by APPROVE_STAGE to unlock the next stage.
+ * Full order: ["input","research","analysis","references","setups","light-states","outputs"]
+ * See ROLLOUT.md for restoration steps.
  */
-const STAGE_ORDER: StageId[] = [
-  "input",
-  "research",
-  "analysis",
-  "references",
-  "setups",
-  "light-states",
-  "outputs",
-];
+const STAGE_ORDER: StageId[] = ["input", "references", "setups"];
 
 export function pipelineReducer(
   state: PipelineState,
