@@ -17,7 +17,6 @@ export const DoPFilmVisionSchema = z.object({
   project_id: z.string(),
   camera_system: z.string().default(""),
   lenses: z.string().default(""),
-  aspect_ratio: z.string().default(""),
   movement_vocabulary: z.string().default(""),
   lighting_philosophy: z.string().default(""),
   color_temperature: z.string().default(""),

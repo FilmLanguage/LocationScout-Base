@@ -13,7 +13,6 @@ export declare const DoPFilmVisionSchema: z.ZodObject<{
     project_id: z.ZodString;
     camera_system: z.ZodDefault<z.ZodString>;
     lenses: z.ZodDefault<z.ZodString>;
-    aspect_ratio: z.ZodDefault<z.ZodString>;
     movement_vocabulary: z.ZodDefault<z.ZodString>;
     lighting_philosophy: z.ZodDefault<z.ZodString>;
     color_temperature: z.ZodDefault<z.ZodString>;
@@ -40,7 +39,6 @@ export declare const DoPFilmVisionSchema: z.ZodObject<{
     $schema: "dop-film-vision-v1";
     camera_system: string;
     lenses: string;
-    aspect_ratio: string;
     movement_vocabulary: string;
     lighting_philosophy: string;
     color_temperature: string;
@@ -64,7 +62,6 @@ export declare const DoPFilmVisionSchema: z.ZodObject<{
     } | undefined;
     camera_system?: string | undefined;
     lenses?: string | undefined;
-    aspect_ratio?: string | undefined;
     movement_vocabulary?: string | undefined;
     lighting_philosophy?: string | undefined;
     color_temperature?: string | undefined;
