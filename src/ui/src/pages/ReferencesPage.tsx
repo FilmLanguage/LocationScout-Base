@@ -213,7 +213,7 @@ export function ReferencesPage() {
     try {
       const result = await callTool<{ task_id: string }>("generate_anchor", {
         bible_uri: BIBLE_URI,
-        generation_params: { aspect_ratio: "16:9", quality: "high" },
+        generation_params: { quality: "high" },
         ...(promptOverride?.trim() ? { prompt_override: promptOverride.trim() } : {}),
         ...(anchorRefs.length > 0 && !anchorEditMode ? { reference_images: anchorRefs } : {}),
         ...(anchorEditMode
