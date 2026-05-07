@@ -25,6 +25,7 @@ export default defineConfig(({ mode }) => {
       proxy: {
         "/mcp": proxyConfig,
         "/health": proxyConfig,
+        "/artifacts": proxyConfig,
       },
     },
     build: { outDir: "dist-ui" },

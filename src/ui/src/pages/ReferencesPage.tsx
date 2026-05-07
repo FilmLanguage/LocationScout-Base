@@ -36,9 +36,18 @@ const setupsSummary = [
 type AnchorState =
   | { kind: "checking" }
   | { kind: "missing" }
-  | { kind: "generating"; status: TaskStatus | null }
+  | { kind: "generating"; status: TaskStatus | null; task_id?: string }
   | { kind: "ready"; cacheBust: number }
   | { kind: "error"; message: string };
+
+/** Fire-and-forget cancel; the existing poll loop will react to status=cancelled. */
+async function cancelTask(task_id: string) {
+  try {
+    await callTool("cancel_task", { task_id });
+  } catch (e) {
+    console.warn("[cancel_task]", e);
+  }
+}
 
 export function ReferencesPage() {
   const { state, dispatch } = usePipeline();
@@ -230,9 +239,10 @@ export function ReferencesPage() {
         setAnchor({ kind: "error", message: "generate_anchor returned no task_id" });
         return;
       }
+      setAnchor({ kind: "generating", status: null, task_id: taskId });
       const final = await pollTask(
         taskId,
-        (s) => setAnchor({ kind: "generating", status: s }),
+        (s) => setAnchor({ kind: "generating", status: s, task_id: taskId }),
         1000,
         180000,
       );
@@ -281,8 +291,9 @@ export function ReferencesPage() {
       if (exists) {
         setAnchor({ kind: "ready", cacheBust: Date.now() });
       } else {
+        // BETA: do NOT auto-generate. User triggers via the Regenerate button.
+        // See ROLLOUT.md.
         setAnchor({ kind: "missing" });
-        runGeneration();
       }
     })();
     return () => {
@@ -302,7 +313,8 @@ export function ReferencesPage() {
       const result = await callTool<{ task_id: string }>("create_floorplan", { bible_uri: BIBLE_URI });
       const taskId = result.data?.task_id;
       if (!taskId) { setFloorplan({ kind: "error", message: "create_floorplan returned no task_id" }); return; }
-      const final = await pollTask(taskId, (s) => setFloorplan({ kind: "generating", status: s }), 1000, 60000);
+      setFloorplan({ kind: "generating", status: null, task_id: taskId });
+      const final = await pollTask(taskId, (s) => setFloorplan({ kind: "generating", status: s, task_id: taskId }), 1000, 60000);
       if (final.status === "failed") { setFloorplan({ kind: "error", message: final.error || "Floorplan generation failed" }); return; }
       const exists = await checkExists(FLOORPLAN_IMG_PATH);
       setFloorplan(exists ? { kind: "ready", cacheBust: Date.now() } : { kind: "error", message: "Floorplan generated but not reachable" });
@@ -340,7 +352,8 @@ export function ReferencesPage() {
       });
       const taskId = result.data?.task_id;
       if (!taskId) { setIsometric({ kind: "error", message: "generate_isometric returned no task_id" }); return; }
-      const final = await pollTask(taskId, (s) => setIsometric({ kind: "generating", status: s }), 1500, 120000);
+      setIsometric({ kind: "generating", status: null, task_id: taskId });
+      const final = await pollTask(taskId, (s) => setIsometric({ kind: "generating", status: s, task_id: taskId }), 1500, 120000);
       if (final.status === "failed") { setIsometric({ kind: "error", message: final.error || "Isometric generation failed" }); return; }
       if ((final as any).prompt_used) setIsometricPrompt((final as any).prompt_used);
       const exists = await checkExists(ISOMETRIC_IMG_PATH);
@@ -361,7 +374,9 @@ export function ReferencesPage() {
     (async () => {
       const exists = await checkExists(ISOMETRIC_IMG_PATH);
       if (c) return;
-      if (exists) { setIsometric({ kind: "ready", cacheBust: Date.now() }); } else { setIsometric({ kind: "missing" }); runIsometric(); }
+      // BETA: do NOT auto-generate. User triggers isometric via the Regenerate button.
+      // See ROLLOUT.md.
+      if (exists) { setIsometric({ kind: "ready", cacheBust: Date.now() }); } else { setIsometric({ kind: "missing" }); }
     })();
     return () => { c = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -467,6 +482,15 @@ export function ReferencesPage() {
           </div>
         )}
         {progress !== null && <div style={{ fontSize: 11, opacity: 0.7 }}>{progress}%</div>}
+        {anchor.kind === "generating" && anchor.task_id && (
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            onClick={() => anchor.kind === "generating" && anchor.task_id && cancelTask(anchor.task_id)}
+          >
+            Cancel
+          </button>
+        )}
       </div>
     );
   };
@@ -502,8 +526,17 @@ export function ReferencesPage() {
                   <span style={{ color: "var(--red)" }}>{"✗ "}{floorplan.message}</span>
                 </div>
               ) : (
-                <div className="placeholder-box placeholder-box--tall">
-                  {floorplan.kind === "generating" ? `Generating floorplan… ${floorplan.status?.current_step ?? ""}` : "Checking…"}
+                <div className="placeholder-box placeholder-box--tall" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  <span>{floorplan.kind === "generating" ? `Generating floorplan… ${floorplan.status?.current_step ?? ""}` : "Checking…"}</span>
+                  {floorplan.kind === "generating" && floorplan.task_id && (
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={() => floorplan.kind === "generating" && floorplan.task_id && cancelTask(floorplan.task_id)}
+                    >
+                      Cancel
+                    </button>
+                  )}
                 </div>
               )}
               <div className="metric-row">
@@ -565,6 +598,16 @@ export function ReferencesPage() {
                     : "Waiting for floorplan…"
                 }
               />
+              {isometric.kind === "generating" && isometric.task_id && (
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  style={{ alignSelf: "flex-start", marginTop: "var(--sp-2)" }}
+                  onClick={() => isometric.kind === "generating" && isometric.task_id && cancelTask(isometric.task_id)}
+                >
+                  Cancel
+                </button>
+              )}
               <ReferencePicker
                 entity_id={LOCATION_ID}
                 value={isometricRefs}

@@ -23,9 +23,75 @@ export interface SetupLike {
   camera?: string;
 }
 
-/** Variables for `generate-anchor-system.md` → `{{space_description}}`. */
-export function buildAnchorPromptVars(bible: LocationBibleLike): Record<string, string> {
+/**
+ * BETA: Extract continuity-critical facts from the bible. Used by all three
+ * prompt builders (anchor / isometric / setup) so the templates can render a
+ * "KEY FACTS — MUST PRESERVE" header. This is what makes each stage's prompt
+ * carry the explicit constraints needed to keep floorplan→isometric→anchor→
+ * setups visually consistent.
+ */
+function extractBibleFacts(bible: LocationBibleLike): {
+  location_name: string;
+  era: string;
+  era_clause: string;
+  dimensions: string;
+  time_of_day: string;
+  light_summary: string;
+  atmosphere: string;
+  key_details: string;
+  negative_list_text: string;
+} {
+  const passport = (bible.passport ?? {}) as Record<string, unknown>;
+  const light = (bible.light_base_state ?? {}) as Record<string, unknown>;
+
+  const locationName = (passport.location_name as string | undefined) ?? "";
+  const era = (passport.era as string | undefined) ?? "";
+  const dimensions =
+    (passport.dimensions as string | undefined) ??
+    (passport.size as string | undefined) ??
+    (passport.area as string | undefined) ??
+    "as defined by the floorplan";
+  const tod = passport.time_of_day as string[] | undefined;
+  const lightParts = [
+    light.primary_source ? `${String(light.primary_source)} as primary source` : "",
+    light.direction ? `from ${String(light.direction)}` : "",
+    light.shadow_hardness ? `${String(light.shadow_hardness)} shadows` : "",
+    light.color_temp_kelvin ? `${String(light.color_temp_kelvin)}K` : "",
+  ].filter(Boolean);
+  const atmosphere = (bible.atmosphere as string | undefined) ?? "";
+  const keyDetailsArr = (bible.key_details as string[] | undefined) ?? [];
+  const negativeArr = (bible.negative_list as string[] | undefined) ?? [];
+
   return {
+    location_name: locationName,
+    era,
+    era_clause: era ? ` (${era})` : "",
+    dimensions,
+    time_of_day: tod && tod.length > 0 ? tod.join(" / ") : "as defined by the bible",
+    light_summary: lightParts.length > 0 ? lightParts.join(", ") : "as defined by the bible",
+    atmosphere,
+    key_details: keyDetailsArr.slice(0, 6).join("; ") || "as described in the location bible",
+    negative_list_text: negativeArr.slice(0, 8).join(", ") || "anachronisms, unrelated objects",
+  };
+}
+
+/**
+ * Variables for `generate-anchor-system.md`.
+ * BETA: now populates location_name, era_clause, dimensions, time_of_day,
+ * light_summary, atmosphere, key_details, negative_list_text in addition to
+ * space_description, so the template can show a KEY FACTS header.
+ */
+export function buildAnchorPromptVars(bible: LocationBibleLike): Record<string, string> {
+  const facts = extractBibleFacts(bible);
+  return {
+    location_name: facts.location_name,
+    era_clause: facts.era_clause,
+    dimensions: facts.dimensions,
+    time_of_day: facts.time_of_day,
+    light_summary: facts.light_summary,
+    atmosphere: facts.atmosphere,
+    key_details: facts.key_details,
+    negative_list_text: facts.negative_list_text,
     space_description: (bible.space_description as string | undefined) ?? "",
   };
 }
@@ -42,15 +108,18 @@ export function buildIsometricPromptVars(
   bible: LocationBibleLike,
   fallbackLocationName?: string,
 ): Record<string, string> {
-  const passport = bible.passport as Record<string, unknown> | undefined;
-  const locationName =
-    (passport?.location_name as string | undefined) ?? fallbackLocationName ?? "";
-  const era = (passport?.era as string | undefined) ?? "";
+  const facts = extractBibleFacts(bible);
+  const locationName = facts.location_name || fallbackLocationName || "";
   const spaceDesc = (bible.space_description as string | undefined) ?? "";
   return {
     location_name: locationName,
-    era_clause: era ? ` Era: ${era}.` : "",
+    // Original `era_clause` form was ` Era: ${era}.`; new template uses different form, so we rebuild.
+    era_clause: facts.era ? ` Era: ${facts.era}.` : "",
+    dimensions: facts.dimensions,
+    // BETA: keep legacy `space_description` (leading space) for back-compat;
+    // also expose `space_description_clause` for the new KEY FACTS template.
     space_description: spaceDesc ? ` ${spaceDesc}` : "",
+    space_description_clause: spaceDesc ? ` Spatial reference: ${spaceDesc}` : "",
   };
 }
 
@@ -116,6 +185,7 @@ export function buildSetupPromptVars(
     ? "top-down real photograph — NO eye-level perspective"
     : "eye-level real photograph";
 
+  const facts = extractBibleFacts(bible);
   return {
     space_description: spaceDesc,
     scene,
@@ -123,6 +193,10 @@ export function buildSetupPromptVars(
     camera,
     camera_directive: cameraDirective,
     photorealism_clause: photorealismClause,
+    // BETA: continuity facts so the template can show a "MUST MATCH ANCHOR" header.
+    dimensions: facts.dimensions,
+    time_of_day: facts.time_of_day,
+    light_summary: facts.light_summary,
   };
 }
 

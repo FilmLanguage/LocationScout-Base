@@ -584,8 +584,11 @@ export function registerLocationTools(server: McpServer) {
       const task_id = crypto.randomUUID();
       createTask(task_id, "Generating anchor image");
 
-      const validationEnabled = validation?.enabled ?? true;
-      const maxAttempts = validation?.max_attempts ?? 3;
+      // BETA: default validation OFF and single attempt. User triggers validation
+      // separately (planned: dedicated tool). Original defaults: enabled=true,
+      // max_attempts=3. See ROLLOUT.md.
+      const validationEnabled = validation?.enabled ?? false;
+      const maxAttempts = validation?.max_attempts ?? 1;
       const threshold = validation?.threshold ?? 0.75;
 
       (async () => {

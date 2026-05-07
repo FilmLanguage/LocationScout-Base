@@ -43,7 +43,7 @@ const SETUP_CAMERA: Record<string, string> = {
 
 type BatchState =
   | { kind: "checking" }
-  | { kind: "generating"; status: TaskStatus | null }
+  | { kind: "generating"; status: TaskStatus | null; task_id?: string }
   | { kind: "ready" }
   | { kind: "error"; message: string };
 
@@ -162,9 +162,10 @@ export function SetupsPage() {
         setBatch({ kind: "error", message: "generate_setup_images returned no task_id" });
         return;
       }
+      setBatch({ kind: "generating", status: null, task_id: taskId });
       const final = await pollTask(
         taskId,
-        (s) => setBatch({ kind: "generating", status: s }),
+        (s) => setBatch({ kind: "generating", status: s, task_id: taskId }),
         1500,
         240000,
       );
@@ -185,23 +186,23 @@ export function SetupsPage() {
     }
   };
 
-  // On mount: see what's missing, generate if needed.
+  // BETA: on mount, only check what already exists. Do NOT auto-generate.
+  // User triggers generation via per-tile Regenerate or batch buttons.
+  // `runBatch` retained for re-wiring to a "Generate All Missing" button.
+  // See ROLLOUT.md for restoration steps.
+  void runBatch;
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const missing = await findMissing(tiles);
       if (cancelled) return;
-      if (missing.length === 0) {
-        // Mark everything as freshly-cached so the browser actually renders.
-        const now = Date.now();
-        const map: Record<string, number> = {};
-        for (const t of tiles) map[t.id] = now;
-        setTileCacheBust(map);
-        setBatch({ kind: "ready" });
-        return;
-      }
-      const targets = setupsArg.filter((s) => missing.includes(s.id));
-      await runBatch(targets);
+      // Mark everything as freshly-cached so existing setups render.
+      const now = Date.now();
+      const map: Record<string, number> = {};
+      for (const t of tiles) map[t.id] = now;
+      setTileCacheBust(map);
+      setBatch({ kind: "ready" });
+      void missing;
     })();
     return () => {
       cancelled = true;
@@ -422,6 +423,22 @@ export function SetupsPage() {
           <span style={{ marginLeft: "auto", opacity: 0.7 }}>
             {Math.round((batch.status?.progress ?? 0) * 100)}%
           </span>
+          {batch.task_id && (
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={async () => {
+                if (batch.kind !== "generating" || !batch.task_id) return;
+                try {
+                  await callTool("cancel_task", { task_id: batch.task_id });
+                } catch (e) {
+                  console.warn("[cancel_task]", e);
+                }
+              }}
+            >
+              Cancel
+            </button>
+          )}
         </div>
       )}
       {batch.kind === "error" && (
