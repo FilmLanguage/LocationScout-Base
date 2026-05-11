@@ -81,7 +81,7 @@ export function InputPage() {
       task_id: "",
       status: "accepted",
       progress: 0,
-      current_step: "Submitting to Location Scout…",
+      current_step: "Building location bible…",
     });
 
     try {
@@ -128,8 +128,9 @@ export function InputPage() {
       }
 
       // Success — unlock the next stage and navigate.
+      // BETA: skip /research → /analysis (Bible review hidden, auto-approved). See ROLLOUT.md.
       dispatch({ type: "APPROVE_STAGE", stage: "input" });
-      navigate("/research");
+      navigate("/references");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[scout_location] failed:", err);
@@ -831,7 +832,7 @@ export function InputPage() {
                 : undefined
             }
           >
-            {isRunning ? "Researching…" : "Start Research"}
+            {isRunning ? "Building…" : "Build Location"}
             {!isRunning && <span className="btn__arrow" aria-hidden>→</span>}
           </button>
         )}

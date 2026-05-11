@@ -67,7 +67,7 @@ export interface ReferenceState {
   };
 }
 
-export type SetupTileStatus = "approved" | "draft" | "rejected";
+export type SetupTileStatus = "none" | "approved" | "draft" | "rejected";
 
 export interface SetupTile {
   id: string;
@@ -269,15 +269,18 @@ export const INITIAL_STATE: PipelineState = {
   setups: {
     selectedId: "S1-A",
     tiles: [
-      { id: "S1-A", status: "approved", scene: "sc_003", mood: "NIGHT" },
-      { id: "S1-B", status: "approved", scene: "sc_003", mood: "DAY" },
-      { id: "S2-A", status: "draft",    scene: "sc_007", mood: "DAY" },
-      { id: "S2-B", status: "draft",    scene: "sc_007", mood: "NIGHT" },
-      { id: "S3-A", status: "approved", scene: "sc_015", mood: "LATE_NIGHT" },
-      { id: "S3-B", status: "rejected", scene: "sc_015", mood: "DAY" },
-      { id: "S1-C", status: "draft",    scene: "sc_003", mood: "DUSK" },
-      { id: "S2-C", status: "draft",    scene: "sc_007", mood: "DUSK" },
-      { id: "S3-C", status: "draft",    scene: "sc_015", mood: "NIGHT" },
+      // Statuses start as "none" — no chip until the user explicitly
+      // approves or rejects via the tile's ✓/✗ icon buttons. Fixture
+      // wireframe statuses removed (was leftover from the Figma mock).
+      { id: "S1-A", status: "none", scene: "sc_003", mood: "NIGHT" },
+      { id: "S1-B", status: "none", scene: "sc_003", mood: "DAY" },
+      { id: "S2-A", status: "none", scene: "sc_007", mood: "DAY" },
+      { id: "S2-B", status: "none", scene: "sc_007", mood: "NIGHT" },
+      { id: "S3-A", status: "none", scene: "sc_015", mood: "LATE_NIGHT" },
+      { id: "S3-B", status: "none", scene: "sc_015", mood: "DAY" },
+      { id: "S1-C", status: "none", scene: "sc_003", mood: "DUSK" },
+      { id: "S2-C", status: "none", scene: "sc_007", mood: "DUSK" },
+      { id: "S3-C", status: "none", scene: "sc_015", mood: "NIGHT" },
     ],
   },
 
@@ -331,17 +334,11 @@ export type PipelineAction =
   | { type: "SET_ANALYSIS"; patch: Partial<AnalysisState> };
 
 /**
- * The 7-stage pipeline order. Used by APPROVE_STAGE to unlock the next stage.
+ * BETA: 3-stage pipeline order. Used by APPROVE_STAGE to unlock the next stage.
+ * Full order: ["input","research","analysis","references","setups","light-states","outputs"]
+ * See ROLLOUT.md for restoration steps.
  */
-const STAGE_ORDER: StageId[] = [
-  "input",
-  "research",
-  "analysis",
-  "references",
-  "setups",
-  "light-states",
-  "outputs",
-];
+const STAGE_ORDER: StageId[] = ["input", "references", "setups"];
 
 export function pipelineReducer(
   state: PipelineState,
@@ -422,7 +419,9 @@ export function pipelineReducer(
         setups: {
           ...state.setups,
           tiles: state.setups.tiles.map((t) =>
-            t.status === "draft" ? { ...t, status: "approved" } : t,
+            t.status === "draft" || t.status === "none"
+              ? { ...t, status: "approved" }
+              : t,
           ),
         },
       };

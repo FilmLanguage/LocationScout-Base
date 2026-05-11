@@ -243,13 +243,15 @@ export function registerLocationTools(server: McpServer) {
       // Run pipeline async (fire and forget)
       (async () => {
         try {
-          // Step 1: Research
-          updateTask(task_id, { status: "processing", progress: 0.1, current_step: "Researching era" });
+          // BETA: Step 1 (Research) disabled — see ROLLOUT.md for restoration steps.
+          // researchId retained because LocationBible v2 schema requires `research_id`.
+          updateTask(task_id, { status: "processing", progress: 0.1, current_step: "Building location bible" });
+          const researchId = `research_${location_brief.location_id}`;
+          /* BETA: research disabled — see ROLLOUT.md
           const research = await llmComplete(
             PROMPT_RESEARCH_PIPELINE,
             [{ role: "user", content: `Location: ${location_brief.location_name}\nEra: ${location_brief.era}\nType: ${location_brief.location_type}\nDirector style: ${director_vision.era_style}` }],
           );
-          const researchId = `research_${location_brief.location_id}`;
           const llmResearchPipeline = JSON.parse(stripCodeFence(research.content));
           // Coerce period_facts: schema expects array of objects {fact, source?, relevance?}
           if (Array.isArray(llmResearchPipeline.period_facts)) {
@@ -266,11 +268,12 @@ export function registerLocationTools(server: McpServer) {
           };
           await saveArtifact("research", researchId, researchPipelinePayload);
           updateTask(task_id, { progress: 0.3, current_step: "Research complete, writing Bible" });
+          */
 
           // Step 2: Write Bible
           const bible = await llmComplete(
             PROMPT_WRITE_BIBLE_PIPELINE,
-            [{ role: "user", content: `Location: ${JSON.stringify(location_brief)}\nDirector vision: ${JSON.stringify(director_vision)}\nResearch: ${research.content}` }],
+            [{ role: "user", content: `Location: ${JSON.stringify(location_brief)}\nDirector vision: ${JSON.stringify(director_vision)}\nResearch: (not available — write from general knowledge of the period: ${location_brief.era})` }],
             { maxTokens: 4096 },
           );
           const bibleId = location_brief.location_id;
@@ -300,6 +303,7 @@ export function registerLocationTools(server: McpServer) {
             brief_id: location_brief.location_id,
             vision_id: `vision_${location_brief.location_id}`,
             research_id: researchId,
+            approval_status: "approved" as const,                // BETA: auto-approve (Bible review screen hidden) — see ROLLOUT.md
           };
           await saveArtifact("bible", bibleId, biblePipelinePayload);
           updateTask(task_id, {
@@ -307,7 +311,6 @@ export function registerLocationTools(server: McpServer) {
             status: "completed",
             current_step: "Pipeline complete",
             artifacts: [
-              { uri: `agent://location-scout/research/${researchId}`, mime_type: "application/json", created_at: new Date().toISOString() },
               { uri: `agent://location-scout/bible/${bibleId}`, mime_type: "application/json", created_at: new Date().toISOString() },
             ],
           });
@@ -581,8 +584,11 @@ export function registerLocationTools(server: McpServer) {
       const task_id = crypto.randomUUID();
       createTask(task_id, "Generating anchor image");
 
-      const validationEnabled = validation?.enabled ?? true;
-      const maxAttempts = validation?.max_attempts ?? 3;
+      // BETA: default validation OFF and single attempt. User triggers validation
+      // separately (planned: dedicated tool). Original defaults: enabled=true,
+      // max_attempts=3. See ROLLOUT.md.
+      const validationEnabled = validation?.enabled ?? false;
+      const maxAttempts = validation?.max_attempts ?? 1;
       const threshold = validation?.threshold ?? 0.75;
 
       (async () => {
@@ -678,7 +684,14 @@ export function registerLocationTools(server: McpServer) {
             });
 
             const promptForAttempt = (basePrompt + correctionHint).slice(0, 2000);
-            const resolvedModel = resolveModel("ANCHOR", generation_params?.model, imageUrls.length > 0);
+            let resolvedModel = resolveModel("ANCHOR", generation_params?.model, imageUrls.length > 0);
+            // When the anchor pipeline runs text-to-image (no refs), strip a
+            // trailing `/edit` from any env- or override-pinned model — the
+            // /edit FAL endpoints require `image_urls` and silently return 0
+            // images when called without refs.
+            if (imageUrls.length === 0 && resolvedModel.endsWith("/edit")) {
+              resolvedModel = resolvedModel.slice(0, -"/edit".length);
+            }
             // Ref-strength policy for anchor (run-019 I5): the isometric is attached
             // as a SPATIAL LAYOUT GUIDE only — prompt must dominate so the output
             // reads as a photoreal eye-level photograph, not an isometric illustration.
@@ -691,6 +704,7 @@ export function registerLocationTools(server: McpServer) {
               model: resolvedModel,
               image_urls: imageUrls,
               image_ref_strength: refStrength,
+              aspect_ratio: "16:9",
             });
 
             if (result.images.length === 0) {
@@ -1379,6 +1393,7 @@ export function registerLocationTools(server: McpServer) {
             const result = await generateImage({
               prompt,
               model: resolvedModel,
+              aspect_ratio: "16:9",
               ...(imageUrls.length > 0 ? { image_urls: imageUrls } : {}),
               ...(editingSetup ? { image_ref_strength: 0.85 } : {}),
             });

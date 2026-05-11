@@ -77,6 +77,16 @@ export interface ReferencePickerProps {
   /** Label shown in the header; defaults to "Reference images". */
   label?: string;
   disabled?: boolean;
+  /**
+   * Optional location-bible id, used by the gallery modal to fetch anchor +
+   * isometric versions keyed by the bible (not the local entity_id). For setup
+   * pickers, entity_id is the setup id (e.g. `S1-A`) — without bible_id the
+   * Location gallery tab would query for anchors keyed by `S1-A` and come back
+   * empty.
+   */
+  bible_id?: string;
+  /** Setup ids whose generated images should appear in the Location gallery tab. */
+  setup_ids?: string[];
 }
 
 interface SidecarVersion {
@@ -145,17 +155,19 @@ function kindBadge(kind: ReferenceKind): string {
 }
 
 function Thumbnail({
-  ref,
+  refData,
   onRemove,
   disabled,
 }: {
-  ref: ReferenceRef;
+  // BETA: prop renamed from `ref` to `refData` — `ref` is reserved by React and
+  // gets stripped from props (silent crash on access). See ROLLOUT.md.
+  refData: ReferenceRef;
   onRemove: () => void;
   disabled?: boolean;
 }) {
   return (
     <div
-      title={ref.prompt ?? `${ref.kind} · ${ref.source_agent}`}
+      title={refData.prompt ?? `${refData.kind} · ${refData.source_agent}`}
       style={{
         width: 90,
         height: 90,
@@ -168,8 +180,8 @@ function Thumbnail({
       }}
     >
       <img
-        src={previewUrl(ref)}
-        alt={ref.kind}
+        src={previewUrl(refData)}
+        alt={refData.kind}
         style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
       />
       <span
@@ -186,7 +198,7 @@ function Thumbnail({
           letterSpacing: 0.3,
         }}
       >
-        {kindBadge(ref.kind)}
+        {kindBadge(refData.kind)}
       </span>
       {!disabled && (
         <button
@@ -216,12 +228,13 @@ function Thumbnail({
   );
 }
 
-function LockedThumbnail({ ref }: { ref: LockedAutoRef }) {
-  const tooltip = `Auto-resolved from ${ref.parentLabel}. Toggle off auto-resolve to remove.`;
+function LockedThumbnail({ refData }: { refData: LockedAutoRef }) {
+  // BETA: prop renamed from `ref` (reserved by React). See ROLLOUT.md.
+  const tooltip = `Auto-resolved from ${refData.parentLabel}. Toggle off auto-resolve to remove.`;
   return (
     <div
       title={tooltip}
-      data-locked-auto-ref={ref.parentLabel}
+      data-locked-auto-ref={refData.parentLabel}
       style={{
         width: 90,
         height: 90,
@@ -234,8 +247,8 @@ function LockedThumbnail({ ref }: { ref: LockedAutoRef }) {
       }}
     >
       <img
-        src={ref.imageUrl}
-        alt={`${ref.parentLabel} (locked auto-ref)`}
+        src={refData.imageUrl}
+        alt={`${refData.parentLabel} (locked auto-ref)`}
         style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
       />
       <span
@@ -252,7 +265,7 @@ function LockedThumbnail({ ref }: { ref: LockedAutoRef }) {
           letterSpacing: 0.3,
         }}
       >
-        {kindBadge(ref.kind)}
+        {kindBadge(refData.kind)}
       </span>
       {/* 🔒 locked badge — replaces the × close button used by user refs */}
       <span
@@ -392,12 +405,14 @@ function GalleryButton({
 function GalleryModal({
   entity_id,
   bible_id,
+  setup_ids,
   currentRefs,
   onPick,
   onClose,
 }: {
   entity_id: string;
   bible_id: string;
+  setup_ids?: string[];
   currentRefs: ReferenceRef[];
   onPick: (ref: ReferenceRef) => void;
   onClose: () => void;
@@ -406,6 +421,7 @@ function GalleryModal({
   const [userRefs, setUserRefs] = useState<SidecarVersion[]>([]);
   const [locRefs, setLocRefs] = useState<LocationGalleryResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const setupIdsKey = (setup_ids ?? []).join(",");
 
   useEffect(() => {
     let cancelled = false;
@@ -414,7 +430,10 @@ function GalleryModal({
       try {
         const [userResp, locResp] = await Promise.all([
           callTool<UserRefResponse>("list_user_references", { entity_id }),
-          callTool<LocationGalleryResponse>("list_location_images", { bible_id }),
+          callTool<LocationGalleryResponse>("list_location_images", {
+            bible_id,
+            ...(setup_ids && setup_ids.length > 0 ? { setup_ids } : {}),
+          }),
         ]);
         if (cancelled) return;
         setUserRefs(userResp.data?.refs ?? []);
@@ -428,7 +447,7 @@ function GalleryModal({
     return () => {
       cancelled = true;
     };
-  }, [entity_id, bible_id]);
+  }, [entity_id, bible_id, setupIdsKey]);
 
   const activeIds = new Set(currentRefs.map((r) => r.image_id));
 
@@ -478,11 +497,20 @@ function GalleryModal({
     </div>
   );
 
+  // Defensive: backend may return partial shapes — including non-array
+  // values when listVersions partially fails (e.g. s3 access denied → field
+  // becomes a string error envelope instead of []). Coerce every field to a
+  // real array before spreading so the modal never crashes the React tree
+  // with `is not iterable`.
+  const asArray = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+  const setupBuckets = locRefs && locRefs.setup && typeof locRefs.setup === "object"
+    ? Object.values(locRefs.setup)
+    : [];
   const locationItems: SidecarVersion[] = locRefs
     ? [
-      ...locRefs.anchor,
-      ...locRefs.isometric,
-      ...Object.values(locRefs.setup).flat(),
+      ...asArray<SidecarVersion>(locRefs.anchor),
+      ...asArray<SidecarVersion>(locRefs.isometric),
+      ...setupBuckets.flatMap((v) => asArray<SidecarVersion>(v)),
     ]
     : [];
 
@@ -504,9 +532,13 @@ function GalleryModal({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: "var(--bg)",
+          // Use the lighter `--surface` so the modal stands out from the
+          // dimmed `--bg` page underneath; previous styling used `--bg` for
+          // both, making the modal indistinguishable from the backdrop
+          // (looked like a fully-black screen).
+          background: "var(--surface)",
           color: "var(--text)",
-          border: "1px solid var(--border)",
+          border: "1px solid var(--border-accent)",
           borderRadius: 8,
           width: "min(720px, 92vw)",
           maxHeight: "80vh",
@@ -514,6 +546,7 @@ function GalleryModal({
           flexDirection: "column",
           padding: 16,
           gap: 12,
+          boxShadow: "0 12px 48px rgba(0,0,0,0.6)",
         }}
         data-gallery-modal
       >
@@ -536,8 +569,37 @@ function GalleryModal({
             </button>
           </div>
           <span style={{ flex: 1 }} />
-          <button type="button" onClick={onClose} className="btn btn--ghost btn--sm">
-            Close
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              width: 28,
+              height: 28,
+              padding: 0,
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            {/* Design System X icon — Figma node 2199:149. */}
+            <svg
+              width="28"
+              height="28"
+              viewBox="0 0 28 28"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <rect x="0.5" y="0.5" width="27" height="27" rx="5.5" stroke="#2B2E31" />
+              <path
+                d="M16.544 17.392L14 14.784L11.456 17.392L10.672 16.608L13.216 14L10.672 11.392L11.456 10.608L14 13.216L16.544 10.608L17.328 11.392L14.784 14L17.328 16.608L16.544 17.392Z"
+                fill="#A1A6AA"
+              />
+            </svg>
           </button>
         </div>
         <div style={{ overflow: "auto", flex: 1 }}>
@@ -562,10 +624,15 @@ export function ReferencePicker({
   autoCascadeHint,
   label = "Reference images",
   disabled,
-}: ReferencePickerProps & { bible_id?: string }) {
+  bible_id,
+  setup_ids,
+}: ReferencePickerProps) {
   const [uploading, setUploading] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
-  const bible_id = entity_id;
+  // Fall back to entity_id only when caller didn't supply a real bible_id.
+  // This keeps the Location gallery useful for non-setup callers (anchor/iso
+  // pickers already pass the bible id as entity_id).
+  const resolvedBibleId = bible_id ?? entity_id;
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -608,13 +675,13 @@ export function ReferencePicker({
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-start" }}>
         {lockedAutoRefs?.map((r, i) => (
-          <LockedThumbnail key={`locked-${r.parentLabel}-${i}`} ref={r} />
+          <LockedThumbnail key={`locked-${r.parentLabel}-${i}`} refData={r} />
         ))}
         {autoCascadeHint?.map((hint) => <AutoHintTile key={`hint-${hint}`} label={hint} />)}
         {value.map((ref, i) => (
           <Thumbnail
             key={`${ref.image_id}-${i}`}
-            ref={ref}
+            refData={ref}
             onRemove={() => handleRemove(i)}
             disabled={disabled}
           />
@@ -625,7 +692,8 @@ export function ReferencePicker({
       {galleryOpen && (
         <GalleryModal
           entity_id={entity_id}
-          bible_id={bible_id}
+          bible_id={resolvedBibleId}
+          setup_ids={setup_ids}
           currentRefs={value}
           onPick={(ref) => {
             if (!value.some((v) => v.image_id === ref.image_id)) {

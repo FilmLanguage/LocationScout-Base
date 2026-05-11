@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "LocationScout-UI",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:ui"],
+      "name": "location-scout-ui",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite"],
       "port": 5176
     },
     {
