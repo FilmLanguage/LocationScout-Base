@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { callTool, pollTask } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
+import { BibleProgressPanel } from "./BibleProgressPanel";
 
 const PROJECT_ID = "proj_default";
 const LOCATION_ID = "loc_001";
@@ -66,6 +67,7 @@ export function BetaAutoBoot({ children }: { children: ReactNode }) {
     inputApproved ? "ready" : "idle",
   );
   const [step, setStep] = useState<string>("Building location bible…");
+  const [progress, setProgress] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
   const fired = useRef(false);
 
@@ -89,6 +91,7 @@ export function BetaAutoBoot({ children }: { children: ReactNode }) {
           taskId,
           (s) => {
             if (s.current_step) setStep(s.current_step);
+            if (typeof s.progress === "number") setProgress(s.progress);
           },
           800,
           180000,
@@ -125,15 +128,8 @@ export function BetaAutoBoot({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div
-      role="status"
-      style={{
-        padding: "var(--sp-4)",
-        color: "#EAEBEC",
-        fontFamily: "inherit",
-      }}
-    >
-      {step}
+    <div role="status">
+      <BibleProgressPanel progress={progress} currentStep={step} />
     </div>
   );
 }

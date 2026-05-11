@@ -104,6 +104,8 @@ interface ImageGenParams {
   image_urls?: string[];
   /** Strength with which the reference image biases the generation (0..1). Used by edit mode to force preservation. */
   image_ref_strength?: number;
+  /** Aspect ratio for models that accept it (e.g. nano-banana): "16:9", "1:1", "9:16", etc. */
+  aspect_ratio?: string;
 }
 
 interface ImageGenResult {
@@ -145,6 +147,23 @@ export async function generateImage(params: ImageGenParams): Promise<ImageGenRes
     }
     if (params.image_ref_strength != null) {
       body.image_ref_strength = params.image_ref_strength;
+    }
+    if (params.aspect_ratio) {
+      body.aspect_ratio = params.aspect_ratio;
+      // Some nano-banana variants (legacy nano-banana/edit) ignore
+      // `aspect_ratio` and emit a 1:1 image with black letterbox bars baked
+      // into the pixels. Also send `image_size` as a preset name — FAL maps
+      // these to concrete canvas dimensions so the model paints a real
+      // 16:9 frame instead of letterboxing a square one.
+      const ARtoPreset: Record<string, string> = {
+        "16:9": "landscape_16_9",
+        "4:3": "landscape_4_3",
+        "1:1": "square_hd",
+        "3:4": "portrait_4_3",
+        "9:16": "portrait_16_9",
+      };
+      const preset = ARtoPreset[params.aspect_ratio];
+      if (preset) body.image_size = preset;
     }
   } else {
     body.image_size = {

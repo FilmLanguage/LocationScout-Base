@@ -17,8 +17,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { callTool, pollTask, type TaskStatus } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
 import type { SetupTile } from "../state/pipeline";
-import { PromptCard } from "../components/PromptCard";
 import { ReferencePicker, type ReferenceRef } from "../components/ReferencePicker";
+import { ImageOverlay } from "../components/ImageOverlay";
 import { useGallery } from "../hooks/useGallery";
 import { useAssemblePrompt } from "../hooks/useAssemblePrompt";
 
@@ -52,7 +52,12 @@ export function SetupsPage() {
   const { tiles, selectedId } = state.setups;
   const selected = tiles.find((t) => t.id === selectedId) ?? tiles[0];
   const approvedCount = tiles.filter((t) => t.status === "approved").length;
-  const draftCount = tiles.filter((t) => t.status === "draft").length;
+  // "Reviewable" = not yet approved (covers both legacy "draft" and the
+  // new "none" initial state). Drives the Approve-All count + send gate.
+  const draftCount = tiles.filter(
+    (t) => t.status === "draft" || t.status === "none",
+  ).length;
+  const rejectedCount = tiles.filter((t) => t.status === "rejected").length;
 
   const [batch, setBatch] = useState<BatchState>({ kind: "checking" });
   /** Per-tile cache-bust number that refreshes the <img src> after regeneration. */
@@ -79,6 +84,8 @@ export function SetupsPage() {
   const [setupEditBaseId, setSetupEditBaseId] = useState<Record<string, string | null>>({});
   const [setupSavedPrompt, setSetupSavedPrompt] = useState<Record<string, string>>({});
   const setupCardRef = useRef<HTMLDivElement | null>(null);
+  const [setupPromptOpen, setSetupPromptOpen] = useState(true);
+  const [setupOverlayOpen, setSetupOverlayOpen] = useState(false);
 
   const enterSetupEdit = (id: string, imageId: string | null) => {
     setSetupSavedPrompt((prev) => ({ ...prev, [id]: setupPrompt }));
@@ -190,19 +197,29 @@ export function SetupsPage() {
   // User triggers generation via per-tile Regenerate or batch buttons.
   // `runBatch` retained for re-wiring to a "Generate All Missing" button.
   // See ROLLOUT.md for restoration steps.
-  void runBatch;
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const missing = await findMissing(tiles);
       if (cancelled) return;
-      // Mark everything as freshly-cached so existing setups render.
+      // Only bust the cache for tiles that ACTUALLY have an image on disk —
+      // otherwise the <img> tag tries to load a missing file and renders the
+      // browser's broken-image icon. Missing tiles fall back to the placeholder.
+      const missingSet = new Set(missing);
       const now = Date.now();
       const map: Record<string, number> = {};
-      for (const t of tiles) map[t.id] = now;
+      for (const t of tiles) {
+        if (!missingSet.has(t.id)) map[t.id] = now;
+      }
       setTileCacheBust(map);
+      // Generated-but-not-reviewed setups (i.e. file exists, status still "none")
+      // start in the "draft" state so the user sees the chip and can approve/reject.
+      for (const t of tiles) {
+        if (!missingSet.has(t.id) && t.status === "none") {
+          dispatch({ type: "SET_SETUP_STATUS", id: t.id, status: "draft" });
+        }
+      }
       setBatch({ kind: "ready" });
-      void missing;
     })();
     return () => {
       cancelled = true;
@@ -235,7 +252,9 @@ export function SetupsPage() {
   };
 
   const handleApproveAll = async () => {
-    const drafts = tiles.filter((t) => t.status === "draft").map((t) => t.id);
+    const drafts = tiles
+      .filter((t) => t.status === "draft" || t.status === "none")
+      .map((t) => t.id);
     dispatch({ type: "APPROVE_ALL_SETUPS" });
     for (const id of drafts) {
       try {
@@ -295,6 +314,10 @@ export function SetupsPage() {
         throw new Error(final.error || "Regeneration failed");
       }
       setTileCacheBust((prev) => ({ ...prev, [selected.id]: Date.now() }));
+      // Newly-generated setup → flip "none" to "draft" so the chip appears.
+      if (selected.status === "none") {
+        dispatch({ type: "SET_SETUP_STATUS", id: selected.id, status: "draft" });
+      }
       const refreshed = await setupGallery.refresh();
       setSetupSelectedVersionId(null);
       if (editing) {
@@ -309,6 +332,62 @@ export function SetupsPage() {
       setRegenerating((prev) => {
         const next = new Set(prev);
         next.delete(selected.id);
+        return next;
+      });
+    }
+  };
+
+  const handleGenerateAll = async () => {
+    // Generate all tiles that don't yet have an image on disk. Reuses the
+    // batch tool so progress + cancel flow into the existing batch banner.
+    const targets = setupsArg.filter((s) => tileCacheBust[s.id] === undefined);
+    if (targets.length === 0) return;
+    await runBatch(targets);
+    // Mark freshly-generated tiles as "draft" so the chip appears.
+    for (const t of targets) {
+      dispatch({ type: "SET_SETUP_STATUS", id: t.id, status: "draft" });
+    }
+  };
+
+  const handleRegenerateRejected = async () => {
+    const targets = setupsArg.filter((s) =>
+      tiles.find((t) => t.id === s.id)?.status === "rejected",
+    );
+    if (targets.length === 0) return;
+    // Mark each rejected tile as in-flight so its image switches to the
+    // "↻ regenerating…" placeholder.
+    setRegenerating((prev) => {
+      const next = new Set(prev);
+      for (const t of targets) next.add(t.id);
+      return next;
+    });
+    try {
+      const result = await callTool<{ task_id: string }>("generate_setup_images", {
+        bible_uri: BIBLE_URI,
+        setups: targets,
+      });
+      const taskId = result.data?.task_id;
+      if (!taskId) throw new Error("no task_id");
+      const final = await pollTask(taskId, undefined, 1500, 240000);
+      if (final.status === "failed") {
+        throw new Error(final.error || "Regeneration failed");
+      }
+      const now = Date.now();
+      setTileCacheBust((prev) => {
+        const next = { ...prev };
+        for (const t of targets) next[t.id] = now;
+        return next;
+      });
+      // Move re-generated tiles back to "draft" so the user can review again.
+      for (const t of targets) {
+        dispatch({ type: "SET_SETUP_STATUS", id: t.id, status: "draft" });
+      }
+    } catch (err) {
+      console.error("[regenerate rejected] failed:", err);
+    } finally {
+      setRegenerating((prev) => {
+        const next = new Set(prev);
+        for (const t of targets) next.delete(t.id);
         return next;
       });
     }
@@ -347,7 +426,9 @@ export function SetupsPage() {
     setSending(true);
     setSendError(null);
     try {
-      const drafts = tiles.filter((t) => t.status === "draft");
+      const drafts = tiles.filter(
+        (t) => t.status === "draft" || t.status === "none",
+      );
       dispatch({ type: "APPROVE_ALL_SETUPS" });
       for (const t of drafts) {
         await callTool("approve_artifact", {
@@ -373,7 +454,24 @@ export function SetupsPage() {
   const renderTileImage = (t: SetupTile) => {
     const isRegen = regenerating.has(t.id);
     const bust = tileCacheBust[t.id];
-    if (isBatchBusy || isRegen || bust === undefined) {
+    // No image on disk yet → empty placeholder (no broken <img>).
+    if (bust === undefined && !isRegen && !isBatchBusy) {
+      return (
+        <div
+          className="setup-tile__image"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 11,
+            opacity: 0.5,
+          }}
+        >
+          Not generated
+        </div>
+      );
+    }
+    if (isBatchBusy || isRegen) {
       return (
         <div
           className="setup-tile__image"
@@ -385,7 +483,7 @@ export function SetupsPage() {
             opacity: 0.7,
           }}
         >
-          {isRegen ? "↻ regenerating…" : batch.kind === "generating" ? "⏳ generating…" : "…"}
+          {isRegen ? "↻ regenerating…" : "⏳ generating…"}
         </div>
       );
     }
@@ -399,8 +497,22 @@ export function SetupsPage() {
     );
   };
 
+  const selectedBust = selected ? tileCacheBust[selected.id] : undefined;
+  const selectedImgSrc = selected
+    ? `${setupImgPath(selected.id)}${selectedBust ? `?v=${selectedBust}` : ""}`
+    : "";
+  const selectedEditMode = selected ? setupEditMode[selected.id] === true : false;
+  const selectedBusy = selected ? regenerating.has(selected.id) || isBatchBusy : false;
+
   return (
     <div className="input-page" data-figma-node="436:33">
+      {setupOverlayOpen && selected && selectedBust !== undefined && (
+        <ImageOverlay
+          src={selectedImgSrc}
+          alt={`Setup ${selected.id}`}
+          onClose={() => setSetupOverlayOpen(false)}
+        />
+      )}
       {/* Batch-level progress / error banner */}
       {batch.kind === "generating" && (
         <div
@@ -477,7 +589,9 @@ export function SetupsPage() {
                 >
                   <div className="setup-tile__header">
                     <span className="setup-tile__id">{t.id}</span>
-                    <span className={`status-badge status-badge--${t.status}`}>{t.status}</span>
+                    {t.status !== "none" && (
+                      <span className={`status-badge status-badge--${t.status}`}>{t.status}</span>
+                    )}
                   </div>
                   {renderTileImage(t)}
                   <div className="setup-tile__footer">
@@ -510,86 +624,246 @@ export function SetupsPage() {
                 </div>
               ))}
             </div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                paddingTop: "var(--sp-2)",
+              }}
+            >
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={handleRegenerateRejected}
+                disabled={rejectedCount === 0 || isBatchBusy}
+                title={rejectedCount === 0 ? "No rejected setups to regenerate" : undefined}
+              >
+                Regenerate Rejected
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={handleApproveAll}
+                disabled={draftCount === 0}
+              >
+                Approve All
+              </button>
+              <span style={{ flex: 1 }} />
+              {(() => {
+                const missingCount = tiles.filter(
+                  (t) => tileCacheBust[t.id] === undefined,
+                ).length;
+                const allGenerated = missingCount === 0;
+                const someGenerated =
+                  missingCount > 0 && missingCount < tiles.length;
+                const label = allGenerated
+                  ? "Generate All"
+                  : someGenerated
+                    ? `Generate Remaining (${missingCount})`
+                    : "Generate All";
+                return (
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={handleGenerateAll}
+                    disabled={isBatchBusy || allGenerated}
+                    title={allGenerated ? "All setups already generated" : undefined}
+                  >
+                    {label}
+                  </button>
+                );
+              })()}
+            </div>
           </article>
         </div>
 
         {/* ───── Setup Detail ───── */}
         <div className="input-page__column" ref={setupCardRef}>
           <div className="section-header">
-            <span className="section-header__title" style={{ color: "var(--accent)" }}>
+            <span className="section-header__title" style={{ color: "#eaebec" }}>
               Setup Detail: {selected.id}
             </span>
           </div>
           <article className="card">
-            <div className="card__body" style={{ gap: "var(--sp-3)" }}>
-              <div className="detail-field">
-                <span className="detail-field__label">Scene / Mood</span>
-                <span className="detail-field__value">
-                  {selected.scene} / {selected.mood}
-                </span>
+            <div className="card__body" style={{ gap: "var(--sp-2)" }}>
+              <div style={{ display: "flex", gap: "var(--sp-4)", flexWrap: "wrap" }}>
+                <div className="detail-field">
+                  <span className="detail-field__label">Scene / Mood</span>
+                  <span className="detail-field__value">
+                    {selected.scene} / {selected.mood}
+                  </span>
+                </div>
+                <div className="detail-field">
+                  <span className="detail-field__label">Status</span>
+                  <span className="detail-field__value">
+                    {selected.status === "none" ? "not generated" : selected.status}
+                  </span>
+                </div>
               </div>
-              <div className="detail-field">
-                <span className="detail-field__label">Status</span>
-                <span className="detail-field__value">{selected.status}</span>
+
+              {/* Image — always visible, click to zoom. Locked to 16:9 via
+                  padding-bottom wrapper so the placeholder + image keep the
+                  same frame ratio. */}
+              <div style={{ position: "relative", width: "100%", paddingBottom: "56.25%" }}>
+                {selectedBust !== undefined ? (
+                  <img
+                    src={selectedImgSrc}
+                    alt={`Setup ${selected.id}`}
+                    onClick={() => setSetupOverlayOpen(true)}
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      borderRadius: 8,
+                      display: "block",
+                      background: "var(--border)",
+                      cursor: "zoom-in",
+                    }}
+                  />
+                ) : (
+                  <div
+                    className="placeholder-box"
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    {selectedBusy ? "Generating…" : "No setup image yet"}
+                  </div>
+                )}
               </div>
-              <div className="detail-field">
-                <span className="detail-field__label">Anchor Ref</span>
-                <span className="detail-field__value">anchor_loc_001 (matched)</span>
+
+              {/* Collapse toggle */}
+              <div style={{ display: "flex", alignItems: "center", height: 32 }}>
+                <button
+                  type="button"
+                  onClick={() => setSetupPromptOpen((o) => !o)}
+                  aria-expanded={setupPromptOpen}
+                  aria-controls="setup-prompt-body"
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "var(--text)",
+                    cursor: "pointer",
+                    padding: 0,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontSize: 11,
+                    letterSpacing: 0.4,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  <span aria-hidden style={{ display: "inline-block", width: 10 }}>
+                    {setupPromptOpen ? "▼" : "▶"}
+                  </span>
+                  <span>Prompt</span>
+                </button>
               </div>
-              <PromptCard
-                label={`Setup ${selected.id}`}
-                kind="setup"
-                entityId={selected.id.replace(/\//g, "_")}
-                collapsible
-                versions={setupGallery.versions}
-                selectedVersionId={setupSelectedVersionId}
-                onSelectVersion={setSetupSelectedVersionId}
-                prompt={setupPrompt}
-                promptUsed={setupGallery.versions[0]?.prompt ?? null}
-                onChange={setSetupPrompt}
-                onRegenerate={handleRegenerateSelected}
-                onAutoFill={handleSetupAutoFill}
-                autoFillBusy={assemble.busy}
-                busy={regenerating.has(selected.id) || isBatchBusy}
-                cacheBust={tileCacheBust[selected.id]}
-                editMode={setupEditMode[selected.id] === true}
-                onToggleEditMode={toggleSetupEdit}
-                editBaseId={setupEditBaseId[selected.id] ?? null}
-                onEditFromVersion={handleSetupEditFromVersion}
-              />
-              <ReferencePicker
-                entity_id={selected.id.replace(/\//g, "_")}
-                value={setupRefs[selected.id] ?? []}
-                onChange={(next) =>
-                  setSetupRefs((prev) => ({ ...prev, [selected.id]: next }))
-                }
-                lockedAutoRefs={[
-                  {
-                    parentLabel: "anchor",
-                    imageUrl: `/artifacts/anchor/${LOCATION_ID}.png`,
-                    kind: "anchor",
-                  },
-                ]}
-                label={`Refs for ${selected.id}`}
-                disabled={regenerating.has(selected.id) || isBatchBusy}
-              />
-              <button type="button" className="btn btn--ghost btn--block" onClick={handleCompare}>
-                ⇄ Compare with Anchor
-              </button>
+
+              {setupPromptOpen && (
+                <div id="setup-prompt-body" style={{ display: "flex", flexDirection: "column", gap: "var(--sp-2)" }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                      <label style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                        {selectedEditMode ? "What to change" : "Generation prompt"}
+                      </label>
+                      {!selectedEditMode && (
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          onClick={handleSetupAutoFill}
+                          disabled={assemble.busy || selectedBusy}
+                          style={{ fontSize: 11, padding: "2px 8px" }}
+                          title="Preview the prompt that would be sent, filled from the Location Bible"
+                        >
+                          {assemble.busy ? "…" : "✦ Auto-fill from Bibles"}
+                        </button>
+                      )}
+                    </div>
+                    <textarea
+                      value={setupPrompt}
+                      onChange={(e) => setSetupPrompt(e.target.value)}
+                      placeholder={
+                        selectedEditMode
+                          ? "Describe what to change… e.g. add golden-hour sunset through window"
+                          : "Auto-filled after first generation — edit to customise next run"
+                      }
+                      rows={3}
+                      disabled={selectedBusy}
+                      style={{
+                        width: "100%",
+                        resize: "vertical",
+                        fontFamily: "ui-monospace, Menlo, monospace",
+                        fontSize: 12,
+                        lineHeight: 1.45,
+                        background: "var(--bg-input, rgba(255,255,255,0.04))",
+                        border: "1px solid var(--border)",
+                        borderRadius: 4,
+                        padding: "6px 8px",
+                        color: "var(--text-primary)",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+
+                  <ReferencePicker
+                    entity_id={selected.id.replace(/\//g, "_")}
+                    bible_id={LOCATION_ID}
+                    setup_ids={tiles.map((t) => t.id)}
+                    value={setupRefs[selected.id] ?? []}
+                    onChange={(next) =>
+                      setSetupRefs((prev) => ({ ...prev, [selected.id]: next }))
+                    }
+                    lockedAutoRefs={[
+                      {
+                        parentLabel: "anchor",
+                        imageUrl: `/artifacts/anchor/${LOCATION_ID}.png`,
+                        kind: "anchor",
+                      },
+                    ]}
+                    label={`Refs for ${selected.id}`}
+                    disabled={selectedBusy}
+                  />
+                </div>
+              )}
+
+              {/* Edit + Regenerate — always visible */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => {
+                    if (!selectedEditMode) setSetupPromptOpen(true);
+                    toggleSetupEdit();
+                  }}
+                  disabled={selectedBusy}
+                  title={selectedEditMode ? "Exit edit mode" : "Edit current setup"}
+                >
+                  {selectedEditMode ? "Cancel" : "Edit"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={handleRegenerateSelected}
+                  disabled={selectedBusy || (selectedEditMode && setupPrompt.trim().length === 0)}
+                  title={selectedEditMode && setupPrompt.trim().length === 0 ? "Describe what to change" : undefined}
+                >
+                  {selectedBusy ? "Generating…" : selectedEditMode ? "Generate Edit" : "Regenerate"}
+                </button>
+              </div>
             </div>
           </article>
         </div>
       </div>
 
       <div className="page-footer">
-        <button
-          type="button"
-          className="btn btn--success"
-          onClick={handleApproveAll}
-          disabled={draftCount === 0}
-        >
-          Approve All ({draftCount})
-        </button>
         <span className="page-footer__spacer" />
         <span className="mini-label" style={{ marginRight: "var(--sp-2)" }}>
           {approvedCount} / {tiles.length} approved

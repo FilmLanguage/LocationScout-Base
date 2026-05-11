@@ -1,0 +1,153 @@
+/* Bible-build progress panel — Orchestrator StepCard visual language. */
+/* Uses @filmlanguage/tokens via CSS custom properties from styles.css. */
+
+.bible-progress {
+  display: flex;
+  justify-content: center;
+  padding: var(--sp-4, 24px);
+  max-width: 860px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.bible-progress__card {
+  width: 100%;
+  background: var(--surface, #131416);
+  border: 1px solid var(--blue-border, #4186f6);
+  border-radius: 8px;
+  padding: 16px 24px;
+  overflow: hidden;
+}
+
+.bible-progress__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding-bottom: 8px;
+}
+
+.bible-progress__title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bible-progress__eyebrow {
+  font-size: 11px;
+  letter-spacing: 2px;
+  line-height: 16px;
+  color: var(--accent, #f7e27e);
+  text-transform: uppercase;
+}
+
+.bible-progress__title {
+  font-family: var(--sans, inherit);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 24px;
+  color: var(--text, #eaebec);
+  margin: 0;
+}
+
+/* Badge (generating) */
+.bible-progress__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  background: rgba(21, 107, 244, 0.15);
+  border: 1px solid rgba(21, 107, 244, 0.4);
+  color: var(--blue, #156bf4);
+}
+
+.bible-progress__badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: bible-progress-pulse 1.5s ease-in-out infinite;
+}
+
+/* Loading copy */
+.bible-progress__loading-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+.bible-progress__detail {
+  font-size: 12px;
+  color: var(--text-muted, #a1a6aa);
+  margin: 0;
+}
+
+/* Progress list */
+.bible-progress__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 16px;
+}
+
+.bible-progress__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--text, #eaebec);
+  transition: opacity 0.3s ease-out;
+}
+
+.bible-progress__item--pending {
+  color: var(--text-muted, #a1a6aa);
+  font-weight: 400;
+}
+
+.bible-progress__icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.bible-progress__icon--done {
+  background: var(--green, #a6f77e);
+}
+
+.bible-progress__icon--active {
+  background: var(--blue, #156bf4);
+  animation: bible-progress-pulse 1.5s ease-in-out infinite;
+}
+
+.bible-progress__icon--pending {
+  background: transparent;
+  border: 2px solid var(--text-muted, #a1a6aa);
+}
+
+@keyframes bible-progress-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* fade-in entrance */
+.bible-progress .fade-in {
+  animation: bible-progress-fade-in 0.4s ease-out;
+}
+
+@keyframes bible-progress-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bible-progress .fade-in { animation: none; }
+  .bible-progress__badge-dot { animation: none; }
+  .bible-progress__icon--active { animation: none; }
+}

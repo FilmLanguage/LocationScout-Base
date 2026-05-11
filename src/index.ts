@@ -53,7 +53,10 @@ function createServer(): McpServer {
 }
 
 const app = express();
-app.use(express.json());
+// Bump body limit so `upload_reference` can accept base64-encoded images.
+// Default `express.json()` cap is ~100kb — anything larger returns 413.
+// 25mb covers typical phone/camera uploads after base64 inflation (~33%).
+app.use(express.json({ limit: "25mb" }));
 
 // CORS for local dev (Vite on :5176 → Express on :8083)
 app.use((_req, res, next) => {

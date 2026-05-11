@@ -1,5 +1,12 @@
 @import "@filmlanguage/tokens/css";
 
+/* Focus ring uses the system blue — high-visibility, palette-locked, matches
+   the primary CTA accent in the Design System. Overrides the tokens default
+   (#7F8081 grey) which is too low-contrast on dark backgrounds. */
+:root {
+  --focus-ring: var(--blue);
+}
+
 *,
 *::before,
 *::after {
@@ -1035,8 +1042,10 @@ h3 {
 }
 
 .setup-tile--selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  /* Off-white selection ring — palette-locked (#EAEBEC), exactly 1px (just
+     re-colours the existing tile border; no extra box-shadow so the ring
+     does not visually double-up). */
+  border-color: var(--text);
 }
 
 button.btn:disabled,

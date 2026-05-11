@@ -11,12 +11,13 @@
  * after floorplan is ready.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { callTool, pollTask, type TaskStatus } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
 import { PromptCard } from "../components/PromptCard";
 import { ReferencePicker, type ReferenceRef } from "../components/ReferencePicker";
+import { ImageOverlay } from "../components/ImageOverlay";
 import { useGallery } from "../hooks/useGallery";
 import { useAssemblePrompt } from "../hooks/useAssemblePrompt";
 
@@ -57,6 +58,29 @@ export function ReferencesPage() {
   const [anchor, setAnchor] = useState<AnchorState>({ kind: "checking" });
   const [floorplan, setFloorplan] = useState<AnchorState>({ kind: "checking" });
   const [isometric, setIsometric] = useState<AnchorState>({ kind: "checking" });
+  const [floorplanOverlayOpen, setFloorplanOverlayOpen] = useState(false);
+  const [isometricOverlayOpen, setIsometricOverlayOpen] = useState(false);
+  const [anchorOverlayOpen, setAnchorOverlayOpen] = useState(false);
+  // Iso prompt starts closed so the Floorplan card can lock to the closed
+  // Isometric height before the user expands it.
+  const [isoPromptOpen, setIsoPromptOpen] = useState(false);
+  const [anchorPromptOpen, setAnchorPromptOpen] = useState(true);
+
+  // Floorplan card pins to the height the Isometric column has while its
+  // prompt panel is closed — so Floorplan stays the same regardless of
+  // whether the user expands/collapses the Isometric prompt.
+  const [floorplanLockedHeight, setFloorplanLockedHeight] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    if (isoPromptOpen) return; // only measure in the closed state
+    const el = isometricCardRef.current;
+    if (!el) return;
+    const measure = () => setFloorplanLockedHeight(el.getBoundingClientRect().height);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isoPromptOpen, isometric.kind]);
 
   // User-editable prompts (pre-filled from the latest sidecar entry)
   const [isometricPrompt, setIsometricPrompt] = useState("");
@@ -497,29 +521,48 @@ export function ReferencesPage() {
 
   return (
     <div className="input-page" data-figma-node="433:26">
-      <div className="banner banner--gate">
-        <span className="banner__icon" aria-hidden>⚠</span>
-        <span className="banner__title">
-          GATE 3: Anchor Approved? | VLM Audit (gemini-2.5-pro vision) | LPIPS &lt; 0.4 | SSIM &gt; 0.6
-        </span>
-        <span className="banner__spacer" />
-        <span className="badge badge--draft">Attempt 1 / 3 (max retry)</span>
-      </div>
+      {floorplanOverlayOpen && floorplan.kind === "ready" && (
+        <ImageOverlay
+          src={`${FLOORPLAN_IMG_PATH}?v=${floorplan.cacheBust}`}
+          onClose={() => setFloorplanOverlayOpen(false)}
+        />
+      )}
+      {isometricOverlayOpen && isometric.kind === "ready" && (
+        <ImageOverlay
+          src={`${ISOMETRIC_IMG_PATH}?v=${isometric.cacheBust}`}
+          onClose={() => setIsometricOverlayOpen(false)}
+        />
+      )}
+      {anchorOverlayOpen && anchor.kind === "ready" && (
+        <ImageOverlay
+          src={`${ANCHOR_IMG_PATH}?v=${anchor.cacheBust}`}
+          onClose={() => setAnchorOverlayOpen(false)}
+        />
+      )}
 
       {/* ───── Top row: Floorplan + Isometric ───── */}
       <div className="columns-2">
-        <div className="input-page__column">
+        <div
+          className="input-page__column"
+          style={floorplanLockedHeight ? { height: floorplanLockedHeight } : undefined}
+        >
           <div className="section-header">
-            <span className="section-header__title">Floorplan + Light Map</span>
+            <span className="section-header__title">Floorplan</span>
             <span className="tech-badge tech-badge--muted">PYTHON + FFmpeg</span>
           </div>
-          <article className="card">
-            <div className="card__body" style={{ gap: "var(--sp-2)" }}>
+          <article className="card" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+            <div className="card__body" style={{ gap: "var(--sp-2)", flex: 1, minHeight: 0 }}>
               {floorplan.kind === "ready" ? (
                 <img
                   src={`${FLOORPLAN_IMG_PATH}?v=${floorplan.cacheBust}`}
                   alt="Floorplan"
-                  style={{ width: "100%", borderRadius: 6 }}
+                  onClick={() => setFloorplanOverlayOpen(true)}
+                  style={{
+                    width: "100%",
+                    borderRadius: 8,
+                    display: "block",
+                    cursor: "zoom-in",
+                  }}
                 />
               ) : floorplan.kind === "error" ? (
                 <div className="placeholder-box placeholder-box--tall" style={{ borderColor: "rgba(220,60,60,0.5)" }}>
@@ -539,12 +582,12 @@ export function ReferencesPage() {
                   )}
                 </div>
               )}
-              <div className="metric-row">
+              <div className="metric-row" style={{ marginTop: "auto" }}>
                 <span className="metric-row__label">{r.floorplanSize}</span>
                 <span className="page-footer__spacer" />
                 <button
                   type="button"
-                  className="btn btn--ghost btn--sm"
+                  className="btn btn--primary"
                   disabled={floorplan.kind === "generating"}
                   onClick={() => runFloorplan()}
                 >
@@ -558,82 +601,416 @@ export function ReferencesPage() {
         <div className="input-page__column" ref={isometricCardRef}>
           <div className="section-header">
             <span className="section-header__title">Isometric Reference</span>
-            <span className="tech-badge tech-badge--gold">NANOBANANA</span>
+            <span className="tech-badge tech-badge--muted">NANOBANANA</span>
           </div>
           <article className="card">
-            <div className="card__body">
+            <div className="card__body" style={{ gap: "var(--sp-2)" }}>
               {isometric.kind === "error" && (
                 <div className="placeholder-box" style={{ borderColor: "rgba(220,60,60,0.5)", color: "var(--red)", marginBottom: "var(--sp-2)" }}>
                   ✗ {isometric.message}
                 </div>
               )}
-              <PromptCard
-                label="Isometric"
-                kind="isometric"
-                entityId={LOCATION_ID}
-                collapsible
-                versions={isometricGallery.versions}
-                selectedVersionId={isometricSelectedId}
-                onSelectVersion={setIsometricSelectedId}
-                prompt={isometricPrompt}
-                promptUsed={isometricPromptUsed}
-                onChange={setIsometricPrompt}
-                onRegenerate={() => runIsometric(isometricPrompt || undefined)}
-                onAutoFill={handleIsometricAutoFill}
-                autoFillBusy={assemble.busy}
-                busy={isometric.kind === "generating"}
-                disabled={floorplan.kind !== "ready"}
-                cacheBust={isometric.kind === "ready" ? isometric.cacheBust : undefined}
-                editMode={isometricEditMode}
-                onToggleEditMode={toggleIsometricEdit}
-                editBaseId={isometricEditBaseId}
-                onEditFromVersion={handleIsometricEditFromVersion}
-                statusLine={
-                  isometric.kind === "generating"
+
+              {/* Image — always visible (independent of prompt collapse) */}
+              {isometric.kind === "ready" ? (
+                <img
+                  src={`${ISOMETRIC_IMG_PATH}?v=${isometric.cacheBust}`}
+                  alt="Isometric preview"
+                  onClick={() => setIsometricOverlayOpen(true)}
+                  style={{ width: "100%", borderRadius: 8, display: "block", background: "var(--border)", cursor: "zoom-in" }}
+                />
+              ) : (
+                <div className="placeholder-box placeholder-box--tall" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {isometric.kind === "generating"
                     ? `Generating isometric… ${isometric.status?.current_step ?? ""}`
-                    : isometric.kind === "ready"
-                    ? undefined
                     : floorplan.kind === "ready"
-                    ? "Checking…"
-                    : "Waiting for floorplan…"
-                }
-              />
+                      ? "Checking…"
+                      : "Waiting for floorplan…"}
+                </div>
+              )}
+
               {isometric.kind === "generating" && isometric.task_id && (
                 <button
                   type="button"
                   className="btn btn--ghost btn--sm"
-                  style={{ alignSelf: "flex-start", marginTop: "var(--sp-2)" }}
+                  style={{ alignSelf: "flex-start" }}
                   onClick={() => isometric.kind === "generating" && isometric.task_id && cancelTask(isometric.task_id)}
                 >
                   Cancel
                 </button>
               )}
-              <ReferencePicker
-                entity_id={LOCATION_ID}
-                value={isometricRefs}
-                onChange={setIsometricRefs}
-                lockedAutoRefs={
-                  floorplan.kind === "ready"
-                    ? [
-                        {
-                          parentLabel: "floorplan",
-                          imageUrl: `${FLOORPLAN_IMG_PATH}?v=${floorplan.cacheBust}`,
-                          kind: "external",
-                        },
-                      ]
-                    : undefined
-                }
-                autoCascadeHint={floorplan.kind !== "ready" ? ["floorplan (auto)"] : undefined}
-                label="Refs for isometric"
-                disabled={isometric.kind === "generating"}
-              />
+
+              {/* Collapse toggle — controls prompt + references visibility */}
+              <div style={{ display: "flex", alignItems: "center", height: 32 }}>
+                <button
+                  type="button"
+                  onClick={() => setIsoPromptOpen((o) => !o)}
+                  aria-expanded={isoPromptOpen}
+                  aria-controls="isometric-prompt-body"
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "var(--text)",
+                    cursor: "pointer",
+                    padding: 0,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontSize: 11,
+                    letterSpacing: 0.4,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  <span aria-hidden style={{ display: "inline-block", width: 10 }}>
+                    {isoPromptOpen ? "▼" : "▶"}
+                  </span>
+                  <span>Prompt</span>
+                </button>
+              </div>
+
+              {isoPromptOpen && (
+                <div id="isometric-prompt-body" style={{ display: "flex", flexDirection: "column", gap: "var(--sp-2)" }}>
+                  {/* Prompt textarea */}
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                      <label style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                        {isometricEditMode ? "What to change" : "Generation prompt"}
+                      </label>
+                      {!isometricEditMode && (
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          onClick={handleIsometricAutoFill}
+                          disabled={assemble.busy || isometric.kind === "generating"}
+                          style={{ fontSize: 11, padding: "2px 8px" }}
+                          title="Preview the prompt that would be sent, filled from the Location Bible"
+                        >
+                          {assemble.busy ? "…" : "✦ Auto-fill from Bibles"}
+                        </button>
+                      )}
+                    </div>
+                    <textarea
+                      value={isometricPrompt}
+                      onChange={(e) => setIsometricPrompt(e.target.value)}
+                      placeholder={
+                        isometricEditMode
+                          ? "Describe what to change… e.g. add golden-hour sunset through window"
+                          : "Auto-filled after first generation — edit to customise next run"
+                      }
+                      rows={3}
+                      disabled={isometric.kind === "generating" || floorplan.kind !== "ready"}
+                      style={{
+                        width: "100%",
+                        resize: "vertical",
+                        fontFamily: "ui-monospace, Menlo, monospace",
+                        fontSize: 12,
+                        lineHeight: 1.45,
+                        background: "var(--bg-input, rgba(255,255,255,0.04))",
+                        border: "1px solid var(--border)",
+                        borderRadius: 4,
+                        padding: "6px 8px",
+                        color: "var(--text-primary)",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+
+                  {/* References — moved above the action buttons */}
+                  <ReferencePicker
+                    entity_id={LOCATION_ID}
+                    bible_id={LOCATION_ID}
+                    setup_ids={state.setups.tiles.map((t) => t.id)}
+                    value={isometricRefs}
+                    onChange={setIsometricRefs}
+                    lockedAutoRefs={
+                      floorplan.kind === "ready"
+                        ? [
+                            {
+                              parentLabel: "floorplan",
+                              imageUrl: `${FLOORPLAN_IMG_PATH}?v=${floorplan.cacheBust}`,
+                              kind: "external",
+                            },
+                          ]
+                        : undefined
+                    }
+                    autoCascadeHint={floorplan.kind !== "ready" ? ["floorplan (auto)"] : undefined}
+                    label="Refs for isometric"
+                    disabled={isometric.kind === "generating"}
+                  />
+
+                </div>
+              )}
+
+              {/* Edit + Regenerate — always visible (outside collapse) */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => {
+                    // Entering edit mode → ensure prompt panel is open so the
+                    // edit textarea is visible. Cancel keeps current state.
+                    if (!isometricEditMode) setIsoPromptOpen(true);
+                    toggleIsometricEdit();
+                  }}
+                  disabled={isometric.kind === "generating" || floorplan.kind !== "ready"}
+                  title={isometricEditMode ? "Exit edit mode" : "Edit current isometric"}
+                >
+                  {isometricEditMode ? "Cancel" : "Edit"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => runIsometric(isometricPrompt || undefined)}
+                  disabled={
+                    isometric.kind === "generating" ||
+                    floorplan.kind !== "ready" ||
+                    (isometricEditMode && isometricPrompt.trim().length === 0)
+                  }
+                  title={
+                    floorplan.kind !== "ready"
+                      ? "Disabled — gate not met"
+                      : isometricEditMode && isometricPrompt.trim().length === 0
+                        ? "Describe what to change"
+                        : undefined
+                  }
+                >
+                  {isometric.kind === "generating"
+                    ? "Generating…"
+                    : isometricEditMode
+                      ? "Generate Edit"
+                      : "Regenerate"}
+                </button>
+              </div>
             </div>
           </article>
         </div>
       </div>
 
-      {/* ───── Bottom row: Setup Extraction + Anchor Image ───── */}
+      {/* ───── Bottom row: Anchor Image + Setup Extraction (swapped) ───── */}
       <div className="columns-2">
+        <div className="input-page__column" ref={anchorCardRef}>
+          <div className="section-header">
+            <span className="section-header__title">Anchor Image</span>
+            <span className="tech-badge tech-badge--muted">NANOBANANA</span>
+          </div>
+          <article className="card">
+            <div className="card__body" style={{ gap: "var(--sp-2)" }}>
+              {anchor.kind === "error" && (
+                <div className="placeholder-box" style={{ borderColor: "rgba(220,60,60,0.5)", color: "var(--red)", marginBottom: "var(--sp-2)" }}>
+                  ✗ {anchor.message}
+                </div>
+              )}
+
+              {/* 16:9 wrapper (padding-bottom trick) — reliable across flex parents */}
+              <div style={{ position: "relative", width: "100%", paddingBottom: "56.25%" }}>
+                {anchor.kind === "ready" ? (
+                  <img
+                    src={`${ANCHOR_IMG_PATH}?v=${anchor.cacheBust}`}
+                    alt="Anchor reference"
+                    onClick={() => setAnchorOverlayOpen(true)}
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      borderRadius: 8,
+                      display: "block",
+                      background: "var(--border)",
+                      cursor: "zoom-in",
+                    }}
+                  />
+                ) : (
+                  <div
+                    className="placeholder-box"
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 8,
+                    }}
+                  >
+                  {anchor.kind === "generating" && anchor.status?.current_step && (
+                    <span style={{ fontSize: 12 }}>{anchor.status.current_step}</span>
+                  )}
+                  {anchor.kind === "generating" && anchor.status?.progress !== undefined && (
+                    <>
+                      <div style={{ width: "60%", height: 4, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
+                        <div
+                          style={{
+                            width: `${Math.round((anchor.status.progress ?? 0) * 100)}%`,
+                            height: "100%",
+                            background: "var(--accent)",
+                            transition: "width 200ms ease",
+                          }}
+                        />
+                      </div>
+                      <span style={{ fontSize: 11, opacity: 0.7 }}>
+                        {Math.round((anchor.status.progress ?? 0) * 100)}%
+                      </span>
+                    </>
+                  )}
+                  {anchor.kind === "checking" && <span style={{ fontSize: 12 }}>Checking…</span>}
+                  {anchor.kind === "missing" && <span style={{ fontSize: 12, opacity: 0.7 }}>No anchor yet</span>}
+                  </div>
+                )}
+              </div>
+
+              {anchor.kind === "generating" && anchor.task_id && (
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  style={{ alignSelf: "flex-start" }}
+                  onClick={() => anchor.kind === "generating" && anchor.task_id && cancelTask(anchor.task_id)}
+                >
+                  Cancel
+                </button>
+              )}
+
+              {/* Collapse toggle */}
+              <div style={{ display: "flex", alignItems: "center", height: 32 }}>
+                <button
+                  type="button"
+                  onClick={() => setAnchorPromptOpen((o) => !o)}
+                  aria-expanded={anchorPromptOpen}
+                  aria-controls="anchor-prompt-body"
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "var(--text)",
+                    cursor: "pointer",
+                    padding: 0,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontSize: 11,
+                    letterSpacing: 0.4,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  <span aria-hidden style={{ display: "inline-block", width: 10 }}>
+                    {anchorPromptOpen ? "▼" : "▶"}
+                  </span>
+                  <span>Prompt</span>
+                </button>
+              </div>
+
+              {anchorPromptOpen && (
+                <div id="anchor-prompt-body" style={{ display: "flex", flexDirection: "column", gap: "var(--sp-2)" }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                      <label style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                        {anchorEditMode ? "What to change" : "Generation prompt"}
+                      </label>
+                      {!anchorEditMode && (
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          onClick={handleAnchorAutoFill}
+                          disabled={assemble.busy || anchor.kind === "generating"}
+                          style={{ fontSize: 11, padding: "2px 8px" }}
+                          title="Preview the prompt that would be sent, filled from the Location Bible"
+                        >
+                          {assemble.busy ? "…" : "✦ Auto-fill from Bibles"}
+                        </button>
+                      )}
+                    </div>
+                    <textarea
+                      value={anchorPrompt}
+                      onChange={(e) => setAnchorPrompt(e.target.value)}
+                      placeholder={
+                        anchorEditMode
+                          ? "Describe what to change… e.g. add golden-hour sunset through window"
+                          : "Auto-filled after first generation — edit to customise next run"
+                      }
+                      rows={3}
+                      disabled={anchor.kind === "generating" || isometric.kind !== "ready"}
+                      style={{
+                        width: "100%",
+                        resize: "vertical",
+                        fontFamily: "ui-monospace, Menlo, monospace",
+                        fontSize: 12,
+                        lineHeight: 1.45,
+                        background: "var(--bg-input, rgba(255,255,255,0.04))",
+                        border: "1px solid var(--border)",
+                        borderRadius: 4,
+                        padding: "6px 8px",
+                        color: "var(--text-primary)",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+
+                  <ReferencePicker
+                    entity_id={LOCATION_ID}
+                    bible_id={LOCATION_ID}
+                    setup_ids={state.setups.tiles.map((t) => t.id)}
+                    value={anchorRefs}
+                    onChange={setAnchorRefs}
+                    lockedAutoRefs={
+                      isometric.kind === "ready"
+                        ? [
+                            {
+                              parentLabel: "isometric",
+                              imageUrl: `${ISOMETRIC_IMG_PATH}?v=${isometric.cacheBust}`,
+                              kind: "isometric",
+                            },
+                          ]
+                        : undefined
+                    }
+                    autoCascadeHint={isometric.kind !== "ready" ? ["isometric (auto)"] : undefined}
+                    label="Refs for anchor"
+                    disabled={anchor.kind === "generating" || anchor.kind === "checking"}
+                  />
+                </div>
+              )}
+
+              {/* Edit + Regenerate — always visible */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => {
+                    if (!anchorEditMode) setAnchorPromptOpen(true);
+                    toggleAnchorEdit();
+                  }}
+                  disabled={anchor.kind === "generating" || isometric.kind !== "ready"}
+                  title={anchorEditMode ? "Exit edit mode" : "Edit current anchor"}
+                >
+                  {anchorEditMode ? "Cancel" : "Edit"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={handleRegenerateAnchor}
+                  disabled={
+                    anchor.kind === "generating" ||
+                    anchor.kind === "checking" ||
+                    isometric.kind !== "ready" ||
+                    (anchorEditMode && anchorPrompt.trim().length === 0)
+                  }
+                  title={
+                    isometric.kind !== "ready"
+                      ? "Disabled — gate not met"
+                      : anchorEditMode && anchorPrompt.trim().length === 0
+                        ? "Describe what to change"
+                        : undefined
+                  }
+                >
+                  {anchor.kind === "generating"
+                    ? "Generating…"
+                    : anchorEditMode
+                      ? "Generate Edit"
+                      : "Regenerate"}
+                </button>
+              </div>
+            </div>
+          </article>
+        </div>
+
         <div className="input-page__column">
           <div className="section-header">
             <span className="section-header__title">Setup Extraction</span>
@@ -657,95 +1034,9 @@ export function ReferencesPage() {
             </div>
           </article>
         </div>
-
-        <div className="input-page__column" ref={anchorCardRef}>
-          <div className="section-header">
-            <span className="section-header__title">Anchor Image</span>
-            <span className="tech-badge tech-badge--gold">NANOBANANA</span>
-          </div>
-          <article className="card">
-            <div className="card__body" style={{ gap: "var(--sp-3)" }}>
-              {anchor.kind !== "ready" ? renderAnchorSlot() : null}
-              <PromptCard
-                label="Anchor"
-                kind="anchor"
-                entityId={LOCATION_ID}
-                collapsible
-                versions={anchorGallery.versions}
-                selectedVersionId={anchorSelectedId}
-                onSelectVersion={setAnchorSelectedId}
-                prompt={anchorPrompt}
-                promptUsed={anchorPromptUsed}
-                onChange={setAnchorPrompt}
-                onRegenerate={handleRegenerateAnchor}
-                onAutoFill={handleAnchorAutoFill}
-                autoFillBusy={assemble.busy}
-                busy={anchor.kind === "generating" || anchor.kind === "checking"}
-                disabled={isometric.kind !== "ready"}
-                cacheBust={anchor.kind === "ready" ? anchor.cacheBust : undefined}
-                editMode={anchorEditMode}
-                onToggleEditMode={toggleAnchorEdit}
-                editBaseId={anchorEditBaseId}
-                onEditFromVersion={handleAnchorEditFromVersion}
-              />
-              <ReferencePicker
-                entity_id={LOCATION_ID}
-                value={anchorRefs}
-                onChange={setAnchorRefs}
-                lockedAutoRefs={
-                  isometric.kind === "ready"
-                    ? [
-                        {
-                          parentLabel: "isometric",
-                          imageUrl: `${ISOMETRIC_IMG_PATH}?v=${isometric.cacheBust}`,
-                          kind: "isometric",
-                        },
-                      ]
-                    : undefined
-                }
-                autoCascadeHint={isometric.kind !== "ready" ? ["isometric (auto)"] : undefined}
-                label="Refs for anchor"
-                disabled={anchor.kind === "generating" || anchor.kind === "checking"}
-              />
-              <span className="section-label">VLM Audit</span>
-              <div className="score-group">
-                <div className="score">
-                  <span className="score__label">LPIPS</span>
-                  <span className={`score__value ${r.vlmAudit.lpips < 0.4 ? "score__value--good" : "score__value--bad"}`}>
-                    {r.vlmAudit.lpips.toFixed(2)}
-                  </span>
-                </div>
-                <div className="score">
-                  <span className="score__label">SSIM</span>
-                  <span className={`score__value ${r.vlmAudit.ssim > 0.6 ? "score__value--good" : "score__value--bad"}`}>
-                    {r.vlmAudit.ssim.toFixed(2)}
-                  </span>
-                </div>
-                <div className="score">
-                  <span className="score__label">Bible match</span>
-                  <span className="score__value">{r.vlmAudit.bibleMatch}%</span>
-                </div>
-                <div className="score">
-                  <span className="score__label">Anachronisms</span>
-                  <span className={`score__value ${r.vlmAudit.anachronismsFound === 0 ? "score__value--good" : "score__value--bad"}`}>
-                    {r.vlmAudit.anachronismsFound} found
-                  </span>
-                </div>
-              </div>
-            </div>
-          </article>
-        </div>
       </div>
 
       <div className="page-footer">
-        <button
-          type="button"
-          className="btn btn--ghost"
-          onClick={handleRegenerateAnchor}
-          disabled={isGenerating}
-        >
-          {isGenerating ? "Generating…" : "Regenerate Anchor"}
-        </button>
         <span className="page-footer__spacer" />
         <button
           type="button"
@@ -761,3 +1052,4 @@ export function ReferencesPage() {
     </div>
   );
 }
+

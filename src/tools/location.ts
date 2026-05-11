@@ -684,7 +684,14 @@ export function registerLocationTools(server: McpServer) {
             });
 
             const promptForAttempt = (basePrompt + correctionHint).slice(0, 2000);
-            const resolvedModel = resolveModel("ANCHOR", generation_params?.model, imageUrls.length > 0);
+            let resolvedModel = resolveModel("ANCHOR", generation_params?.model, imageUrls.length > 0);
+            // When the anchor pipeline runs text-to-image (no refs), strip a
+            // trailing `/edit` from any env- or override-pinned model — the
+            // /edit FAL endpoints require `image_urls` and silently return 0
+            // images when called without refs.
+            if (imageUrls.length === 0 && resolvedModel.endsWith("/edit")) {
+              resolvedModel = resolvedModel.slice(0, -"/edit".length);
+            }
             // Ref-strength policy for anchor (run-019 I5): the isometric is attached
             // as a SPATIAL LAYOUT GUIDE only — prompt must dominate so the output
             // reads as a photoreal eye-level photograph, not an isometric illustration.
@@ -697,6 +704,7 @@ export function registerLocationTools(server: McpServer) {
               model: resolvedModel,
               image_urls: imageUrls,
               image_ref_strength: refStrength,
+              aspect_ratio: "16:9",
             });
 
             if (result.images.length === 0) {
@@ -1385,6 +1393,7 @@ export function registerLocationTools(server: McpServer) {
             const result = await generateImage({
               prompt,
               model: resolvedModel,
+              aspect_ratio: "16:9",
               ...(imageUrls.length > 0 ? { image_urls: imageUrls } : {}),
               ...(editingSetup ? { image_ref_strength: 0.85 } : {}),
             });
