@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", ["INTER_AGENT_TOKEN", "VITE_"]);
   const token = env.INTER_AGENT_TOKEN || env.VITE_AGENT_TOKEN || "";
   const proxyConfig = {
-    target: "http://localhost:8080",
+    target: "http://127.0.0.1:8080",
     changeOrigin: true,
     configure: (proxy: { on: (event: string, cb: (req: { setHeader: (k: string, v: string) => void }) => void) => void }) => {
       if (!token) return;
@@ -21,6 +21,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     root: ".",
     server: {
+      host: '127.0.0.1',
       port: 5176,
       proxy: {
         "/mcp": proxyConfig,
