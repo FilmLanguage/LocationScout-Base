@@ -28,17 +28,56 @@ The **Location Scout** researches locations, creates Location Bibles, generates 
 | 1AD | `agent://1ad/film-ir/{project_id}` |
 | Director | `agent://director/vision/dfv/{project_id}` |
 
-## Implementation status: COMPLETE
+## Who depends on this agent
 
-All 20 domain tools + 9 common tools (29 total) + 8 resources are implemented.
+- **Shot Generation** — reads Location Bible + Anchor + Mood States for visual consistency (ConsisID prompt context)
 
-## Key patterns for other agents to follow
+## Current implementation
 
-1. **Tool registration**: `src/tools/location.ts` — Zod schemas, hints, structured responses
+| File | Status | What it does |
+|------|--------|--------------|
+| `src/index.ts` | ✓ Done | Express + MCP server, 25MB body limit (base64 images), CORS, inter-agent auth |
+| `src/tools/location.ts` | ✓ Done | 25 domain tools: scout, research_era, write_bible, generate_anchor, create_mood_states, create_floorplan, extract_setups, generate_setup_images, check_era_accuracy, check_consistency, compare_with_anchor, + prompt assembly / mood helpers |
+| `src/tools/references.ts` | ✓ Done | 3 reference tools: upload_reference, list_user_references, list_location_images |
+| `src/tools/common.ts` | ✓ Done | 9 shared FLACP tools (ping, approve, reject, task management) |
+| `src/resources/location.ts` | ✓ Done | 10 MCP resources: bible, anchor, mood, floorplan, isometric, comparison, setup, task, research, schema |
+| `src/lib/db.ts` | ✓ Done | Yandex PG adapter — PRIMARY write-path; v2 tables: `location_bibles`, `location_research_packs`, `mood_states`, `floorplans`, `location_setups`; circuit breaker (5 failures → 30s open) |
+| `src/lib/storage.ts` | ✓ Done | Multi-tier artifact storage: memory → disk → S3 |
+| `src/lib/mcp-resource-client.ts` | ✓ Done | Reads upstream: 1AD film-ir, Director location-vision via MCP |
+| `src/lib/api-client.ts` | ✓ Done | FAL.ai image generation + Anthropic LLM completion |
+| `src/lib/gemini-vision.ts` | ✓ Done | Anchor validation via Gemini Vision API |
+| `src/lib/prompt-assembly.ts` | ✓ Done | Builds prompt variables for anchor / isometric / setup generation |
+| `src/prompts/` | ✓ Done | 15 markdown prompts + `prompts-manifest.json` (research, bible, anchor, mood, setup, validation) |
+| `_schemas/` | ✓ Synced | `@filmlanguage/schemas` incl. `LocationBibleSchema`, `MoodStateSchema`, `ResearchPackSchema` |
+
+## Key patterns (reference implementation)
+
+1. **Tool registration**: `src/tools/location.ts` — Zod input schemas, structured hint responses
 2. **Resource registration**: `src/resources/location.ts` — URI templates, mime types
-3. **Schema usage**: `_schemas/src/` — import types, validate inputs/outputs
+3. **DB-first storage**: `src/lib/db.ts` + `src/lib/storage.ts` — write to PG, replicate to S3
 4. **Error handling**: `src/lib/errors.ts` — Film Language error codes
-5. **Swagger/OpenAPI**: `src/swagger.ts` — auto-generated docs
+5. **VLM validation**: `src/lib/anchor-validator.ts` — Gemini Vision checks anchor against Bible
+
+## Tool flow
+
+```
+scout_location({project_id, location_id})         [async composite]
+  ├── readAgentResource(AGENT_1AD_URL, film-ir)    → location brief
+  ├── readAgentResource(AGENT_DIRECTOR_URL, location-vision) → director notes
+  ├── research_era(...)   → research_pack (DB: v2.location_research_packs)
+  ├── write_bible(...)    → location_bible (DB: v2.location_bibles)
+  ├── generate_anchor(...)
+  │     ├── prompt_assembly.buildAnchorVars(bible)
+  │     ├── FAL.ai image generation
+  │     ├── gemini-vision validate anchor vs bible
+  │     └── storage.saveBlobTwoPhase (S3 + v2.blobs)
+  └── create_floorplan(...)  → floorplan (DB: v2.floorplans)
+
+create_mood_states({project_id, location_id, scene_ids})
+  ├── readArtifact("bible")   [local / DB]
+  ├── for each scene: LLM → MoodStateSchema.safeParse
+  └── saveArtifact("mood", state) → DB: v2.mood_states
+```
 
 ## Tests
 
@@ -50,65 +89,39 @@ Unit tests run via `npm test` (default vitest). Inter-tool name parity runs via 
 All shared documentation lives in `../ai-stanislavsky-workspace/docs/`. Full docs index with descriptions → workspace `CLAUDE.md` (canonical).
 <!-- WORKSPACE-DOCS-END -->
 
-## Development
+## Local development
 
 ```bash
-npm install && npm run dev
+# Start 1AD-Base and Director-Base first (LocationScout reads from both)
+cd ../1AD-Base && npm start          # :8081
+cd ../Director-Base && npm start     # :8082
+
+cd ../LocationScout-Base
+npm install    # once
+npm run dev    # tsx watch, hot reload
 ```
 
-
-## Figma workflow (Phase 10: UI)
-
-When building the UI panel for this agent, follow the 4-step Figma workflow.
-
-### Step 1: Draft in Figma
-
-Use the Figma MCP tools to create the initial mockup:
-
+Env vars required (see `.env`):
 ```
-get_design_context  — read existing narrativity-UI layout for context
-use_figma           — create agent panel components via Plugin API
-get_screenshot      — capture result for review
+PORT=8085
+ANTHROPIC_API_KEY=sk-ant-...
+FAL_KEY=...
+GEMINI_API_KEY=...
+AGENT_1AD_URL=http://localhost:8081
+AGENT_DIRECTOR_URL=http://localhost:8082
+# Yandex PG (optional for local dev — agent degrades gracefully without it)
+YANDEX_DB_HOST=...
+YANDEX_DB_NAME=filmlanguage
+YANDEX_DB_USER=...
+YANDEX_DB_PASSWORD=...
 ```
 
-**Figma file**: `https://www.figma.com/design/PnAhZwUJJmtTBRJWZh08ed/narrativity-UI`
-
-Start by reading the existing Narrativity Editor layout (`get_design_context`), then create the agent panel inside it. Follow:
-- Agent panel pattern from `../ai-stanislavsky-workspace/docs/ui-architecture.md`
-- Color tokens, typography, spacing from `../ai-stanislavsky-workspace/docs/design-system.md`
-- Interactive states (8-state model) and motion tokens from the same design system
-
-### Step 2: Refinement
-
-Manual polish in Figma: add states (hover, focus, disabled, loading, error, success), micro-interactions, edge cases. Use `search_design_system` to find reusable components.
-
-### Step 3: Handoff
-
-Extract structure from Figma to code:
-- `get_design_context` with node ID — get code + assets for specific components
-- `get_variable_defs` — extract design tokens used
-- `get_metadata` — get layer structure
-
-### Step 4: Assembly
-
-Build the React UI component from the Figma handoff. Deploy to Narrativity Editor (Replit).
-
-### Design rules
-
-- **Bible First rule**: generation UI controls disabled until Bible has `approval_status: "approved"`
-- **Gate visualization**: red border + badge when gate blocks downstream
-- **Negative list**: always red tags (`--red`), never collapsible
-- **Delta display**: inherited values dimmed, overrides highlighted with arrows
-- Reduced motion: mandatory `@media (prefers-reduced-motion: reduce)`
-- All interactive elements: declare which of 8 states apply (use state matrix template)
-- Touch targets: 44x44px minimum
-- Color contrast: 4.5:1 text, 3:1 UI components
 
 ## Figma
 
+Follow the 4-step UI workflow in `docs/canonical/ui-architecture.md` and design rules in `docs/canonical/design-system.md`.
+
 | Resource | URL |
 |----------|-----|
-| **Design System** (all agents) | [https://www.figma.com/design/PnAhZwUJJmtTBRJWZh08ed/narrativity-UI?node-id=326-2](https://www.figma.com/design/PnAhZwUJJmtTBRJWZh08ed/narrativity-UI?node-id=326-2) |
-| **Location Scout [Claude]** (this agent) | [https://www.figma.com/design/PnAhZwUJJmtTBRJWZh08ed/narrativity-UI?node-id=264-800](https://www.figma.com/design/PnAhZwUJJmtTBRJWZh08ed/narrativity-UI?node-id=264-800) |
-
-Design tokens come from the Design System page via `@filmlanguage/tokens` (in `_tokens/`). Never hardcode color/font values — import from `tokens.ts`.
+| **Design System** | [narrativity-UI?node-id=326-2](https://www.figma.com/design/PnAhZwUJJmtTBRJWZh08ed/narrativity-UI?node-id=326-2) |
+| **Location Scout** | [narrativity-UI?node-id=264-800](https://www.figma.com/design/PnAhZwUJJmtTBRJWZh08ed/narrativity-UI?node-id=264-800) |
