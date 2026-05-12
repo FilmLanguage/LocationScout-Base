@@ -155,6 +155,7 @@ describe("image versions (sidecar JSON)", () => {
 
     const saved1 = await storage.saveImage("anchor", buf1, {
       entity_id,
+      location_id: entity_id,
       prompt: "first prompt",
       model: "nanobanana",
       source_tool: "generate_anchor",
@@ -163,6 +164,7 @@ describe("image versions (sidecar JSON)", () => {
     await new Promise((r) => setTimeout(r, 5));
     const saved2 = await storage.saveImage("anchor", buf2, {
       entity_id,
+      location_id: entity_id,
       prompt: "second prompt — edited",
       model: "nanobanana",
       source_tool: "generate_anchor",

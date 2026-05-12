@@ -228,6 +228,12 @@ export interface SidecarEntry {
   image_id: string;
   entity_type: string;
   entity_id: string;
+  /**
+   * Parent location id. Required for new writes via SaveImageOptions; remains
+   * optional on the read type for backward compat with sidecars written before
+   * this field existed. Readers should use attributedLocationId() to backfill.
+   */
+  location_id?: string;
   kind: string;
   prompt: string;
   negative_prompt?: string;
@@ -245,6 +251,12 @@ export interface SidecarEntry {
 export interface SaveImageOptions {
   /** Stable identifier of the parent entity (e.g. bible_id, setup_id). */
   entity_id: string;
+  /**
+   * Parent location id. For kind ∈ {anchor,floorplan,isometric} this equals
+   * entity_id; for setup/mood_variation/user-ref it must be resolved from
+   * the parent Bible (see upload_reference for the loadArtifact fallback).
+   */
+  location_id: string;
   /** Final prompt actually sent to the image generator (post template-fill + override). */
   prompt: string;
   /** Name of the model that produced the image. */
@@ -261,6 +273,22 @@ export interface SaveImageOptions {
   parent_version_id?: string;
   /** project_id for PG metadata row. Defaults to LS_DEFAULT_PROJECT_KEY env var. */
   project_id?: string;
+}
+
+/**
+ * Resolve the owning location_id for a sidecar entry.
+ * - If the entry was written after `location_id` became required → use it.
+ * - Else for versionable location-scoped kinds (anchor/floorplan/isometric)
+ *   entity_id IS the location_id by contract → safe fallback.
+ * - Else (setup/mood_variation/user-ref written before migration) → null;
+ *   such entries are excluded from gallery results rather than mis-attributed.
+ */
+export function attributedLocationId(s: SidecarEntry): string | null {
+  if (s.location_id) return s.location_id;
+  if (s.kind === "anchor" || s.kind === "floorplan" || s.kind === "isometric") {
+    return s.entity_id;
+  }
+  return null;
 }
 
 export interface SaveImageResult {
@@ -432,6 +460,7 @@ export async function saveImage(
     image_id,
     entity_type: opts.entity_type ?? kind,
     entity_id: opts.entity_id,
+    location_id: opts.location_id,
     kind,
     prompt: opts.prompt,
     model: opts.model,
@@ -661,6 +690,67 @@ export async function listVersions(kind: string, entity_id: string): Promise<Sid
         const { data } = await s3Download(key);
         const parsed = JSON.parse(data.toString("utf8")) as SidecarEntry;
         if (parsed.entity_id !== entity_id) continue;
+        if (seenImageIds.has(parsed.image_id)) continue;
+        results.push(parsed);
+        seenImageIds.add(parsed.image_id);
+      } catch {
+        /* skip malformed / missing */
+      }
+    }
+  }
+
+  results.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  return results;
+}
+
+/**
+ * List every saved version for a `kind` across **all** entity_ids,
+ * newest-first. Used by `list_gallery` to aggregate per-location previews
+ * without having to enumerate entity ids in advance.
+ *
+ * Reads sidecar JSONs from the local dir and dedupes against S3 (cold-start
+ * fallback), exactly like `listVersions`. S3 is only consulted when
+ * `S3_BUCKET` is set — local dev paths still work as-is.
+ */
+export async function listAllVersions(kind: string): Promise<SidecarEntry[]> {
+  const dir = resolveLocalDir(kind);
+  const results: SidecarEntry[] = [];
+  const seenImageIds = new Set<string>();
+
+  if (dir) {
+    let entries: string[] = [];
+    try {
+      entries = await fs.readdir(dir);
+    } catch {
+      entries = [];
+    }
+    const sidecarFiles = entries.filter(
+      (f) => f.endsWith(".json") && !f.endsWith(".prev.json"),
+    );
+    for (const f of sidecarFiles) {
+      try {
+        const raw = await fs.readFile(join(dir, f), "utf8");
+        const parsed = JSON.parse(raw) as SidecarEntry;
+        if (!parsed.image_id) continue;
+        if (seenImageIds.has(parsed.image_id)) continue;
+        results.push(parsed);
+        seenImageIds.add(parsed.image_id);
+      } catch {
+        /* skip malformed */
+      }
+    }
+  }
+
+  if (S3_BUCKET) {
+    const prefix = `${kind}/`;
+    const keys = (await s3List(prefix)).filter(
+      (k) => k.endsWith(".json") && !k.endsWith(".prev.json"),
+    );
+    for (const key of keys) {
+      try {
+        const { data } = await s3Download(key);
+        const parsed = JSON.parse(data.toString("utf8")) as SidecarEntry;
+        if (!parsed.image_id) continue;
         if (seenImageIds.has(parsed.image_id)) continue;
         results.push(parsed);
         seenImageIds.add(parsed.image_id);

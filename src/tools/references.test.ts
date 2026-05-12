@@ -148,12 +148,14 @@ describe("upload_reference + list_user_references + list_location_images", () =>
     const buf = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
     await storage.saveImage("anchor", buf, {
       entity_id: bible_id,
+      location_id: bible_id,
       prompt: "anchor p",
       model: "nanobanana",
       source_tool: "generate_anchor",
     });
     await storage.saveImage("isometric", buf, {
       entity_id: bible_id,
+      location_id: bible_id,
       prompt: "iso p",
       model: "nanobanana",
       source_tool: "generate_isometric_reference",

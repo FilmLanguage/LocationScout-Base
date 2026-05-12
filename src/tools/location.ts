@@ -720,6 +720,7 @@ export function registerLocationTools(server: McpServer) {
             const imgBuf = Buffer.from(await imgRes.arrayBuffer());
             lastSaveResult = await saveImage("anchor", imgBuf, {
               entity_id: bibleId,
+              location_id: bibleId,
               prompt: promptForAttempt,
               model: resolvedModel,
               source_tool: "generate_anchor",
@@ -1024,6 +1025,7 @@ export function registerLocationTools(server: McpServer) {
           updateTask(task_id, { progress: 0.85, current_step: "Saving floorplan PNG" });
           const saveResult = await saveImage("floorplan", pngBuffer, {
             entity_id: bibleId,
+            location_id: bibleId,
             prompt: "",
             model: "matplotlib",
             source_tool: "create_floorplan",
@@ -1161,6 +1163,7 @@ export function registerLocationTools(server: McpServer) {
           const imgBuf = Buffer.from(await imgRes.arrayBuffer());
           const saveResult = await saveImage("isometric", imgBuf, {
             entity_id: floorplanId,
+            location_id: floorplanId,
             prompt,
             model: resolvedModel,
             source_tool: "generate_isometric_reference",
@@ -1410,6 +1413,7 @@ export function registerLocationTools(server: McpServer) {
               }
               const saveResult = await saveImage("setup", imgBuf, {
                 entity_id: setupId,
+                location_id: bibleId,
                 prompt,
                 model: resolvedModel,
                 source_tool: "generate_setup_images",
@@ -1956,6 +1960,7 @@ export function registerLocationTools(server: McpServer) {
           const imgBuf = Buffer.from(await imgRes.arrayBuffer());
           const saveResult = await saveImage("mood_variation", imgBuf, {
             entity_id: variation_id,
+            location_id: bibleId,
             prompt: moodParts,
             model: resolvedModel,
             source_tool: "add_mood_variation",

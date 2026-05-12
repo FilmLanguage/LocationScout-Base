@@ -57,5 +57,12 @@ export { LocationBriefsSchema, type LocationBriefs, LocationBriefsJsonSchema } f
 
 export { ReferenceRefSchema, type ReferenceRef, ReferenceKindSchema, ReferenceSourceAgentSchema, REF_KIND, REF_SOURCE_AGENT, mergeRefs } from "./common/reference-ref.js";
 
+export {
+  GalleryItemSchema, type GalleryItem,
+  GalleryKindSchema, type GalleryKind,
+  ListGalleryInputSchema, type ListGalleryInput,
+  ListGalleryOutputSchema, type ListGalleryOutput,
+} from "./common/gallery.js";
+
 // --- Registry ---
 export { ARTIFACT_REGISTRY, type ArtifactType } from "./artifacts/registry.js";

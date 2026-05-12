@@ -13,7 +13,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { saveImage, listVersions } from "../lib/storage.js";
+import { saveImage, listVersions, loadArtifact } from "../lib/storage.js";
 import type { ReferenceRef } from "@filmlanguage/schemas";
 const AGENT_KEY = "location-scout" as const;
 
@@ -24,18 +24,35 @@ export function registerReferenceTools(server: McpServer) {
     {
       kind: z.enum(["user_upload", "external"]).default("user_upload"),
       entity_id: z.string().describe("Parent entity (bible_id, setup_id) the ref belongs to"),
+      location_id: z.string().optional().describe("Owning location id. Optional — if omitted, resolved from entity_id (bible_id passthrough; setup_id → setup.bible_id lookup)."),
       base64_data: z.string().describe("Image bytes, base64-encoded (no data: prefix)"),
       content_type: z.string().default("image/png"),
       note: z.string().optional().describe("Why user uploaded this; shown in gallery"),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    async ({ kind, entity_id, base64_data, content_type, note }) => {
+    async ({ kind, entity_id, location_id, base64_data, content_type, note }) => {
       const buf = Buffer.from(base64_data, "base64");
+
+      // Resolve location_id when caller didn't pass it. For bible_id it's a
+      // pass-through; for setup_id we look up setup.bible_id. If neither
+      // resolves we still write the sidecar (entity_id-as-fallback) so the
+      // upload isn't dropped, but the gallery filter may exclude it.
+      let resolvedLocationId = location_id;
+      if (!resolvedLocationId) {
+        try {
+          const setup = await loadArtifact<{ bible_id?: string; location_id?: string }>("setup", entity_id);
+          if (setup?.bible_id) resolvedLocationId = setup.bible_id;
+          else if (setup?.location_id) resolvedLocationId = setup.location_id;
+        } catch { /* setup miss → entity_id is likely a bible_id, fall through */ }
+        if (!resolvedLocationId) resolvedLocationId = entity_id;
+      }
+
       const result = await saveImage(
         "user-ref",
         buf,
         {
           entity_id,
+          location_id: resolvedLocationId,
           prompt: note ?? "",
           model: "user_upload",
           source_tool: "upload_reference",

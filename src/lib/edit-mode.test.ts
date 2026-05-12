@@ -49,6 +49,7 @@ describe("resolveEditBase", () => {
     );
     const v1 = await storage.saveImage("anchor", png, {
       entity_id: bible_id,
+      location_id: bible_id,
       prompt: "v1 dim office",
       model: "nanobanana",
       source_tool: "generate_anchor",
@@ -56,6 +57,7 @@ describe("resolveEditBase", () => {
     await new Promise((r) => setTimeout(r, 10));
     const v2 = await storage.saveImage("anchor", png, {
       entity_id: bible_id,
+      location_id: bible_id,
       prompt: "v2 sunset office",
       model: "nanobanana",
       source_tool: "generate_anchor",
@@ -90,6 +92,7 @@ describe("resolveEditBase", () => {
     // v1 — initial generation (no parent).
     const v1 = await storage.saveImage("anchor", png, {
       entity_id: bible_id,
+      location_id: bible_id,
       prompt: "dim office interior",
       model: "nanobanana",
       source_tool: "generate_anchor",
@@ -101,6 +104,7 @@ describe("resolveEditBase", () => {
     expect(base1!.image_id).toBe(v1.image_id);
     const v2 = await storage.saveImage("anchor", png, {
       entity_id: bible_id,
+      location_id: bible_id,
       prompt: "edit: add golden-hour sunset through window",
       model: "nanobanana",
       source_tool: "generate_anchor",
@@ -113,6 +117,7 @@ describe("resolveEditBase", () => {
     expect(base2!.image_id).toBe(v2.image_id);
     const v3 = await storage.saveImage("anchor", png, {
       entity_id: bible_id,
+      location_id: bible_id,
       prompt: "edit: add dust motes",
       model: "nanobanana",
       source_tool: "generate_anchor",
