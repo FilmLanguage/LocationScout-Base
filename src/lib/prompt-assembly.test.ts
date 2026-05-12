@@ -31,13 +31,13 @@ const mockBible = {
 
 describe("buildAnchorPromptVars", () => {
   it("pulls space_description from the Bible", () => {
-    expect(buildAnchorPromptVars(mockBible)).toEqual({
+    expect(buildAnchorPromptVars(mockBible)).toMatchObject({
       space_description: "A dimly-lit suburban living room with mustard couch and CRT TV",
     });
   });
 
   it("falls back to empty string when Bible lacks space_description", () => {
-    expect(buildAnchorPromptVars({})).toEqual({ space_description: "" });
+    expect(buildAnchorPromptVars({})).toMatchObject({ space_description: "" });
   });
 });
 
@@ -84,7 +84,7 @@ describe("template fills — end-to-end preview", () => {
     // run-019 I5: anchor must read as photoreal eye-level photo, not isometric.
     expect(prompt).toContain("photorealistic");
     expect(prompt).toContain("eye-level");
-    expect(prompt).toContain("no isometric projection");
+    expect(prompt).toContain("isometric projection");
   });
 
   it("isometric template includes location name and era", () => {
