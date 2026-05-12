@@ -133,6 +133,7 @@ export const INITIAL_STATE: PipelineState = {
     setups: "locked",
     "light-states": "locked",
     outputs: "locked",
+    gallery: "draft",
   },
   currentStage: "input",
 

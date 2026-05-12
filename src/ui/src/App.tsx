@@ -10,6 +10,7 @@ import { StagePlaceholder } from "./components/StagePlaceholder";
 // import { LightStatesPage } from "./pages/LightStatesPage";
 // import { OutputsPage } from "./pages/OutputsPage";
 // import { ResearchPage } from "./pages/ResearchPage";
+import { GalleryPage } from "./pages/GalleryPage";
 import { ReferencesPage } from "./pages/ReferencesPage";
 import { SetupsPage } from "./pages/SetupsPage";
 import { STAGES, type StageId } from "./stages";
@@ -19,6 +20,7 @@ import { isStageAccessible } from "./state/pipeline";
 const PAGES: Partial<Record<string, FC>> = {
   references: ReferencesPage,
   setups: SetupsPage,
+  gallery: GalleryPage,
 };
 
 /**

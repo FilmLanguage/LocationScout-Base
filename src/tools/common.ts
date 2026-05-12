@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getTask, updateTask, deleteTask, loadArtifact, saveArtifact, listVersions } from "../lib/storage.js";
+import { getTask, updateTask, deleteTask, loadArtifact, saveArtifact, listVersions, listAllVersions, attributedLocationId, type SidecarEntry } from "../lib/storage.js";
+import { GalleryKindSchema, type GalleryItem, type GalleryKind } from "@filmlanguage/schemas";
 import { VERSION } from "../lib/version.js";
 
 /**
@@ -53,6 +54,7 @@ export function registerCommonTools(server: McpServer) {
             "add_fact", "add_anachronism", "manual_setup_input",
             "compare_with_anchor", "get_setup_prompt", "get_outputs",
             "apply_mood_suggestion", "dismiss_mood_suggestion", "add_mood_variation",
+            "list_gallery",
           ],
           schema_versions: {
             "location-bible": "v2",
@@ -218,6 +220,116 @@ export function registerCommonTools(server: McpServer) {
     async ({ artifact_uri, changes }) => {
       const task_id = crypto.randomUUID();
       return { content: [{ type: "text" as const, text: JSON.stringify({ task_id, artifact_uri, changes_count: changes.length }) }] };
+    },
+  );
+
+  // 10a. list_gallery — location-level gallery aggregator
+  //
+  // Surfaces every saved image across every kind for a single location, so
+  // the UI can render one unified gallery (generated artifacts + user
+  // uploads) without enumerating entity ids in advance. Backs the
+  // location-level GalleryPage and the "Uploaded" section pattern
+  // mirrored from ShotGeneration's GalleryTab.
+  server.tool(
+    "list_gallery",
+    "List every saved image for a location, newest first, across all kinds (anchor/floorplan/isometric/setup/mood_variation/user-ref). Each item carries http_path so the UI can drop it straight into <img src>; clients must not reconstruct URLs. latest_only collapses versionable kinds to the newest per entity_id; user-ref is always returned in full.",
+    {
+      location_id: z.string().describe("Filter to one location (required)"),
+      kinds: z.array(GalleryKindSchema).optional().describe("Restrict to a subset of kinds"),
+      latest_only: z.boolean().default(true).describe("When true, versionable kinds collapse to newest per entity_id; user-ref is always returned in full."),
+      limit: z.number().int().min(1).max(200).default(48),
+      cursor: z.string().optional().describe("Opaque pagination cursor from the previous call. Do NOT mix cursors across different latest_only values."),
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    async ({ location_id, kinds, latest_only, limit, cursor }) => {
+      const ALL_KINDS: GalleryKind[] = [
+        "anchor", "floorplan", "isometric", "setup", "mood_variation", "user-ref",
+      ];
+      const targetKinds: GalleryKind[] = kinds && kinds.length > 0 ? kinds : ALL_KINDS;
+
+      // Gather sidecars for every requested kind, then filter by attributed
+      // location_id. attributedLocationId() handles the legacy backfill —
+      // unattributed sidecars (setup/mood/user-ref pre-migration) return
+      // null and are dropped here rather than mis-attributed.
+      const collected: SidecarEntry[] = [];
+      for (const kind of targetKinds) {
+        const entries = await listAllVersions(kind);
+        for (const s of entries) {
+          if (attributedLocationId(s) === location_id) collected.push(s);
+        }
+      }
+
+      // Newest-first overall; stable tiebreaker on image_id so pagination
+      // cursors stay deterministic when two sidecars share created_at.
+      collected.sort((a, b) => {
+        if (a.created_at !== b.created_at) return a.created_at < b.created_at ? 1 : -1;
+        return a.image_id < b.image_id ? 1 : -1;
+      });
+
+      // Optional collapse to latest per (kind, entity_id) for versionable
+      // kinds; user-ref always passes through because every upload is a
+      // standalone asset, not a version.
+      let filtered: SidecarEntry[];
+      if (latest_only) {
+        const seen = new Set<string>();
+        filtered = [];
+        for (const s of collected) {
+          if (s.kind === "user-ref") { filtered.push(s); continue; }
+          const key = `${s.kind}:${s.entity_id}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          filtered.push(s);
+        }
+      } else {
+        filtered = collected;
+      }
+
+      // Cursor is the image_id of the last item from the previous page;
+      // we drop everything up to and including that id. Clients must keep
+      // latest_only stable across calls (documented in the schema).
+      let startIdx = 0;
+      if (cursor) {
+        const i = filtered.findIndex((s) => s.image_id === cursor);
+        if (i >= 0) startIdx = i + 1;
+      }
+      const page = filtered.slice(startIdx, startIdx + limit);
+      const next_cursor = startIdx + limit < filtered.length ? page[page.length - 1].image_id : undefined;
+
+      // Project SidecarEntry → GalleryItem. http_path follows the existing
+      // /artifacts routes in src/index.ts:
+      //   - latest_only=true & versionable kind → /artifacts/<kind>/<entity_id>.png
+      //   - else (user-ref or full history)     → /artifacts/<kind>/v/<image_id>.png
+      const items: GalleryItem[] = page.map((s) => {
+        const ext = "png"; // sidecars are always PNG in current pipeline
+        const useLatestAlias = latest_only && s.kind !== "user-ref";
+        const http_path = useLatestAlias
+          ? `/artifacts/${encodeURIComponent(s.kind)}/${encodeURIComponent(s.entity_id)}.${ext}`
+          : `/artifacts/${encodeURIComponent(s.kind)}/v/${encodeURIComponent(s.image_id)}.${ext}`;
+        return {
+          image_id: s.image_id,
+          kind: s.kind as GalleryKind,
+          entity_id: s.entity_id,
+          location_id,
+          prompt: s.prompt ?? "",
+          model: s.model ?? "unknown",
+          created_at: s.created_at,
+          uri: s.uri,
+          http_path,
+          ...(s.source_tool ? { source_tool: s.source_tool } : {}),
+          ...(s.source_task_id ? { source_task_id: s.source_task_id } : {}),
+          ...(s.negative_prompt ? { negative_prompt: s.negative_prompt } : {}),
+          ...(s.seed !== undefined ? { seed: s.seed } : {}),
+          ...(s.parent_version_id ? { parent_version_id: s.parent_version_id } : {}),
+        };
+      });
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({
+          location_id,
+          items,
+          ...(next_cursor ? { next_cursor } : {}),
+        }) }],
+      };
     },
   );
 
