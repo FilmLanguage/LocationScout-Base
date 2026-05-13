@@ -30,6 +30,8 @@ import { ARTIFACT_TYPE as SCENE_STYLE, URI_PATTERN as SCENE_STYLE_URI, PRODUCED_
 import { ARTIFACT_TYPE as VALIDATION_REPORT, URI_PATTERN as VALIDATION_REPORT_URI, PRODUCED_BY as VALIDATION_REPORT_PRODUCER, MIME_TYPE as VALIDATION_REPORT_MIME } from "./validation-report-v1.js";
 import { ARTIFACT_TYPE as CHARACTER_BRIEFS, URI_PATTERN as CHARACTER_BRIEFS_URI, PRODUCED_BY as CHARACTER_BRIEFS_PRODUCER, MIME_TYPE as CHARACTER_BRIEFS_MIME } from "./character-briefs-v1.js";
 import { ARTIFACT_TYPE as LOCATION_BRIEFS, URI_PATTERN as LOCATION_BRIEFS_URI, PRODUCED_BY as LOCATION_BRIEFS_PRODUCER, MIME_TYPE as LOCATION_BRIEFS_MIME } from "./location-briefs-v1.js";
+import { ARTIFACT_TYPE as SCENE_GEN_JOB, URI_PATTERN as SCENE_GEN_JOB_URI, PRODUCED_BY as SCENE_GEN_JOB_PRODUCER, MIME_TYPE as SCENE_GEN_JOB_MIME } from "./scene-generation-job-v1.js";
+import { ARTIFACT_TYPE as STYLE_FRAME_REFS, URI_PATTERN as STYLE_FRAME_REFS_URI, PRODUCED_BY as STYLE_FRAME_REFS_PRODUCER, MIME_TYPE as STYLE_FRAME_REFS_MIME } from "./style-frame-references-v1.js";
 
 export const ARTIFACT_REGISTRY = {
   [FILM_IR]: { uriPattern: FILM_IR_URI, producedBy: FILM_IR_PRODUCER, mimeType: FILM_IR_MIME },
@@ -77,6 +79,12 @@ export const ARTIFACT_REGISTRY = {
   [VALIDATION_REPORT]: { uriPattern: VALIDATION_REPORT_URI, producedBy: VALIDATION_REPORT_PRODUCER, mimeType: VALIDATION_REPORT_MIME },
 
   [EDL]:               { uriPattern: EDL_URI, producedBy: EDL_PRODUCER, mimeType: EDL_MIME },
+
+  // SceneGenerator-Base — automated per-scene image+video generation
+  [SCENE_GEN_JOB]:     { uriPattern: SCENE_GEN_JOB_URI, producedBy: SCENE_GEN_JOB_PRODUCER, mimeType: SCENE_GEN_JOB_MIME },
+  [STYLE_FRAME_REFS]:  { uriPattern: STYLE_FRAME_REFS_URI, producedBy: STYLE_FRAME_REFS_PRODUCER, mimeType: STYLE_FRAME_REFS_MIME },
+  scene_gen_shot_image: { uriPattern: "agent://scene-generator/shot/{job_id}/{shot_id}/image" as const, producedBy: "scene-generator-base" as const, mimeType: "image/png" as const },
+  scene_gen_shot_video: { uriPattern: "agent://scene-generator/shot/{job_id}/{shot_id}/video" as const, producedBy: "scene-generator-base" as const, mimeType: "video/mp4" as const },
 
   // Editor — live MCP resource in Editor-Base (resources/domain.ts). Retained
   // without a Zod body; if PacingMap grows structure, promote to pacing-map-v1.

@@ -64,5 +64,10 @@ export {
   ListGalleryOutputSchema, type ListGalleryOutput,
 } from "./common/gallery.js";
 
+// --- Scene Generator (alisa-scene-generation) ---
+export { StepStateSchema, type StepState, StepStateJsonSchema, StepStatusEnum, type StepStatus, ShotGenStateSchema, type ShotGenState, ShotGenStateJsonSchema } from "./artifacts/step-state-v1.js";
+export { StyleFrameReferencesSchema, type StyleFrameReferences, StyleFrameReferencesJsonSchema, CharacterRefSchema, type CharacterRef } from "./artifacts/style-frame-references-v1.js";
+export { SceneGenerationJobSchema, type SceneGenerationJob, SceneGenerationJobJsonSchema, JobStatusEnum, type JobStatus } from "./artifacts/scene-generation-job-v1.js";
+
 // --- Registry ---
 export { ARTIFACT_REGISTRY, type ArtifactType } from "./artifacts/registry.js";
