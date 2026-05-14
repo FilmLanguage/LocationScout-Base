@@ -28,6 +28,7 @@ export const DoPShotVisionSchema = z.object({
   $schema: z.literal("dop-shot-vision-v1"),
   project_id: z.string(),
   scene_id: z.string(),
+  scene_number: z.number().int().describe("Scene number from EDL — needed by UI for shot label (e.g. 'SHOT 1.3')"),
   shot_id: z.string().describe("Derived from EDL: `${scene_id}_s${shot_number:03d}`"),
   shot_number: z.number().int(),
 
