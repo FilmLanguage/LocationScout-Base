@@ -15,7 +15,7 @@ export const CharacterPassportSchema = z.object({
   height_build: z.string().describe("Body type description, e.g. 'tall and gaunt', 'stocky, broad-shouldered'"),
   distinguishing_marks: z.array(z.string()).default([]).describe("Scars, tattoos, birthmarks, prosthetics"),
   importance: z.enum(["LEAD", "SUPPORTING", "FEATURED", "BACKGROUND"]).describe("Dramatic weight"),
-  scenes: z.array(z.string()).min(1).describe("Scene IDs where character appears"),
+  scenes: z.array(z.string()).default([]).describe("Scene IDs where character appears (empty when bible written before 1AD scene-resolution)"),
 });
 
 export const FaceC1Schema = z.object({
@@ -54,11 +54,11 @@ export const CharacterBibleSchema = z.object({
   bible_id: z.string().describe("Unique bible ID, e.g. char_001"),
   brief_id: z.string().describe("Reference to source AD Character Brief"),
   vision_id: z.string().describe("Reference to Director's casting vision"),
-  research_id: z.string().describe("Reference to CharacterResearchPack"),
+  research_id: z.string().nullable().describe("Reference to CharacterResearchPack. Null when research stage was skipped (current default)."),
   passport: CharacterPassportSchema,
   body_physics: z.string().describe("Posture, gait, habitual gestures, physical mannerisms"),
-  face_c1_structural: FaceC1Schema,
-  face_c2_surface: FaceC2Schema,
+  face_c1_structural: FaceC1Schema.optional(),
+  face_c2_surface: FaceC2Schema.optional(),
   hair_and_groom: z.string().describe("Base hairstyle, color, facial hair, grooming level"),
   base_wardrobe: z.string().describe("Default outfit description for majority of scenes"),
   character_through_appearance: z.string().describe("How visual appearance expresses inner character arc"),
