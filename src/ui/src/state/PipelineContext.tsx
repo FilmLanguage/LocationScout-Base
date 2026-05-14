@@ -1,7 +1,9 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useReducer,
+  useState,
   type Dispatch,
   type ReactNode,
 } from "react";
@@ -11,6 +13,7 @@ import {
   type PipelineAction,
   type PipelineState,
 } from "./pipeline";
+import { hydrateFromServer } from "../api/hydration";
 
 interface PipelineContextValue {
   state: PipelineState;
@@ -21,6 +24,21 @@ const PipelineContext = createContext<PipelineContextValue | null>(null);
 
 export function PipelineProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(pipelineReducer, INITIAL_STATE);
+  const [hydrating, setHydrating] = useState(true);
+
+  useEffect(() => {
+    hydrateFromServer()
+      .then(({ found, patch }) => {
+        if (found) dispatch({ type: "HYDRATE", patch });
+      })
+      .catch(() => {
+        // Server unreachable — proceed with INITIAL_STATE; BetaAutoBoot handles it.
+      })
+      .finally(() => setHydrating(false));
+  }, []);
+
+  if (hydrating) return null;
+
   return (
     <PipelineContext.Provider value={{ state, dispatch }}>
       {children}

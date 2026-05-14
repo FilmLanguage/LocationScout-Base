@@ -133,7 +133,6 @@ export const INITIAL_STATE: PipelineState = {
     setups: "locked",
     "light-states": "locked",
     outputs: "locked",
-    gallery: "draft",
   },
   currentStage: "input",
 
@@ -315,6 +314,7 @@ export const INITIAL_STATE: PipelineState = {
 // ──────────────── Actions ────────────────
 
 export type PipelineAction =
+  | { type: "HYDRATE"; patch: Partial<PipelineState> }
   | { type: "APPROVE_STAGE"; stage: StageId }
   | { type: "SET_BRIEF"; patch: Partial<LocationBrief> }
   | { type: "SET_VISION"; patch: Partial<DirectorVision> }
@@ -346,6 +346,9 @@ export function pipelineReducer(
   action: PipelineAction,
 ): PipelineState {
   switch (action.type) {
+    case "HYDRATE":
+      return { ...state, ...action.patch };
+
     case "APPROVE_STAGE": {
       const idx = STAGE_ORDER.indexOf(action.stage);
       const next = STAGE_ORDER[idx + 1];

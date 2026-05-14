@@ -9,8 +9,7 @@ export type StageId =
   | "references"
   | "setups"
   | "light-states"
-  | "outputs"
-  | "gallery";
+  | "outputs";
 
 export interface Stage {
   id: StageId;
@@ -26,5 +25,4 @@ export interface Stage {
 export const STAGES: readonly Stage[] = [
   { id: "references", label: "References", path: "/",        figmaNodeId: "433:26" },
   { id: "setups",     label: "Setups",     path: "/setups",  figmaNodeId: "436:33" },
-  { id: "gallery",    label: "Gallery",    path: "/gallery", figmaNodeId: "TBD"    },
 ] as const;
