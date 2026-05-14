@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { callTool } from "../api/mcp";
 import { ImageOverlay } from "../components/ImageOverlay";
+import { usePipeline } from "../state/PipelineContext";
 
 const LOCATION_ID = "loc_001"; // BETA: same hard-code as the rest of the pipeline (see ReferencesPage)
 
@@ -62,6 +63,9 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 export function GalleryPage() {
+  const { state } = usePipeline();
+  const inputApproved = state.statuses.input === "approved";
+
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("all");
@@ -89,6 +93,15 @@ export function GalleryPage() {
   }, [latestOnly]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Re-fetch when BetaAutoBoot finishes the scout pipeline. Until then, the
+  // input stage is "draft"; once scout_location → write_bible → generate_anchor
+  // completes, the boot dispatches APPROVE_STAGE("input"), which flips
+  // state.statuses.input to "approved" and pulls the freshly-written sidecars
+  // into view here.
+  useEffect(() => {
+    if (inputApproved) refresh();
+  }, [inputApproved, refresh]);
 
   const handleFile = useCallback(async (file: File) => {
     if (!file.type.startsWith("image/")) {
@@ -215,7 +228,9 @@ export function GalleryPage() {
         <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)" }}>Loading…</div>
       ) : filtered.length === 0 ? (
         <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
-          No images yet. Generate a reference or upload one above.
+          {inputApproved
+            ? "No images yet. Generate a reference or upload one above."
+            : "Pipeline still booting (scout → bible → anchor). Images will appear here when ready."}
         </div>
       ) : (
         <div

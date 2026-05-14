@@ -26,6 +26,7 @@ export const URI_PATTERN = "agent://scene-generator/job/{job_id}" as const;
 export const JobStatusEnum = z.enum([
   "pending_confirm",
   "running",
+  "pending_video_confirm",
   "completed",
   "failed",
   "cancelled",

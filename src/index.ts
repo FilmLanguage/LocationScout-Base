@@ -85,11 +85,15 @@ app.use((req, res, next) => {
 });
 
 // Inter-agent auth: if INTER_AGENT_TOKEN is set, require x-agent-token header.
-// Skip auth when token is empty (dev mode) or for health check.
+// Skip auth when token is empty (dev mode), for health check, or for
+// /artifacts/* GET requests — those are loaded by browser <img>/<video>
+// elements which can't attach custom headers and need to be publicly
+// readable so the embedded UIs (GeneralUI, SceneGenerator) can show them.
 const INTER_AGENT_TOKEN = process.env.INTER_AGENT_TOKEN || "";
 app.use((req, res, next) => {
   if (!INTER_AGENT_TOKEN) { next(); return; }
   if (req.path === "/health") { next(); return; }
+  if (req.method === "GET" && req.path.startsWith("/artifacts/")) { next(); return; }
   const raw = req.headers["x-agent-token"];
   const token = Array.isArray(raw) ? raw[0] : raw;
   if (token?.trim() !== INTER_AGENT_TOKEN.trim()) {
