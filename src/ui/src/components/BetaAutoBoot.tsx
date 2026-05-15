@@ -9,7 +9,7 @@
  *
  * History:
  *   - First this component auto-fired `scout_location` with a hardcoded
- *     "Marlowe's Office, 1947 noir LA" fixture. That was a silent mock.
+ *     demo fixture. That was a silent mock.
  *   - Then it was a gate that blocked the UI behind a "no brief" screen.
  *     That was overreach — supplying briefs is an upstream concern, not
  *     this agent's UI concern.

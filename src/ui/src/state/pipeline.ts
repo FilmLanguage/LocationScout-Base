@@ -141,175 +141,76 @@ export const INITIAL_STATE: PipelineState = {
   currentStage: "references",
 
   brief: {
-    locationName: "Walter's living room",
-    scriptQuotes: [
-      '"The living room is dim, lit only by the blue glow of the CRT television. Pizza boxes are stacked on the coffee table."',
-      '"WALTER enters through the front door, crosses the hallway into the living room. The air-conditioning hums."',
-      '"Morning light filters through cheap blinds, casting prison-bar shadows across the carpet. A half-empty bottle of beer sits on the armrest."',
-    ],
-    shortDescription:
-      "A cramped, sun-bleached suburban living room in Albuquerque. Low ceilings, worn furniture, and an oppressive stillness that feels like it's closing in.",
-    type: ["INT", "EXT", "INT/EXT"],
+    locationName: "",
+    scriptQuotes: [],
+    shortDescription: "",
+    type: [],
     selectedType: "",
-    timeOfDay: ["Day", "Night", "Morning", "Evening"],
+    timeOfDay: [],
     selectedTimeOfDay: "",
-    scenes: ["sc_001", "sc_007", "sc_015"],
-    props: ["CRT TV", "Bottle of beer", "Pizza box"],
-    entryExit: ["Front door", "Kitchen archway", "Hallway"],
-    generationFlags: ["Night shoot", "Practical TV light"],
+    scenes: [],
+    props: [],
+    entryExit: [],
+    generationFlags: [],
   },
 
   vision: {
-    eraStyle:
-      "2004 suburban Albuquerque — middle-class decay, sun-bleached surfaces, Walmart furniture aesthetic",
+    eraStyle: "",
     colorPalette: {
-      description:
-        "Desaturated beiges, sickly yellows, muted earth tones. Oppressive flatness.",
-      // Mock director palette for Walter's living room demo — user-editable
-      // content, not UI styling. Intentionally NOT tokenized; the palette is
-      // the director's creative data that flows into the color-picker swatches.
-      swatches: ["#c4a746", "#a89a6b", "#6b5d3a", "#7a7a5e"],
+      description: "",
+      swatches: [],
     },
-    spatialPhilosophy:
-      "Claustrophobic despite open plan. Low ceilings press down. The space should feel like it's slowly suffocating its inhabitants.",
-    atmosphere:
-      "Stale air-conditioning hum. Faint smell of carpet cleaner. The silence between family members is deafening.",
-    lightVision:
-      "Harsh New Mexico daylight filtered through cheap blinds creates prison-bar shadows. At night, only the blue TV glow.",
-    referenceFilms: [
-      "No Country for Old Men",
-      "American Beauty",
-      "Blue Velvet",
-      "Safe (1995)",
-    ],
+    spatialPhilosophy: "",
+    atmosphere: "",
+    lightVision: "",
+    referenceFilms: [],
   },
 
   research: {
-    iteration: 2,
+    iteration: 0,
     maxIterations: 3,
-    facts: [
-      {
-        id: "f1",
-        title: "CRT televisions dominated American homes until mid-2000s",
-        subtitle: "Flat screens rare before 2006 in middle-class homes",
-      },
-      {
-        id: "f2",
-        title: "Berber carpet was ubiquitous in 2000s suburban homes",
-        subtitle: "Low-pile, usually beige or cream colored",
-      },
-      {
-        id: "f3",
-        title: "Cordless phones (not cell) primary home communication",
-        subtitle: "Nokia/Motorola flip phones just emerging for personal use",
-      },
-      {
-        id: "f4",
-        title: "Venetian blinds standard in Southwest residential",
-        subtitle: "Cheap horizontal plastic blinds, often yellowed",
-      },
-      {
-        id: "f5",
-        title: "La-Z-Boy recliners peak suburban furniture",
-        subtitle: "Brown/tan leather or fabric, well-worn armrests",
-      },
-    ],
-    typicalElements: [
-      "CRT TV set (bulky)",
-      "Berber carpet (beige)",
-      "La-Z-Boy recliner",
-      "Venetian blinds (plastic)",
-      "Cordless phone",
-      "Wall-mounted clock",
-    ],
-    anachronisms: [
-      "LED lighting (any type)",
-      "Flat screen / LCD TV",
-      "Smartphones / tablets",
-      "USB cables visible",
-      "Modern laptop (thin)",
-      "Stainless steel appliances",
-      "Granite countertops",
-      "Ring doorbell / smart home",
-    ],
+    facts: [],
+    typicalElements: [],
+    anachronisms: [],
   },
 
   analysis: {
-    spaceDescription:
-      "The living room of the White residence is a monument to middle-class stagnation. A rectangular space approximately 5.5m x 4m with a 2.4m ceiling that seems to press down oppressively. The walls are painted in a washed-out cream that has yellowed from years of New Mexico sunlight filtering through cheap horizontal blinds.\n\nA bulky CRT television dominates the far wall, its screen perpetually reflecting the room back at itself. A well-worn La-Z-Boy recliner faces it at an angle, its brown fabric smooth and shiny on the armrests.",
-    atmosphere:
-      "Stale air-conditioning hum undercut by the distant drone of lawnmowers. The faint chemical tang of carpet cleaner. A heaviness in the air that makes every conversation feel like an interrogation. The silence between family members has texture — dense, oppressive, loaded with unspoken accusations.",
-    wordCount: 438,
+    spaceDescription: "",
+    atmosphere: "",
+    wordCount: 0,
     wordBudget: 200,
-    keyDetails: [
-      "CRT TV (bulky, 90s model)",
-      "Frayed beige Berber carpet",
-      "La-Z-Boy recliner (brown leather)",
-      "Horizontal plastic blinds (yellowed)",
-      "Pizza box on coffee table",
-      "Cordless phone on end table",
-    ],
-    negatives: [
-      "LED lighting",
-      "Flat screen TV",
-      "Smartphones",
-      "USB cables",
-      "Modern laptop",
-    ],
-    colorTemp: "5500K",
+    keyDetails: [],
+    negatives: [],
+    colorTemp: "",
     shadowHardness: "soft",
   },
 
   references: {
-    floorplanSize: "5.5m × 4.0m × 2.4m",
+    floorplanSize: "",
     vlmAudit: {
-      lpips: 0.32,
-      ssim: 0.71,
-      bibleMatch: 94,
+      lpips: 0,
+      ssim: 0,
+      bibleMatch: 0,
       anachronismsFound: 0,
     },
   },
 
   setups: {
-    selectedId: "S1-A",
-    tiles: [
-      // Statuses start as "none" — no chip until the user explicitly
-      // approves or rejects via the tile's ✓/✗ icon buttons. Fixture
-      // wireframe statuses removed (was leftover from the Figma mock).
-      { id: "S1-A", status: "none", scene: "sc_003", mood: "NIGHT" },
-      { id: "S1-B", status: "none", scene: "sc_003", mood: "DAY" },
-      { id: "S2-A", status: "none", scene: "sc_007", mood: "DAY" },
-      { id: "S2-B", status: "none", scene: "sc_007", mood: "NIGHT" },
-      { id: "S3-A", status: "none", scene: "sc_015", mood: "LATE_NIGHT" },
-      { id: "S3-B", status: "none", scene: "sc_015", mood: "DAY" },
-      { id: "S1-C", status: "none", scene: "sc_003", mood: "DUSK" },
-      { id: "S2-C", status: "none", scene: "sc_007", mood: "DUSK" },
-      { id: "S3-C", status: "none", scene: "sc_015", mood: "NIGHT" },
-    ],
+    selectedId: "",
+    tiles: [],
   },
 
   lightStates: {
-    sources: [
-      { id: "S1", meta: "35mm · 45° · sc_003", variations: 3 },
-      { id: "S2", meta: "50mm · 180° · sc_007", variations: 2 },
-      { id: "S3", meta: "24mm · 90° · sc_015", variations: 1 },
-    ],
-    activeSourceId: "S1",
-    variations: [
-      { id: "S1 / NIGHT",      status: "approved",   temp: "2700K" },
-      { id: "S1 / DAY",        status: "approved",   temp: "5500K" },
-      { id: "S1 / DUSK",       status: "draft",      temp: "4200K" },
-      { id: "S2 / NIGHT",      status: "approved",   temp: "2700K" },
-      { id: "S2 / DAY",        status: "approved",   temp: "5500K" },
-      { id: "S3 / LATE_NIGHT", status: "generating", temp: "1800K" },
-    ],
+    sources: [],
+    activeSourceId: "",
+    variations: [],
     aiSuggestionDismissed: false,
     moodConfig: {
-      directionOverride: "OVERHEAD",
-      timeOfDay: "NIGHT",
-      colorTempK: 2700,
-      shadowHardness: "hard",
-      clutterLevel: "messy",
+      directionOverride: "",
+      timeOfDay: "",
+      colorTempK: 0,
+      shadowHardness: "soft",
+      clutterLevel: "clean",
       windowState: "closed",
     },
   },

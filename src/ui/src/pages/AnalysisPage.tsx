@@ -205,11 +205,15 @@ export function AnalysisPage() {
                 <span className="chip chip--sm chip--outlined">EXT</span>
                 <span className="chip chip--sm chip--outlined">INT-EXT</span>
                 <span className="passport-row__label">Era:</span>
-                <span className="passport-row__value">2004 Albuquerque</span>
+                <span className="passport-row__value">{state.vision.eraStyle || "—"}</span>
                 <span className="passport-row__label">Scenes:</span>
-                <span className="chip chip--sm chip--filled">sc_003</span>
-                <span className="chip chip--sm chip--filled">sc_007</span>
-                <span className="chip chip--sm chip--filled">sc_015</span>
+                {state.brief.scenes.length > 0 ? (
+                  state.brief.scenes.map((s) => (
+                    <span key={s} className="chip chip--sm chip--filled">{s}</span>
+                  ))
+                ) : (
+                  <span className="chip chip--sm chip--filled">—</span>
+                )}
               </div>
 
               {/* Space Description */}

@@ -24,12 +24,6 @@ import { useGallery } from "../hooks/useGallery";
 import { useAssemblePrompt } from "../hooks/useAssemblePrompt";
 import { useProjectContext, buildArtifactUrl } from "../hooks/useProjectContext";
 
-const setupsSummary = [
-  { id: "S1", camera: "x:2.1 y:3.0 angle:45° | 35mm", characters: "Characters: Walter, Skyler", composition: "Composition: Medium wide, couch centered" },
-  { id: "S2", camera: "x:4.0 y:1.5 angle:180° | 50mm", characters: "Characters: Walter", composition: "Composition: Close-up, TV reflection in eyes" },
-  { id: "S3", camera: "x:1.0 y:2.0 angle:90° | 24mm", characters: "Characters: Skyler (entering)", composition: "Composition: Wide, kitchen archway frame" },
-];
-
 type AnchorState =
   | { kind: "checking" }
   | { kind: "missing" }
@@ -994,16 +988,21 @@ export function ReferencesPage() {
           </div>
           <article className="card">
             <div className="card__body" style={{ gap: "var(--sp-2)" }}>
-              {setupsSummary.map((s) => (
-                <div key={s.id} className="setup-row">
-                  <span className="setup-row__badge">{s.id}</span>
-                  <div className="setup-row__info">
-                    <span className="setup-row__line">{s.camera}</span>
-                    <span className="setup-row__sub">{s.characters}</span>
-                    <span className="setup-row__sub">{s.composition}</span>
+              {state.setups.tiles.length > 0 ? (
+                state.setups.tiles.map((s) => (
+                  <div key={s.id} className="setup-row">
+                    <span className="setup-row__badge">{s.id}</span>
+                    <div className="setup-row__info">
+                      <span className="setup-row__line">Scene: {s.scene}</span>
+                      <span className="setup-row__sub">Mood: {s.mood}</span>
+                    </div>
                   </div>
+                ))
+              ) : (
+                <div className="placeholder-box" style={{ fontSize: 12, opacity: 0.7, padding: 12 }}>
+                  No setups extracted yet
                 </div>
-              ))}
+              )}
               <button type="button" className="add-link" style={{ color: "var(--accent)" }}>
                 ✏ Manual Input?
               </button>
