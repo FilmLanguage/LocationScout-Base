@@ -106,6 +106,14 @@ app.use((req, res, next) => {
   if (req.method === "GET" && req.path.startsWith("/artifacts/")) { next(); return; }
   // GET to any non-API path → static UI / SPA fallback, no auth required.
   if (req.method === "GET" && !isApiPath(req.path)) { next(); return; }
+  // Same-origin bypass: the agent's own UI iframe (served from this same origin)
+  // can call /mcp without the inter-agent token. Cross-origin callers still need it.
+  const origin = req.headers.origin;
+  const host = req.headers.host; // e.g. "fl-location-scout-base-lpymmaqbkq-uc.a.run.app"
+  if (origin && host && (origin === `https://${host}` || origin === `http://${host}`)) {
+    next();
+    return;
+  }
   const raw = req.headers["x-agent-token"];
   const token = Array.isArray(raw) ? raw[0] : raw;
   if (token?.trim() !== INTER_AGENT_TOKEN.trim()) {
