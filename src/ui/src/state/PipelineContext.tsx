@@ -1,9 +1,7 @@
 import {
   createContext,
   useContext,
-  useEffect,
   useReducer,
-  useState,
   type Dispatch,
   type ReactNode,
 } from "react";
@@ -13,7 +11,6 @@ import {
   type PipelineAction,
   type PipelineState,
 } from "./pipeline";
-import { hydrateFromServer } from "../api/hydration";
 
 interface PipelineContextValue {
   state: PipelineState;
@@ -22,22 +19,13 @@ interface PipelineContextValue {
 
 const PipelineContext = createContext<PipelineContextValue | null>(null);
 
+// Hydration disabled: previously this fetched /artifacts/bible/<id>.json on
+// mount and auto-approved the input stage if any Bible was found. Combined
+// with a stale fixture-Bible on disk, that silently unlocked generation as
+// if the user had supplied a real brief. The gate (BetaAutoBoot) is now the
+// only path to `input: "approved"`, and it never approves on its own.
 export function PipelineProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(pipelineReducer, INITIAL_STATE);
-  const [hydrating, setHydrating] = useState(true);
-
-  useEffect(() => {
-    hydrateFromServer()
-      .then(({ found, patch }) => {
-        if (found) dispatch({ type: "HYDRATE", patch });
-      })
-      .catch(() => {
-        // Server unreachable — proceed with INITIAL_STATE; BetaAutoBoot handles it.
-      })
-      .finally(() => setHydrating(false));
-  }, []);
-
-  if (hydrating) return null;
 
   return (
     <PipelineContext.Provider value={{ state, dispatch }}>

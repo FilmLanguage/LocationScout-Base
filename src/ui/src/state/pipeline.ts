@@ -124,17 +124,21 @@ export interface PipelineState {
 
 // ──────────────── Initial state ────────────────
 
+// Script analysis happens upstream; this agent assumes its inputs are
+// handled. References + setups are always reachable so the user can hit
+// Generate. Backend rejects generation if no Bible is available — the UI
+// does not pretend otherwise by gating.
 export const INITIAL_STATE: PipelineState = {
   statuses: {
-    input: "draft",
-    research: "locked",
-    analysis: "locked",
-    references: "locked",
-    setups: "locked",
+    input: "approved",
+    research: "approved",
+    analysis: "approved",
+    references: "draft",
+    setups: "draft",
     "light-states": "locked",
     outputs: "locked",
   },
-  currentStage: "input",
+  currentStage: "references",
 
   brief: {
     locationName: "Walter's living room",

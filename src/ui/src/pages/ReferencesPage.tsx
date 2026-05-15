@@ -2,13 +2,15 @@
  * Stage 4 — Reference Generation.
  * Mirrors Figma frame "Reference Generation" (node 433:26).
  *
- * On mount, checks whether an anchor image already exists at
- * /artifacts/anchor/<location_id>.png. If not, fires generate_anchor and
- * polls until the backend signals completion, then re-loads the image.
+ * Fresh-start contract: every mount starts empty for floorplan, isometric,
+ * and anchor. We do not auto-load existing artifacts from S3 — that pulled
+ * stale images into "new projects" because the artifact slot is shared.
+ * Cards only fill after the user clicks Generate in this session.
  *
- * Floorplan auto-generates via create_floorplan (Python/Pillow).
- * Isometric auto-generates via generate_isometric_reference (FAL img2img)
- * after floorplan is ready.
+ * Generation chain (each step user-triggered):
+ *   floorplan  → create_floorplan (Python/matplotlib, top-down)
+ *   isometric  → generate_isometric_reference (FAL img2img, needs floorplan)
+ *   anchor     → generate_anchor (FAL, needs isometric)
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -55,9 +57,9 @@ export function ReferencesPage() {
   const navigate = useNavigate();
   const r = state.references;
 
-  const [anchor, setAnchor] = useState<AnchorState>({ kind: "checking" });
-  const [floorplan, setFloorplan] = useState<AnchorState>({ kind: "checking" });
-  const [isometric, setIsometric] = useState<AnchorState>({ kind: "checking" });
+  const [anchor, setAnchor] = useState<AnchorState>({ kind: "missing" });
+  const [floorplan, setFloorplan] = useState<AnchorState>({ kind: "missing" });
+  const [isometric, setIsometric] = useState<AnchorState>({ kind: "missing" });
   const [floorplanOverlayOpen, setFloorplanOverlayOpen] = useState(false);
   const [isometricOverlayOpen, setIsometricOverlayOpen] = useState(false);
   const [anchorOverlayOpen, setAnchorOverlayOpen] = useState(false);
@@ -300,37 +302,15 @@ export function ReferencesPage() {
     }
   };
 
-  // Anchor depends on isometric — only auto-generate after isometric is ready.
-  useEffect(() => {
-    if (isometric.kind !== "ready") {
-      if (isometric.kind === "error" || isometric.kind === "missing") {
-        setAnchor({ kind: "error", message: "Isometric reference required. Generate floorplan + isometric first." });
-      }
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const exists = await checkAnchorExists();
-      if (cancelled) return;
-      if (exists) {
-        setAnchor({ kind: "ready", cacheBust: Date.now() });
-      } else {
-        // BETA: do NOT auto-generate. User triggers via the Regenerate button.
-        // See ROLLOUT.md.
-        setAnchor({ kind: "missing" });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isometric.kind]);
+  // Fresh-start contract: anchor only appears after explicit Generate in
+  // this session. We no longer auto-load from S3 on mount; the cascade gate
+  // (isometric must be ready) is enforced at the click site in runGeneration.
 
   const handleRegenerateAnchor = async () => {
     runGeneration(anchorPrompt || undefined);
   };
 
-  // ─── Floorplan: auto-generate on mount ──────────────────────────
+  // ─── Floorplan: user-triggered via the Generate button ──────────
   const runFloorplan = async () => {
     setFloorplan({ kind: "generating", status: null });
     try {
@@ -345,18 +325,11 @@ export function ReferencesPage() {
     } catch (err) { setFloorplan({ kind: "error", message: err instanceof Error ? err.message : String(err) }); }
   };
 
-  useEffect(() => {
-    let c = false;
-    (async () => {
-      const exists = await checkExists(FLOORPLAN_IMG_PATH);
-      if (c) return;
-      if (exists) { setFloorplan({ kind: "ready", cacheBust: Date.now() }); } else { setFloorplan({ kind: "missing" }); runFloorplan(); }
-    })();
-    return () => { c = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Fresh-start contract: floorplan stays empty until the user presses
+  // Generate. Previously auto-fired on mount; that pulled stale artifacts
+  // from S3 and made every "new project" look pre-populated.
 
-  // ─── Isometric: auto-generate after floorplan is ready ──────────
+  // ─── Isometric: user-triggered via the Generate button ─────────
   const runIsometric = async (promptOverride?: string) => {
     setIsometric({ kind: "generating", status: null });
     try {
@@ -392,19 +365,8 @@ export function ReferencesPage() {
     } catch (err) { setIsometric({ kind: "error", message: err instanceof Error ? err.message : String(err) }); }
   };
 
-  useEffect(() => {
-    if (floorplan.kind !== "ready") return;
-    let c = false;
-    (async () => {
-      const exists = await checkExists(ISOMETRIC_IMG_PATH);
-      if (c) return;
-      // BETA: do NOT auto-generate. User triggers isometric via the Regenerate button.
-      // See ROLLOUT.md.
-      if (exists) { setIsometric({ kind: "ready", cacheBust: Date.now() }); } else { setIsometric({ kind: "missing" }); }
-    })();
-    return () => { c = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [floorplan.kind]);
+  // Fresh-start contract: isometric stays empty until the user presses
+  // Generate (no S3 auto-load on floorplan transition).
 
   const handleApprove = async () => {
     dispatch({ type: "APPROVE_STAGE", stage: "references" });
@@ -457,12 +419,12 @@ export function ReferencesPage() {
       );
     }
 
-    // checking | missing | generating
+    // missing | generating
     const step =
       anchor.kind === "generating" && anchor.status?.current_step
         ? anchor.status.current_step
-        : anchor.kind === "checking"
-        ? "Checking for existing anchor…"
+        : anchor.kind === "missing"
+        ? "Press Generate to create the anchor"
         : "Starting image generation…";
     const progress =
       anchor.kind === "generating" && anchor.status?.progress !== undefined
@@ -482,7 +444,7 @@ export function ReferencesPage() {
         }}
       >
         <div style={{ fontSize: 28 }} aria-hidden>
-          ⏳
+          {anchor.kind === "missing" ? "✦" : "⏳"}
         </div>
         <div style={{ fontSize: 13 }}>{step}</div>
         {progress !== null && (
@@ -570,7 +532,7 @@ export function ReferencesPage() {
                 </div>
               ) : (
                 <div className="placeholder-box placeholder-box--tall" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                  <span>{floorplan.kind === "generating" ? `Generating floorplan… ${floorplan.status?.current_step ?? ""}` : "Checking…"}</span>
+                  <span>{floorplan.kind === "generating" ? `Generating floorplan… ${floorplan.status?.current_step ?? ""}` : "Press Generate to create the floorplan"}</span>
                   {floorplan.kind === "generating" && floorplan.task_id && (
                     <button
                       type="button"
@@ -591,7 +553,11 @@ export function ReferencesPage() {
                   disabled={floorplan.kind === "generating"}
                   onClick={() => runFloorplan()}
                 >
-                  {floorplan.kind === "generating" ? "Generating…" : "Regenerate"}
+                  {floorplan.kind === "generating"
+                    ? "Generating…"
+                    : floorplan.kind === "ready"
+                      ? "Regenerate"
+                      : "Generate"}
                 </button>
               </div>
             </div>
@@ -624,8 +590,8 @@ export function ReferencesPage() {
                   {isometric.kind === "generating"
                     ? `Generating isometric… ${isometric.status?.current_step ?? ""}`
                     : floorplan.kind === "ready"
-                      ? "Checking…"
-                      : "Waiting for floorplan…"}
+                      ? "Press Generate to create the isometric"
+                      : "Generate the floorplan first"}
                 </div>
               )}
 
@@ -778,7 +744,9 @@ export function ReferencesPage() {
                     ? "Generating…"
                     : isometricEditMode
                       ? "Generate Edit"
-                      : "Regenerate"}
+                      : isometric.kind === "ready"
+                        ? "Regenerate"
+                        : "Generate"}
                 </button>
               </div>
             </div>
@@ -1004,7 +972,9 @@ export function ReferencesPage() {
                     ? "Generating…"
                     : anchorEditMode
                       ? "Generate Edit"
-                      : "Regenerate"}
+                      : anchor.kind === "ready"
+                        ? "Regenerate"
+                        : "Generate"}
                 </button>
               </div>
             </div>
