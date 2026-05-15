@@ -25,18 +25,11 @@ import { useProjectContext } from "../hooks/useProjectContext";
 const setupUri = (id: string) => `agent://location-scout/setup/${id}`;
 const setupImgPath = (id: string) => `/artifacts/setup/${id}.png`;
 
-/** Default camera descriptions per setup, pulled from the Figma mock-up. */
-const SETUP_CAMERA: Record<string, string> = {
-  "S1-A": "35mm, angle 45°, medium wide, couch centered",
-  "S1-B": "35mm, angle 45°, medium wide, daylight key",
-  "S1-C": "35mm, angle 45°, dusk warm fill",
-  "S2-A": "50mm, angle 180°, close-up, TV reflection in eyes",
-  "S2-B": "50mm, angle 180°, close-up, night practical only",
-  "S2-C": "50mm, angle 180°, dusk side light",
-  "S3-A": "24mm, angle 90°, wide, kitchen archway frame, late-night moonlight",
-  "S3-B": "24mm, angle 90°, wide, flat daylight",
-  "S3-C": "24mm, angle 90°, wide, overhead practicals at night",
-};
+// Camera descriptions previously hardcoded per Figma mock IDs (S1-A through S3-C)
+// containing Walter's-living-room specifics like "TV reflection in eyes" and
+// "kitchen archway frame". Removed 2026-05-15 — real setups come from the backend
+// state.setups.tiles[].camera, populated upstream by Cinematographer/Editor.
+// When tile.camera is missing the UI shows an empty/dash, not a fixture.
 
 type BatchState =
   | { kind: "checking" }
@@ -130,7 +123,7 @@ export function SetupsPage() {
         id: t.id,
         scene: t.scene,
         mood: t.mood,
-        camera: SETUP_CAMERA[t.id] ?? undefined,
+        camera: undefined,
       })),
     [tiles],
   );
