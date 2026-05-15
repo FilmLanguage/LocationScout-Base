@@ -20,6 +20,7 @@ import { usePipeline } from "../state/PipelineContext";
 import { PromptCard } from "../components/PromptCard";
 import { ReferencePicker, type ReferenceRef } from "../components/ReferencePicker";
 import { ImageOverlay } from "../components/ImageOverlay";
+import { BibleProgressPanel } from "../components/BibleProgressPanel";
 import { useGallery } from "../hooks/useGallery";
 import { useAssemblePrompt } from "../hooks/useAssemblePrompt";
 import { useProjectContext, buildArtifactUrl } from "../hooks/useProjectContext";
@@ -30,6 +31,35 @@ type AnchorState =
   | { kind: "generating"; status: TaskStatus | null; task_id?: string }
   | { kind: "ready"; cacheBust: number }
   | { kind: "error"; message: string };
+
+/**
+ * Eager Bible state — drives the top-of-page banner.
+ *
+ * Contract change (v1.0.34): LocationScout no longer requires an upstream
+ * agent to seed the Location Bible. If the user lands on /references and no
+ * Bible exists for this location_id, this page itself calls scout_location
+ * and surfaces progress. The Orchestrator may also fan out at extract time
+ * (planned separately) — both layers are idempotent via sessionStorage.
+ *
+ * Note: scout_location auto-resolves location_brief + director_vision via
+ * MCP from AGENT_1AD_URL and AGENT_DIRECTOR_URL. If those upstream agents
+ * have no data for this project, the backend pipeline will fail and we
+ * surface the error with a Retry button.
+ */
+type BibleBootState =
+  | { kind: "checking" }
+  | { kind: "ready" }
+  | { kind: "generating"; status: TaskStatus | null; task_id: string }
+  | { kind: "error"; message: string };
+
+/**
+ * sessionStorage key for the in-flight scout_location task_id, scoped per
+ * locationId so re-mounts attach to the same task instead of double-firing.
+ * Cleared on terminal status (ready / error).
+ */
+function bibleTaskKey(locationId: string) {
+  return `ls.bible_task.${locationId}`;
+}
 
 /** Fire-and-forget cancel; the existing poll loop will react to status=cancelled. */
 async function cancelTask(task_id: string) {
@@ -56,6 +86,10 @@ export function ReferencesPage() {
   const ANCHOR_IMG_PATH = artifactUrl("anchor");
   const FLOORPLAN_IMG_PATH = artifactUrl("floorplan");
   const ISOMETRIC_IMG_PATH = artifactUrl("isometric");
+
+  const [bibleBoot, setBibleBoot] = useState<BibleBootState>({ kind: "checking" });
+  // Bumped to force a Bible re-check + re-trigger after the user clicks Retry.
+  const [bibleRetryNonce, setBibleRetryNonce] = useState(0);
 
   const [anchor, setAnchor] = useState<AnchorState>({ kind: "missing" });
   const [floorplan, setFloorplan] = useState<AnchorState>({ kind: "missing" });
@@ -220,6 +254,151 @@ export function ReferencesPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isometricGallery.versions]);
+
+  // ─── Eager Bible bootstrap ─────────────────────────────────────────────
+  // On mount (and on Retry), check if a Location Bible already exists for
+  // this location_id. If yes → mark ready (no-op for the rest of the page).
+  // If no → kick off scout_location and poll until terminal. Idempotent:
+  // re-mounts and tab switches re-attach to the in-flight task via
+  // sessionStorage rather than firing a second pipeline.
+  useEffect(() => {
+    let cancelled = false;
+    const key = bibleTaskKey(LOCATION_ID);
+
+    const pollExistingTask = async (taskId: string) => {
+      setBibleBoot({ kind: "generating", status: null, task_id: taskId });
+      try {
+        const final = await pollTask(
+          taskId,
+          (s) => {
+            if (!cancelled) setBibleBoot({ kind: "generating", status: s, task_id: taskId });
+          },
+          2000,
+          240000,
+        );
+        if (cancelled) return;
+        sessionStorage.removeItem(key);
+        if (final.status === "failed") {
+          setBibleBoot({ kind: "error", message: final.error || "Bible generation failed" });
+          return;
+        }
+        // Re-verify the artifact landed before flipping to ready — guards
+        // against the rare case where the task says completed but the DB
+        // write hasn't propagated.
+        const verify = await callTool<Record<string, unknown> & { error?: string }>(
+          "get_bible",
+          { bible_id: LOCATION_ID },
+        );
+        if (cancelled) return;
+        if (verify.data && !verify.data.error) {
+          setBibleBoot({ kind: "ready" });
+        } else {
+          setBibleBoot({
+            kind: "error",
+            message: "Pipeline reported success but Bible is not readable. Try again.",
+          });
+        }
+      } catch (err) {
+        if (cancelled) return;
+        sessionStorage.removeItem(key);
+        setBibleBoot({
+          kind: "error",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+
+    const run = async () => {
+      // 1. Does the bible already exist?
+      try {
+        const res = await callTool<Record<string, unknown> & { error?: string }>(
+          "get_bible",
+          { bible_id: LOCATION_ID },
+        );
+        if (cancelled) return;
+        if (res.data && !res.data.error) {
+          setBibleBoot({ kind: "ready" });
+          // Clear any stale task pointer — bible is here, no need to track.
+          sessionStorage.removeItem(key);
+          return;
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setBibleBoot({
+          kind: "error",
+          message: `Failed to check Bible: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        return;
+      }
+
+      // 2. Bible missing. Is a scout_location task already running?
+      const existing = sessionStorage.getItem(key);
+      if (existing) {
+        try {
+          const probe = await callTool<TaskStatus & { error?: string }>(
+            "get_task_status",
+            { task_id: existing },
+          );
+          const status = probe.data?.status;
+          if (status === "accepted" || status === "processing") {
+            await pollExistingTask(existing);
+            return;
+          }
+          // Otherwise the cached task is stale (completed-but-no-bible, failed,
+          // or unknown) — drop it and start fresh.
+          sessionStorage.removeItem(key);
+        } catch {
+          sessionStorage.removeItem(key);
+        }
+      }
+
+      // 3. Start a fresh scout_location task. We pass project_id + location
+      // name only — the backend auto-resolves the brief + director vision
+      // via MCP from upstream agents (AGENT_1AD_URL, AGENT_DIRECTOR_URL).
+      // No inline location_brief here because we don't have one at this
+      // mount path (user may have landed on /references directly).
+      setBibleBoot({ kind: "generating", status: null, task_id: "" });
+      try {
+        const result = await callTool<{ task_id?: string; error?: string }>(
+          "scout_location",
+          {
+            project_id: projectId,
+            location_name: LOCATION_ID,
+            priority: "normal",
+          },
+        );
+        if (cancelled) return;
+        const taskId = result.data?.task_id;
+        if (!taskId) {
+          const errMsg =
+            (typeof result.data?.error === "string" && result.data.error) ||
+            "scout_location returned no task_id (upstream brief may be missing)";
+          setBibleBoot({ kind: "error", message: errMsg });
+          return;
+        }
+        sessionStorage.setItem(key, taskId);
+        await pollExistingTask(taskId);
+      } catch (err) {
+        if (cancelled) return;
+        setBibleBoot({
+          kind: "error",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [LOCATION_ID, projectId, bibleRetryNonce]);
+
+  const retryBibleBoot = () => {
+    sessionStorage.removeItem(bibleTaskKey(LOCATION_ID));
+    setBibleBoot({ kind: "checking" });
+    setBibleRetryNonce((n) => n + 1);
+  };
 
   const anchorPromptUsed = anchorGallery.versions[0]?.prompt ?? null;
   const isometricPromptUsed = isometricGallery.versions[0]?.prompt ?? null;
@@ -481,8 +660,53 @@ export function ReferencesPage() {
     );
   };
 
+  // Show the BibleProgressPanel while we're checking for the bible or actively
+  // generating one. Errors render as a separate banner with Retry. Once the
+  // bible is ready, neither block renders and the page behaves exactly as
+  // before (existing floorplan/iso/anchor gates remain the source of truth
+  // for their own enablement).
+  const bibleBannerVisible =
+    bibleBoot.kind === "checking" || bibleBoot.kind === "generating";
+
   return (
     <div className="input-page" data-figma-node="433:26">
+      {bibleBannerVisible && (
+        <BibleProgressPanel
+          progress={
+            bibleBoot.kind === "generating" && bibleBoot.status?.progress !== undefined
+              ? bibleBoot.status.progress
+              : 0
+          }
+          currentStep={
+            bibleBoot.kind === "checking"
+              ? "Checking for existing Location Bible…"
+              : bibleBoot.status?.current_step || "Starting location scouting pipeline…"
+          }
+        />
+      )}
+      {bibleBoot.kind === "error" && (
+        <div
+          className="banner banner--gate"
+          role="alert"
+          style={{
+            borderColor: "rgba(220,60,60,0.5)",
+            background: "rgba(220,60,60,0.08)",
+          }}
+        >
+          <span className="banner__icon" aria-hidden>✗</span>
+          <span className="banner__title">
+            Location Bible generation failed: {bibleBoot.message}
+          </span>
+          <span className="banner__spacer" />
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            onClick={retryBibleBoot}
+          >
+            Retry
+          </button>
+        </div>
+      )}
       {floorplanOverlayOpen && floorplan.kind === "ready" && (
         <ImageOverlay
           src={`${artifactUrl("floorplan", floorplan.cacheBust)}`}

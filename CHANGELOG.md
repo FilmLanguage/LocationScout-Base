@@ -1,5 +1,36 @@
 # Changelog
 
+## v1.0.34 — 2026-05-15
+
+### Added
+
+- **Eager Bible generation on References mount** — until now, opening the
+  References page when no upstream agent had seeded a Location Bible left
+  every panel in the "Bible not found" failure state. The References page now
+  calls `get_bible` on mount; if missing, it auto-fires `scout_location` (the
+  existing async composite: research_era → write_bible → generate_anchor →
+  create_floorplan) and surfaces a `BibleProgressPanel` at the top of the page
+  while the pipeline runs. When the bible lands, the banner disappears and the
+  page renders normally. Failures surface a Retry button.
+- **Idempotency across remounts** — the in-flight scout task_id is stashed in
+  `sessionStorage` under `ls.bible_task.${locationId}`. Re-mounts and tab
+  switches re-attach to the existing task via `get_task_status` and continue
+  polling, rather than starting a second pipeline. Cleared on terminal status.
+
+### Contract change
+
+LocationScout no longer requires an upstream agent (Orchestrator, manual
+script analysis, fixture seeding) to write a Location Bible before the
+References stage opens. LocationScout itself will initiate the scout pipeline
+if the artifact is missing. The Orchestrator may also fan-out at
+`extract_locations` time (planned in a separate change) — both layers are
+idempotent and will not double-fire.
+
+The underlying `scout_location` tool still auto-resolves `location_brief`
+from 1AD and `director_vision` from Director via MCP — if those upstream
+agents have no data for the project, the pipeline fails and the user sees
+the error banner with Retry, instead of a silent "Bible not found".
+
 ## Unreleased
 
 ### Fixed
