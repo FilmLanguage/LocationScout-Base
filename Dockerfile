@@ -5,6 +5,10 @@ WORKDIR /app
 COPY _schemas/ ./_schemas/
 RUN cd _schemas && npm ci && npm run build
 
+# Copy and build local tokens dependency (used by UI sub-package CSS imports)
+COPY _tokens/ ./_tokens/
+RUN cd _tokens && npm ci && npm run build
+
 COPY package*.json ./
 RUN npm ci
 COPY . .
@@ -21,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/src/ui/dist ./dist-ui
 COPY --from=builder /app/_schemas ./_schemas
+COPY --from=builder /app/_tokens ./_tokens
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/scripts ./scripts
 COPY package.json ./
