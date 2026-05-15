@@ -103,7 +103,7 @@ const isApiPath = (p: string) =>
 app.use((req, res, next) => {
   if (!INTER_AGENT_TOKEN) { next(); return; }
   if (req.path === "/health") { next(); return; }
-  if (req.method === "GET" && req.path.startsWith("/artifacts/")) { next(); return; }
+  if ((req.method === "GET" || req.method === "HEAD") && req.path.startsWith("/artifacts/")) { next(); return; }
   // GET to any non-API path → static UI / SPA fallback, no auth required.
   if (req.method === "GET" && !isApiPath(req.path)) { next(); return; }
   // Same-origin bypass: the agent's own UI iframe (served from this same origin)
