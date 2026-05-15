@@ -92,17 +92,20 @@ app.use((req, res, next) => {
 // elements which can't attach custom headers and need to be publicly
 // readable so the embedded UIs (GeneralUI, SceneGenerator) can show them.
 const INTER_AGENT_TOKEN = process.env.INTER_AGENT_TOKEN || "";
-const isPublicUiPath = (p: string) =>
-  p === "/" ||
-  p === "/index.html" ||
-  p === "/logo.svg" ||
-  p === "/favicon.ico" ||
-  p.startsWith("/assets/");
+// Paths that bypass auth entirely (UI shell, static assets, SPA client routes).
+// Anything served by the embedded React app must be reachable without
+// x-agent-token because the browser can't attach custom headers to navigation.
+const isApiPath = (p: string) =>
+  p === "/mcp" ||
+  p === "/health" ||
+  p.startsWith("/artifacts/") ||
+  p.startsWith("/api-docs");
 app.use((req, res, next) => {
   if (!INTER_AGENT_TOKEN) { next(); return; }
   if (req.path === "/health") { next(); return; }
   if (req.method === "GET" && req.path.startsWith("/artifacts/")) { next(); return; }
-  if (req.method === "GET" && isPublicUiPath(req.path)) { next(); return; }
+  // GET to any non-API path → static UI / SPA fallback, no auth required.
+  if (req.method === "GET" && !isApiPath(req.path)) { next(); return; }
   const raw = req.headers["x-agent-token"];
   const token = Array.isArray(raw) ? raw[0] : raw;
   if (token?.trim() !== INTER_AGENT_TOKEN.trim()) {
