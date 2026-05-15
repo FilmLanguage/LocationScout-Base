@@ -3,6 +3,8 @@ process.env.AGENT_NAME ??= "location-scout";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { VERSION } from "./lib/version.js";
 import { isDbEnabled, getPool, isCircuitOpen } from "./lib/db.js";
@@ -90,10 +92,17 @@ app.use((req, res, next) => {
 // elements which can't attach custom headers and need to be publicly
 // readable so the embedded UIs (GeneralUI, SceneGenerator) can show them.
 const INTER_AGENT_TOKEN = process.env.INTER_AGENT_TOKEN || "";
+const isPublicUiPath = (p: string) =>
+  p === "/" ||
+  p === "/index.html" ||
+  p === "/logo.svg" ||
+  p === "/favicon.ico" ||
+  p.startsWith("/assets/");
 app.use((req, res, next) => {
   if (!INTER_AGENT_TOKEN) { next(); return; }
   if (req.path === "/health") { next(); return; }
   if (req.method === "GET" && req.path.startsWith("/artifacts/")) { next(); return; }
+  if (req.method === "GET" && isPublicUiPath(req.path)) { next(); return; }
   const raw = req.headers["x-agent-token"];
   const token = Array.isArray(raw) ? raw[0] : raw;
   if (token?.trim() !== INTER_AGENT_TOKEN.trim()) {
@@ -185,6 +194,23 @@ app.get("/health", async (_req, res) => {
     }
   }
   res.json({ status: "ok", version: VERSION, uptime_seconds: Math.floor(process.uptime()) });
+});
+
+// Serve production UI bundle (built into dist-ui by Dockerfile).
+const __dirname_ui = path.dirname(fileURLToPath(import.meta.url));
+const uiDir = path.join(__dirname_ui, "..", "dist-ui");
+app.use(express.static(uiDir));
+app.get("*", (req, res, next) => {
+  // Don't swallow API/MCP/health/artifacts paths if they 404 — pass through.
+  if (
+    req.path === "/health" ||
+    req.path === "/mcp" ||
+    req.path.startsWith("/artifacts/") ||
+    req.path.startsWith("/api-docs")
+  ) {
+    return next();
+  }
+  res.sendFile(path.join(uiDir, "index.html"));
 });
 
 const PORT = process.env.PORT || 8083;

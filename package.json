@@ -15,7 +15,8 @@
     "test:all": "vitest run --exclude 'src/integration/**'",
     "test:watch": "vitest",
     "dev:ui": "vite",
-    "build:ui": "tsc -p tsconfig.ui.json",
+    "typecheck:ui": "tsc -p tsconfig.ui.json",
+    "build:ui": "cd src/ui && npm ci && npm run build",
     "build:all": "npm run build && npm run build:ui",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:ui\""
   },

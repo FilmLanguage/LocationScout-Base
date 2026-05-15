@@ -9,6 +9,7 @@ COPY package*.json ./
 RUN npm ci
 COPY . .
 RUN npm run build
+RUN npm run build:ui
 
 FROM node:20-slim
 WORKDIR /app
@@ -18,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/src/ui/dist ./dist-ui
 COPY --from=builder /app/_schemas ./_schemas
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/scripts ./scripts
