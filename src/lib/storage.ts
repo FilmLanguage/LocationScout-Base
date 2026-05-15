@@ -32,7 +32,7 @@ import {
   ResearchPackSchema,
 } from "@filmlanguage/schemas";
 import { validatePayload } from "./schema-registry.js";
-import { log } from "./log.js";
+import { log, getRequestProjectId } from "./log.js";
 
 const AGENT_NAME = "location-scout";
 
@@ -92,15 +92,55 @@ async function readLocal(path: string): Promise<Buffer | null> {
 
 // ─── JSON Artifacts ──────────────────────────────────────────────────
 
-export async function saveArtifact(type: string, id: string, data: unknown): Promise<string> {
+const DEFAULT_PROJECT_KEY = process.env.LS_DEFAULT_PROJECT_KEY || "default-project";
+
+/** Resolve the namespace key for a save/load. Priority:
+ *    1. explicit projectId passed by the caller
+ *    2. data.project_id field embedded in the payload (saves only)
+ *    3. RequestContext.project_id set at MCP/HTTP entry
+ *    4. process-wide default
+ *  This lets per-project isolation work even when individual call sites
+ *  don't thread the key through manually — the MCP entry sets it once,
+ *  every storage call in that async chain inherits. */
+function resolveProjectKey(
+  explicit: string | undefined,
+  data?: unknown,
+): string {
+  if (explicit && explicit.trim()) return explicit.trim();
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const fromPayload = (data as Record<string, unknown>).project_id;
+    if (typeof fromPayload === "string" && fromPayload.trim()) return fromPayload.trim();
+  }
+  const fromContext = getRequestProjectId();
+  if (fromContext && fromContext.trim()) return fromContext.trim();
+  return DEFAULT_PROJECT_KEY;
+}
+
+/** Per-project namespaced storage key. */
+function artifactPath(type: string, id: string, projectKey: string): string {
+  return `${projectKey}/${type}/${id}.json`;
+}
+
+/** Legacy un-namespaced storage key, kept as a read-fallback for pre-namespace data. */
+function legacyArtifactPath(type: string, id: string): string {
+  return `${type}/${id}.json`;
+}
+
+export async function saveArtifact(
+  type: string,
+  id: string,
+  data: unknown,
+  projectId?: string,
+): Promise<string> {
   const start = Date.now();
   const destinations: string[] = [];
-  const path = `${type}/${id}.json`;
+  const projectKey = resolveProjectKey(projectId, data);
+  const path = artifactPath(type, id, projectKey);
 
   // Save previous version for diff (one backup only)
   const abs = resolveLocalPath(path);
   if (abs && existsSync(abs)) {
-    const prevPath = resolveLocalPath(`${type}/${id}.prev.json`);
+    const prevPath = resolveLocalPath(artifactPath(type, `${id}.prev`, projectKey));
     if (prevPath) {
       copyFileSync(abs, prevPath);
     }
@@ -161,42 +201,54 @@ export async function saveArtifact(type: string, id: string, data: unknown): Pro
     action: `data_write:${type}`,
     status: "completed",
     duration_ms: Date.now() - start,
-    details: { type, id, bytes: Buffer.byteLength(json, "utf8"), destinations },
+    details: { type, id, project_key: projectKey, bytes: Buffer.byteLength(json, "utf8"), destinations },
   });
 
   return result;
 }
 
-export async function loadArtifact<T = unknown>(type: string, id: string): Promise<T | null> {
-  const path = `${type}/${id}.json`;
-
-  let raw: T | null = null;
-
-  // L1: memory
+/**
+ * Try one storage path through memory → disk → S3. Returns the parsed JSON
+ * payload or null. No Zod validation here — caller wraps the resolved value
+ * with validatePayload() once we've decided which path actually hit.
+ */
+async function tryLoadJsonByPath<T>(path: string): Promise<T | null> {
   const entry = memoryStore.get(path);
   if (entry) {
-    raw = JSON.parse(entry.data) as T;
+    try { return JSON.parse(entry.data) as T; } catch { /* fall through */ }
   }
-
-  // L2: local disk
-  if (!raw) {
-    const local = await readLocal(path);
-    if (local) {
-      const str = local.toString("utf8");
-      raw = JSON.parse(str) as T;
+  const local = await readLocal(path);
+  if (local) {
+    const str = local.toString("utf8");
+    try {
+      const parsed = JSON.parse(str) as T;
       memoryStore.set(path, { data: str, contentType: "application/json" });
-    }
+      return parsed;
+    } catch { /* fall through */ }
   }
-
-  // L3: S3
-  if (!raw && S3_BUCKET) {
+  if (S3_BUCKET) {
     try {
       const { data } = await s3Download(path);
-      raw = JSON.parse(data.toString()) as T;
-    } catch {
-      return null;
-    }
+      return JSON.parse(data.toString()) as T;
+    } catch { /* fall through */ }
   }
+  return null;
+}
+
+export async function loadArtifact<T = unknown>(
+  type: string,
+  id: string,
+  projectId?: string,
+): Promise<T | null> {
+  const projectKey = resolveProjectKey(projectId);
+  const primaryPath = artifactPath(type, id, projectKey);
+  const legacyPath = legacyArtifactPath(type, id);
+
+  // Primary: per-project namespaced key.
+  let raw = await tryLoadJsonByPath<T>(primaryPath);
+  // Fallback: pre-namespace legacy path, so existing data stays readable
+  // while the new write path migrates the namespace forward.
+  if (!raw) raw = await tryLoadJsonByPath<T>(legacyPath);
 
   if (!raw) return null;
 
@@ -204,18 +256,23 @@ export async function loadArtifact<T = unknown>(type: string, id: string): Promi
   return validatePayload<T>(type, raw);
 }
 
-export async function artifactExists(type: string, id: string): Promise<boolean> {
-  const path = `${type}/${id}.json`;
-  if (memoryStore.has(path)) return true;
-  if (resolveLocalPath(path)) {
-    try {
-      await fs.access(resolveLocalPath(path)!);
-      return true;
-    } catch {
-      /* fall through */
+export async function artifactExists(
+  type: string,
+  id: string,
+  projectId?: string,
+): Promise<boolean> {
+  const projectKey = resolveProjectKey(projectId);
+  const primaryPath = artifactPath(type, id, projectKey);
+  const legacyPath = legacyArtifactPath(type, id);
+
+  for (const path of [primaryPath, legacyPath]) {
+    if (memoryStore.has(path)) return true;
+    const abs = resolveLocalPath(path);
+    if (abs) {
+      try { await fs.access(abs); return true; } catch { /* fall through */ }
     }
+    if (S3_BUCKET && await s3Exists(path)) return true;
   }
-  if (S3_BUCKET) return s3Exists(path);
   return false;
 }
 
@@ -865,18 +922,30 @@ export function deleteTask(task_id: string): boolean {
  * List artifact ids of a given type. Reads memory + local disk + S3
  * (deduped) so the result survives Cloud Run cold starts. Returns base
  * ids without the `.json` suffix (e.g. `bible_001`, not `bible_001.json`).
+ *
+ * Honors per-project namespacing: scans both `{projectKey}/{type}/` and the
+ * legacy un-namespaced `{type}/` so pre-namespace data still surfaces.
  */
-export async function listLocalArtifacts(type: string): Promise<string[]> {
-  const prefix = `${type}/`;
+export async function listLocalArtifacts(type: string, projectId?: string): Promise<string[]> {
+  const projectKey = resolveProjectKey(projectId);
+  const scopedPrefix = `${projectKey}/${type}/`;
+  const legacyPrefix = `${type}/`;
   const ids = new Set<string>();
 
   for (const k of memoryStore.keys()) {
-    if (!k.startsWith(prefix)) continue;
-    ids.add(k.slice(prefix.length).replace(/\.json$/, ""));
+    if (k.startsWith(scopedPrefix)) {
+      const rel = k.slice(scopedPrefix.length);
+      if (!rel.includes("/")) ids.add(rel.replace(/\.json$/, ""));
+    } else if (k.startsWith(legacyPrefix)) {
+      const rel = k.slice(legacyPrefix.length);
+      if (!rel.includes("/")) ids.add(rel.replace(/\.json$/, ""));
+    }
   }
 
-  const localDir = resolveLocalDir(type);
-  if (localDir) {
+  // Local disk — scan both layouts.
+  for (const baseRel of [`${projectKey}/${type}`, type]) {
+    const localDir = resolveLocalDir(baseRel);
+    if (!localDir) continue;
     try {
       const entries = await fs.readdir(localDir);
       for (const f of entries) {
@@ -889,12 +958,14 @@ export async function listLocalArtifacts(type: string): Promise<string[]> {
   }
 
   if (S3_BUCKET) {
-    const keys = await s3List(prefix);
-    for (const key of keys) {
-      if (!key.endsWith(".json") || key.endsWith(".prev.json")) continue;
-      const rel = key.slice(prefix.length);
-      if (rel.includes("/")) continue; // direct children only
-      ids.add(rel.replace(/\.json$/, ""));
+    for (const prefix of [scopedPrefix, legacyPrefix]) {
+      const keys = await s3List(prefix);
+      for (const key of keys) {
+        if (!key.endsWith(".json") || key.endsWith(".prev.json")) continue;
+        const rel = key.slice(prefix.length);
+        if (rel.includes("/")) continue; // direct children only
+        ids.add(rel.replace(/\.json$/, ""));
+      }
     }
   }
 

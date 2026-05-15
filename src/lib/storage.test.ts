@@ -45,6 +45,34 @@ describe("artifact CRUD (memory mode, no GCS)", () => {
   });
 });
 
+describe("per-project namespacing", () => {
+  it("isolates payloads written under different explicit project_ids", async () => {
+    const t = `iso-${Date.now()}`;
+    await saveArtifact(t, "shared", { n: "A" }, "proj-a");
+    await saveArtifact(t, "shared", { n: "B" }, "proj-b");
+    const a = await loadArtifact<{ n: string }>(t, "shared", "proj-a");
+    const b = await loadArtifact<{ n: string }>(t, "shared", "proj-b");
+    expect(a?.n).toBe("A");
+    expect(b?.n).toBe("B");
+  });
+
+  it("extracts project_id from payload when explicit not given", async () => {
+    const t = `payload-${Date.now()}`;
+    await saveArtifact(t, "from-payload", { project_id: "proj-x", value: 42 });
+    const x = await loadArtifact<{ value: number }>(t, "from-payload", "proj-x");
+    const other = await loadArtifact<{ value: number }>(t, "from-payload", "proj-y");
+    expect(x?.value).toBe(42);
+    expect(other).toBeNull();
+  });
+
+  it("artifactExists honours project namespace", async () => {
+    const t = `exists-${Date.now()}`;
+    await saveArtifact(t, "thing", { ok: true }, "proj-a");
+    expect(await artifactExists(t, "thing", "proj-a")).toBe(true);
+    expect(await artifactExists(t, "thing", "proj-b")).toBe(false);
+  });
+});
+
 describe("task store", () => {
   it("creates and retrieves a task", async () => {
     const task = createTask("task-1", "starting");

@@ -15,16 +15,12 @@ import { useNavigate } from "react-router-dom";
 import { callTool, pollTask, type TaskStatus } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
 import type { DirectorVision, LocationBrief } from "../state/pipeline";
+import { useProjectContext } from "../hooks/useProjectContext";
 
 interface UpstreamGate {
   director_film_vision: "ready" | "missing" | "unknown";
   warnings: string[];
 }
-
-// Stable IDs for the demo session — Phase 5 wiring uses fixed values so the
-// backend can be exercised without persistent project state.
-const PROJECT_ID = "demo-project";
-const LOCATION_ID = "loc_001";
 
 type BriefListField = "scenes" | "props" | "entryExit" | "generationFlags";
 
@@ -33,6 +29,7 @@ export function InputPage() {
   const navigate = useNavigate();
   const brief = state.brief;
   const vision = state.vision;
+  const { projectId: PROJECT_ID, locationId: LOCATION_ID } = useProjectContext();
 
   // Anchor for the Type/Time-of-day row + flash feedback when the user
   // tries to advance without making the required selections.

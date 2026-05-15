@@ -8,8 +8,7 @@
 import { useEffect, useState } from "react";
 import { callTool } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
-
-const LOCATION_ID = "loc_001";
+import { useProjectContext } from "../hooks/useProjectContext";
 
 interface Consumer {
   title: string;
@@ -86,6 +85,7 @@ export function OutputsPage() {
   const { state, dispatch } = usePipeline();
   const outputsStatus = state.statuses.outputs;
   const [outputs, setOutputs] = useState<unknown>(null);
+  const { locationId: LOCATION_ID } = useProjectContext();
 
   // Fetch outputs from backend on mount.
   useEffect(() => {

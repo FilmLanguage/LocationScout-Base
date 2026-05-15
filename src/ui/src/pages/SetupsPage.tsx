@@ -21,10 +21,7 @@ import { ReferencePicker, type ReferenceRef } from "../components/ReferencePicke
 import { ImageOverlay } from "../components/ImageOverlay";
 import { useGallery } from "../hooks/useGallery";
 import { useAssemblePrompt } from "../hooks/useAssemblePrompt";
-
-const LOCATION_ID = "loc_001";
-const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
-const ANCHOR_URI = `agent://location-scout/anchor/${LOCATION_ID}`;
+import { useProjectContext } from "../hooks/useProjectContext";
 const setupUri = (id: string) => `agent://location-scout/setup/${id}`;
 const setupImgPath = (id: string) => `/artifacts/setup/${id}.png`;
 
@@ -50,6 +47,9 @@ type BatchState =
 export function SetupsPage() {
   const { state, dispatch } = usePipeline();
   const { tiles, selectedId } = state.setups;
+  const { locationId: LOCATION_ID } = useProjectContext();
+  const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
+  const ANCHOR_URI = `agent://location-scout/anchor/${LOCATION_ID}`;
   const selected = tiles.find((t) => t.id === selectedId) ?? tiles[0];
   const approvedCount = tiles.filter((t) => t.status === "approved").length;
   // "Reviewable" = not yet approved (covers both legacy "draft" and the

@@ -13,9 +13,7 @@ import { useNavigate } from "react-router-dom";
 import { callTool, pollTask, type TaskStatus } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
 import type { SetupTile } from "../state/pipeline";
-
-const LOCATION_ID = "loc_001";
-const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
+import { useProjectContext } from "../hooks/useProjectContext";
 
 const variationUri = (id: string) =>
   `agent://location-scout/mood-variation/${encodeURIComponent(id)}`;
@@ -56,6 +54,8 @@ export function LightStatesPage() {
   const navigate = useNavigate();
   const ls = state.lightStates;
   const setupTiles = state.setups.tiles;
+  const { locationId: LOCATION_ID } = useProjectContext();
+  const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
   const activeSource = ls.sources.find((s) => s.id === ls.activeSourceId) ?? ls.sources[0];
   const visibleVariations = ls.variations.filter((v) => v.status !== "canceled");
   const approvedCount = visibleVariations.filter((v) => v.status === "approved").length;

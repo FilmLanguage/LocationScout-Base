@@ -22,13 +22,7 @@ import { ReferencePicker, type ReferenceRef } from "../components/ReferencePicke
 import { ImageOverlay } from "../components/ImageOverlay";
 import { useGallery } from "../hooks/useGallery";
 import { useAssemblePrompt } from "../hooks/useAssemblePrompt";
-
-const LOCATION_ID = "loc_001";
-const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
-const ANCHOR_URI = `agent://location-scout/anchor/${LOCATION_ID}`;
-const ANCHOR_IMG_PATH = `/artifacts/anchor/${LOCATION_ID}.png`;
-const FLOORPLAN_IMG_PATH = `/artifacts/floorplan/${LOCATION_ID}.png`;
-const ISOMETRIC_IMG_PATH = `/artifacts/isometric/${LOCATION_ID}.png`;
+import { useProjectContext, buildArtifactUrl } from "../hooks/useProjectContext";
 
 const setupsSummary = [
   { id: "S1", camera: "x:2.1 y:3.0 angle:45° | 35mm", characters: "Characters: Walter, Skyler", composition: "Composition: Medium wide, couch centered" },
@@ -56,6 +50,18 @@ export function ReferencesPage() {
   const { state, dispatch } = usePipeline();
   const navigate = useNavigate();
   const r = state.references;
+  const { projectId, locationId: LOCATION_ID } = useProjectContext();
+  const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
+  const ANCHOR_URI = `agent://location-scout/anchor/${LOCATION_ID}`;
+  // Backend HTTP routes resolve the storage namespace via ?project_id=… —
+  // without it the route falls back to default-project and would pick up
+  // another project's artifacts. Cache-bust is appended at the use site
+  // because it changes per render.
+  const artifactUrl = (type: "anchor" | "floorplan" | "isometric", cacheBust?: number) =>
+    buildArtifactUrl(type, `${LOCATION_ID}.png`, projectId, cacheBust);
+  const ANCHOR_IMG_PATH = artifactUrl("anchor");
+  const FLOORPLAN_IMG_PATH = artifactUrl("floorplan");
+  const ISOMETRIC_IMG_PATH = artifactUrl("isometric");
 
   const [anchor, setAnchor] = useState<AnchorState>({ kind: "missing" });
   const [floorplan, setFloorplan] = useState<AnchorState>({ kind: "missing" });
@@ -390,7 +396,7 @@ export function ReferencesPage() {
     if (anchor.kind === "ready") {
       return (
         <img
-          src={`${ANCHOR_IMG_PATH}?v=${anchor.cacheBust}`}
+          src={`${artifactUrl("anchor", anchor.cacheBust)}`}
           alt="Anchor reference"
           style={{
             width: "100%",
@@ -485,19 +491,19 @@ export function ReferencesPage() {
     <div className="input-page" data-figma-node="433:26">
       {floorplanOverlayOpen && floorplan.kind === "ready" && (
         <ImageOverlay
-          src={`${FLOORPLAN_IMG_PATH}?v=${floorplan.cacheBust}`}
+          src={`${artifactUrl("floorplan", floorplan.cacheBust)}`}
           onClose={() => setFloorplanOverlayOpen(false)}
         />
       )}
       {isometricOverlayOpen && isometric.kind === "ready" && (
         <ImageOverlay
-          src={`${ISOMETRIC_IMG_PATH}?v=${isometric.cacheBust}`}
+          src={`${artifactUrl("isometric", isometric.cacheBust)}`}
           onClose={() => setIsometricOverlayOpen(false)}
         />
       )}
       {anchorOverlayOpen && anchor.kind === "ready" && (
         <ImageOverlay
-          src={`${ANCHOR_IMG_PATH}?v=${anchor.cacheBust}`}
+          src={`${artifactUrl("anchor", anchor.cacheBust)}`}
           onClose={() => setAnchorOverlayOpen(false)}
         />
       )}
@@ -516,7 +522,7 @@ export function ReferencesPage() {
             <div className="card__body" style={{ gap: "var(--sp-2)", flex: 1, minHeight: 0 }}>
               {floorplan.kind === "ready" ? (
                 <img
-                  src={`${FLOORPLAN_IMG_PATH}?v=${floorplan.cacheBust}`}
+                  src={`${artifactUrl("floorplan", floorplan.cacheBust)}`}
                   alt="Floorplan"
                   onClick={() => setFloorplanOverlayOpen(true)}
                   style={{
@@ -580,7 +586,7 @@ export function ReferencesPage() {
               {/* Image — always visible (independent of prompt collapse) */}
               {isometric.kind === "ready" ? (
                 <img
-                  src={`${ISOMETRIC_IMG_PATH}?v=${isometric.cacheBust}`}
+                  src={`${artifactUrl("isometric", isometric.cacheBust)}`}
                   alt="Isometric preview"
                   onClick={() => setIsometricOverlayOpen(true)}
                   style={{ width: "100%", borderRadius: 8, display: "block", background: "var(--border)", cursor: "zoom-in" }}
@@ -693,7 +699,7 @@ export function ReferencesPage() {
                         ? [
                             {
                               parentLabel: "floorplan",
-                              imageUrl: `${FLOORPLAN_IMG_PATH}?v=${floorplan.cacheBust}`,
+                              imageUrl: `${artifactUrl("floorplan", floorplan.cacheBust)}`,
                               kind: "external",
                             },
                           ]
@@ -773,7 +779,7 @@ export function ReferencesPage() {
               <div style={{ position: "relative", width: "100%", paddingBottom: "56.25%" }}>
                 {anchor.kind === "ready" ? (
                   <img
-                    src={`${ANCHOR_IMG_PATH}?v=${anchor.cacheBust}`}
+                    src={`${artifactUrl("anchor", anchor.cacheBust)}`}
                     alt="Anchor reference"
                     onClick={() => setAnchorOverlayOpen(true)}
                     style={{
@@ -923,7 +929,7 @@ export function ReferencesPage() {
                         ? [
                             {
                               parentLabel: "isometric",
-                              imageUrl: `${ISOMETRIC_IMG_PATH}?v=${isometric.cacheBust}`,
+                              imageUrl: `${artifactUrl("isometric", isometric.cacheBust)}`,
                               kind: "isometric",
                             },
                           ]

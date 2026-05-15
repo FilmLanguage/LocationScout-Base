@@ -18,8 +18,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { callTool } from "../api/mcp";
 import { ImageOverlay } from "../components/ImageOverlay";
 import { usePipeline } from "../state/PipelineContext";
-
-const LOCATION_ID = "loc_001"; // BETA: same hard-code as the rest of the pipeline (see ReferencesPage)
+import { useProjectContext } from "../hooks/useProjectContext";
 
 type Kind = "anchor" | "floorplan" | "isometric" | "setup" | "mood_variation" | "user-ref";
 
@@ -65,6 +64,7 @@ function fileToBase64(file: File): Promise<string> {
 export function GalleryPage() {
   const { state } = usePipeline();
   const inputApproved = state.statuses.input === "approved";
+  const { locationId: LOCATION_ID } = useProjectContext();
 
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [loading, setLoading] = useState(true);

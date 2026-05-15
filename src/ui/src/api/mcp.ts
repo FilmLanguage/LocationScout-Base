@@ -21,16 +21,31 @@ export interface McpToolResult<T = unknown> {
  *
  * Throws on transport / JSON-RPC errors.
  */
+/** Read project_id from the current page URL. Injected into every MCP call
+ *  so the backend's MCP-entry middleware can stamp it on the request
+ *  context and storage layers automatically namespace per-project. Caller-
+ *  supplied `args.project_id` always wins. */
+function projectIdFromUrl(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const raw = new URLSearchParams(window.location.search).get("project_id");
+  return raw && raw.trim() ? raw.trim() : undefined;
+}
+
 export async function callTool<T = unknown>(
   name: string,
   args: Record<string, unknown>,
 ): Promise<McpToolResult<T>> {
   const id = nextId++;
+  const urlProjectId = projectIdFromUrl();
+  const argsWithProject =
+    urlProjectId && args.project_id === undefined
+      ? { ...args, project_id: urlProjectId }
+      : args;
   const body = {
     jsonrpc: "2.0",
     id,
     method: "tools/call",
-    params: { name, arguments: args },
+    params: { name, arguments: argsWithProject },
   };
 
   // Retry on 500/502/503 — backend may still be starting up.

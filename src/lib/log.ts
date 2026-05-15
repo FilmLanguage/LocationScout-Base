@@ -50,6 +50,12 @@ export interface LogEntry {
 interface RequestContext {
   request_id: string;
   tool_name?: string;
+  /** Set at MCP entry from request body params.arguments.project_id (when
+   *  present) or from HTTP /artifacts/* query ?project_id=…. Storage reads
+   *  this as the last fallback when callers don't pass project_id explicitly,
+   *  so per-project namespacing works without threading the key through every
+   *  save/load call site. */
+  project_id?: string;
 }
 
 const ctx = new AsyncLocalStorage<RequestContext>();
@@ -58,12 +64,20 @@ export function getRequestId(): string | undefined {
   return ctx.getStore()?.request_id;
 }
 
+/** Project key from the current request context (set at MCP / HTTP entry).
+ *  Returns undefined when called outside any request context or when the
+ *  request didn't carry a project_id. */
+export function getRequestProjectId(): string | undefined {
+  return ctx.getStore()?.project_id;
+}
+
 export function withRequestContext<T>(
   request_id: string,
   tool_name: string | undefined,
   fn: () => Promise<T>,
+  project_id?: string,
 ): Promise<T> {
-  return ctx.run({ request_id, tool_name }, fn);
+  return ctx.run({ request_id, tool_name, project_id }, fn);
 }
 
 export function log(entry: Omit<LogEntry, "ts" | "agent" | "request_id">): void {

@@ -125,11 +125,23 @@ app.use((req, res, next) => {
 
 app.post("/mcp", async (req, res) => {
   const request_id = randomUUID();
-  const body = req.body as { method?: string; params?: { name?: string; uri?: string } } | undefined;
+  const body = req.body as {
+    method?: string;
+    params?: {
+      name?: string;
+      uri?: string;
+      arguments?: Record<string, unknown>;
+    };
+  } | undefined;
   const rpcMethod = body?.method ?? "unknown";
   const tool = body?.params?.name;
   const uri = body?.params?.uri;
   const action = tool ? `tool:${tool}` : uri ? `resource_read:${uri}` : `mcp:${rpcMethod}`;
+  // Per-project isolation: pull project_id off the tool arguments (when the
+  // caller passed one) and put it on the request context so storage layer
+  // namespaces artifacts under that project for the whole async chain.
+  const rawProjectId = body?.params?.arguments?.project_id;
+  const project_id = typeof rawProjectId === "string" && rawProjectId.trim() ? rawProjectId.trim() : undefined;
 
   await withRequestContext(request_id, tool, async () => {
     const start = Date.now();
@@ -147,8 +159,17 @@ app.post("/mcp", async (req, res) => {
       log({ category: "error", action, status: "error", duration_ms: Date.now() - start, details: { from_category: "mcp_in", error_message: message.slice(0, 500) } });
       throw err;
     }
-  });
+  }, project_id);
 });
+
+/** Pull ?project_id=… off an /artifacts request and put it on the request
+ *  context so storage layers automatically scope to that project. Returns
+ *  the resolved id (undefined when not provided) for logging. */
+function projectIdFromQuery(req: import("express").Request): string | undefined {
+  const raw = req.query.project_id;
+  if (typeof raw === "string" && raw.trim()) return raw.trim();
+  return undefined;
+}
 
 // Serve a specific image version by its short image_id — used by PromptCard
 // when the user selects an older version from the gallery dropdown.
@@ -156,41 +177,49 @@ app.get("/artifacts/:type/v/:file", async (req, res) => {
   const { type, file } = req.params;
   const ext = file.split(".").pop() ?? "png";
   const image_id = file.replace(/\.[^.]+$/, "");
-  try {
-    const { loadImageVersion } = await import("./lib/storage.js");
-    const img = await loadImageVersion(type, image_id, ext === "jpeg" ? "jpg" : ext);
-    if (!img) { res.status(404).json({ error: "not_found" }); return; }
-    res.setHeader("Content-Type", img.contentType);
-    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-    res.send(img.data);
-  } catch {
-    res.status(500).json({ error: "internal" });
-  }
+  const project_id = projectIdFromQuery(req);
+  await withRequestContext(randomUUID(), `artifacts:${type}:v`, async () => {
+    try {
+      const { loadImageVersion } = await import("./lib/storage.js");
+      const img = await loadImageVersion(type, image_id, ext === "jpeg" ? "jpg" : ext);
+      if (!img) { res.status(404).json({ error: "not_found" }); return; }
+      res.setHeader("Content-Type", img.contentType);
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.send(img.data);
+    } catch {
+      res.status(500).json({ error: "internal" });
+    }
+  }, project_id);
 });
 
 // Serve stored artifacts (images, JSON) via HTTP so the UI can display them.
 // GET /artifacts/:type/:id.ext → loads from storage layer (memory → disk → S3).
+// Optional ?project_id=… scopes the lookup; without it, falls back to
+// per-process default + legacy un-namespaced paths.
 app.get("/artifacts/:type/:file", async (req, res) => {
   const { type, file } = req.params;
   const ext = file.split(".").pop() ?? "";
   const id = file.replace(/\.[^.]+$/, "");
-  try {
-    if (["png", "jpg", "jpeg"].includes(ext)) {
-      const { loadImage } = await import("./lib/storage.js");
-      const img = await loadImage(type, id, ext === "jpeg" ? "jpg" : ext);
-      if (!img) { res.status(404).json({ error: "not_found" }); return; }
-      res.setHeader("Content-Type", img.contentType);
-      res.setHeader("Cache-Control", "no-cache");
-      res.send(img.data);
-    } else {
-      const { loadArtifact } = await import("./lib/storage.js");
-      const data = await loadArtifact(type, id);
-      if (!data) { res.status(404).json({ error: "not_found" }); return; }
-      res.json(data);
+  const project_id = projectIdFromQuery(req);
+  await withRequestContext(randomUUID(), `artifacts:${type}`, async () => {
+    try {
+      if (["png", "jpg", "jpeg"].includes(ext)) {
+        const { loadImage } = await import("./lib/storage.js");
+        const img = await loadImage(type, id, ext === "jpeg" ? "jpg" : ext);
+        if (!img) { res.status(404).json({ error: "not_found" }); return; }
+        res.setHeader("Content-Type", img.contentType);
+        res.setHeader("Cache-Control", "no-cache");
+        res.send(img.data);
+      } else {
+        const { loadArtifact } = await import("./lib/storage.js");
+        const data = await loadArtifact(type, id);
+        if (!data) { res.status(404).json({ error: "not_found" }); return; }
+        res.json(data);
+      }
+    } catch {
+      res.status(500).json({ error: "internal" });
     }
-  } catch {
-    res.status(500).json({ error: "internal" });
-  }
+  }, project_id);
 });
 
 mountSwagger(app);

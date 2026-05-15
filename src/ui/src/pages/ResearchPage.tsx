@@ -7,14 +7,14 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { callTool } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
-
-const LOCATION_ID = "loc_001";
-const RESEARCH_PACK_URI = `agent://location-scout/research/research_${LOCATION_ID}`;
+import { useProjectContext } from "../hooks/useProjectContext";
 
 export function ResearchPage() {
   const { state, dispatch } = usePipeline();
   const navigate = useNavigate();
   const { facts, typicalElements, anachronisms, iteration, maxIterations } = state.research;
+  const { locationId: LOCATION_ID } = useProjectContext();
+  const RESEARCH_PACK_URI = `agent://location-scout/research/research_${LOCATION_ID}`;
 
   const [newFact, setNewFact] = useState("");
   const [newAnachronism, setNewAnachronism] = useState("");

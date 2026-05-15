@@ -8,10 +8,7 @@ import { useNavigate } from "react-router-dom";
 import { callTool, pollTask } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
 import type { AnalysisState } from "../state/pipeline";
-
-const LOCATION_ID = "loc_001";
-const RESEARCH_PACK_URI = `agent://location-scout/research/research_${LOCATION_ID}`;
-const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
+import { useProjectContext } from "../hooks/useProjectContext";
 
 type ToolFeedback =
   | { kind: "idle" }
@@ -24,6 +21,9 @@ export function AnalysisPage() {
   const navigate = useNavigate();
   const a = state.analysis;
   const [feedback, setFeedback] = useState<ToolFeedback>({ kind: "idle" });
+  const { locationId: LOCATION_ID } = useProjectContext();
+  const RESEARCH_PACK_URI = `agent://location-scout/research/research_${LOCATION_ID}`;
+  const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
 
   /** Normalize an array that may contain strings or objects with label/item/name. */
   const toStringArray = (arr: unknown): string[] => {
