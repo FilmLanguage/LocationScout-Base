@@ -44,6 +44,27 @@ export function SetupsPage() {
   const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
   const ANCHOR_URI = `agent://location-scout/anchor/${LOCATION_ID}`;
   const selected = tiles.find((t) => t.id === selectedId) ?? tiles[0];
+  // Empty-tiles guard: without this, every JSX access to `selected.id` below
+  // throws `TypeError: Cannot read properties of undefined (reading 'id')` and
+  // the route renders a blank iframe. Reproduced live 2026-05-16.
+  if (!selected) {
+    return (
+      <div
+        className="input-page"
+        data-figma-node="436:33"
+        style={{ padding: 32, textAlign: "center" }}
+      >
+        <h3 style={{ fontSize: 14, marginBottom: 8, color: "var(--text)" }}>
+          No setups extracted yet
+        </h3>
+        <p style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.6 }}>
+          Go to <a href="/" style={{ color: "var(--accent)" }}>References</a> and
+          click <strong>Extract Setups</strong> after the floorplan + anchor are
+          ready. Setups depend on a Location Bible plus a generated floorplan.
+        </p>
+      </div>
+    );
+  }
   const approvedCount = tiles.filter((t) => t.status === "approved").length;
   // "Reviewable" = not yet approved (covers both legacy "draft" and the
   // new "none" initial state). Drives the Approve-All count + send gate.

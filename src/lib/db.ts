@@ -17,7 +17,7 @@ import { z } from "zod";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
-import { log } from "./log.js";
+import { log, getRequestProjectId } from "./log.js";
 
 const { Pool } = pg;
 
@@ -233,8 +233,15 @@ async function ensureLocation(
 // ─── Key extraction ─────────────────────────────────────────────────
 
 function extractProjectKey(payload: Record<string, unknown>): string {
-  const fromPayload = typeof payload.project_id === "string" ? payload.project_id : null;
-  return fromPayload || process.env.LS_DEFAULT_PROJECT_KEY || "default-project";
+  // Priority: payload.project_id → AsyncLocalStorage request ctx → env default.
+  // See ai-stanislavsky-workspace/docs/canonical/per-project-namespace.md for
+  // why each layer matters; without the request-ctx fallback, every project
+  // collapses to LS_DEFAULT_PROJECT_KEY and per-project isolation breaks.
+  const fromPayload = typeof payload.project_id === "string" ? payload.project_id.trim() : "";
+  if (fromPayload) return fromPayload;
+  const fromCtx = getRequestProjectId();
+  if (fromCtx && fromCtx.trim()) return fromCtx.trim();
+  return process.env.LS_DEFAULT_PROJECT_KEY || "default-project";
 }
 
 function extractLocationKey(type: string, id: string, payload: Record<string, unknown>): string {

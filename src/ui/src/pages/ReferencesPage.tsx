@@ -91,6 +91,17 @@ export function ReferencesPage() {
   // Bumped to force a Bible re-check + re-trigger after the user clicks Retry.
   const [bibleRetryNonce, setBibleRetryNonce] = useState(0);
 
+  // Setup extraction — drives the "Extract Setups" button in the Setup
+  // Extraction card. Replaces the dead "Manual Input?" affordance that shipped
+  // in v1.0.31-v1.0.35; with no handler the user had no way to populate
+  // state.setups.tiles and the /setups page rendered a TypeError.
+  type ExtractState =
+    | { kind: "idle" }
+    | { kind: "running"; status: TaskStatus | null; task_id?: string }
+    | { kind: "ready"; count: number }
+    | { kind: "error"; message: string };
+  const [extract, setExtract] = useState<ExtractState>({ kind: "idle" });
+
   const [anchor, setAnchor] = useState<AnchorState>({ kind: "missing" });
   const [floorplan, setFloorplan] = useState<AnchorState>({ kind: "missing" });
   const [isometric, setIsometric] = useState<AnchorState>({ kind: "missing" });
@@ -566,6 +577,71 @@ export function ReferencesPage() {
       console.error("[approve_artifact anchor] failed:", err);
     }
     navigate("/setups");
+  };
+
+  /**
+   * Trigger backend extract_setups. Floorplan must exist (hard gate). On
+   * success we resolve each artifact URI to a SetupTile by reading the
+   * /artifacts/setup/<id>.json sidecar and stamping scene + mood so the
+   * Setups page tiles render with real data instead of empty pills.
+   */
+  const handleExtractSetups = async () => {
+    if (floorplan.kind !== "ready") {
+      setExtract({ kind: "error", message: "Generate the floorplan first — setups depend on it." });
+      return;
+    }
+    setExtract({ kind: "running", status: null });
+    try {
+      const r = await callTool<{ task_id: string }>("extract_setups", {
+        floorplan_uri: `agent://location-scout/floorplan/${LOCATION_ID}`,
+        mood_state_uris: [],
+        project_id: projectId,
+      });
+      const taskId = r.data?.task_id;
+      if (!taskId) {
+        setExtract({ kind: "error", message: "extract_setups returned no task_id" });
+        return;
+      }
+      setExtract({ kind: "running", status: null, task_id: taskId });
+      const final = await pollTask(
+        taskId,
+        (s) => setExtract({ kind: "running", status: s, task_id: taskId }),
+        1500,
+        180000,
+      );
+      if (final.status === "failed") {
+        setExtract({ kind: "error", message: final.error || "Extract failed" });
+        return;
+      }
+      const artifacts = (final as { artifacts?: Array<{ uri: string }> }).artifacts ?? [];
+      if (artifacts.length === 0) {
+        setExtract({ kind: "error", message: "No setups produced — the LLM returned an empty plan." });
+        return;
+      }
+      const tiles = await Promise.all(
+        artifacts.map(async (a) => {
+          const sid = a.uri.split("/").pop() || "";
+          try {
+            const url = `/artifacts/setup/${sid}.json?project_id=${encodeURIComponent(projectId)}`;
+            const resp = await fetch(url, { cache: "no-store" });
+            if (!resp.ok) return { id: sid, status: "none" as const, scene: "", mood: "" };
+            const data = await resp.json() as Record<string, unknown>;
+            return {
+              id: sid,
+              status: "none" as const,
+              scene: (typeof data.scene_id === "string" && data.scene_id) || (typeof data.setup_name === "string" && data.setup_name) || "",
+              mood: (typeof data.mood === "string" && data.mood) || (typeof data.mood_id === "string" && data.mood_id) || "",
+            };
+          } catch {
+            return { id: sid, status: "none" as const, scene: "", mood: "" };
+          }
+        }),
+      );
+      dispatch({ type: "SET_SETUPS_TILES", tiles });
+      setExtract({ kind: "ready", count: tiles.length });
+    } catch (err) {
+      setExtract({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+    }
   };
 
   const isGenerating = anchor.kind === "generating" || anchor.kind === "checking";
@@ -1224,8 +1300,8 @@ export function ReferencesPage() {
                   <div key={s.id} className="setup-row">
                     <span className="setup-row__badge">{s.id}</span>
                     <div className="setup-row__info">
-                      <span className="setup-row__line">Scene: {s.scene}</span>
-                      <span className="setup-row__sub">Mood: {s.mood}</span>
+                      <span className="setup-row__line">Scene: {s.scene || "—"}</span>
+                      <span className="setup-row__sub">Mood: {s.mood || "—"}</span>
                     </div>
                   </div>
                 ))
@@ -1234,9 +1310,78 @@ export function ReferencesPage() {
                   No setups extracted yet
                 </div>
               )}
-              <button type="button" className="add-link" style={{ color: "var(--accent)" }}>
-                ✏ Manual Input?
-              </button>
+
+              {extract.kind === "running" && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    fontSize: 12,
+                    background: "rgba(255,255,255,0.04)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                  }}
+                >
+                  ⏳ {extract.status?.current_step ?? "Extracting setups…"}{" "}
+                  {extract.status?.progress !== undefined
+                    ? `· ${Math.round((extract.status.progress ?? 0) * 100)}%`
+                    : ""}
+                </div>
+              )}
+              {extract.kind === "error" && (
+                <div
+                  role="status"
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    fontSize: 12,
+                    background: "rgba(220,60,60,0.08)",
+                    border: "1px solid rgba(220,60,60,0.4)",
+                    color: "var(--red)",
+                  }}
+                >
+                  ✗ {extract.message}
+                </div>
+              )}
+              {extract.kind === "ready" && (
+                <div
+                  role="status"
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    fontSize: 12,
+                    background: "rgba(166,247,126,0.12)",
+                    border: "1px solid rgba(166,247,126,0.4)",
+                    color: "#A6F77E",
+                  }}
+                >
+                  ✓ {extract.count} setup{extract.count === 1 ? "" : "s"} extracted —
+                  open the <strong>Setups</strong> tab to review.
+                </div>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={handleExtractSetups}
+                  disabled={extract.kind === "running" || floorplan.kind !== "ready"}
+                  title={
+                    floorplan.kind !== "ready"
+                      ? "Generate the floorplan first — setups depend on it"
+                      : state.setups.tiles.length > 0
+                        ? "Re-run extraction (overwrites the current setup list)"
+                        : "Run extract_setups against the floorplan + Bible"
+                  }
+                >
+                  {extract.kind === "running"
+                    ? "Extracting…"
+                    : state.setups.tiles.length > 0
+                      ? "Re-extract Setups"
+                      : "Extract Setups"}
+                </button>
+              </div>
             </div>
           </article>
         </div>

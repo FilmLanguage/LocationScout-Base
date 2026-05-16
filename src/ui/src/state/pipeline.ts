@@ -227,6 +227,7 @@ export type PipelineAction =
   | { type: "SET_BRIEF_TIME_OF_DAY"; value: string }
   | { type: "ADD_FACT"; title: string; subtitle: string }
   | { type: "ADD_ANACHRONISM"; text: string }
+  | { type: "SET_SETUPS_TILES"; tiles: SetupTile[] }
   | { type: "SET_SETUP_STATUS"; id: string; status: SetupTileStatus }
   | { type: "SELECT_SETUP"; id: string }
   | { type: "APPROVE_ALL_SETUPS" }
@@ -304,6 +305,15 @@ export function pipelineReducer(
         },
       };
     }
+
+    case "SET_SETUPS_TILES":
+      return {
+        ...state,
+        setups: {
+          tiles: action.tiles,
+          selectedId: action.tiles[0]?.id ?? "",
+        },
+      };
 
     case "SET_SETUP_STATUS":
       return {
