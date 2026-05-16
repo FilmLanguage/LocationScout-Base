@@ -180,14 +180,15 @@ export function registerLocationTools(server: McpServer) {
     "Run full location scouting pipeline: research era, write Bible, generate anchor image, create floorplan. Returns task_id for async tracking. Requires location_brief (from 1AD) and director_vision (from Director agent) as inputs.",
     {
       project_id: z.string().describe("Project GUID"),
+      location_id: z.string().optional().describe("Caller-supplied storage key for the resulting Bible. Overrides location_brief.location_id for save+lookup. Demo/UI callers pass loc_<project_id> so subsequent get_bible({bible_id: loc_<project_id>}) calls find the artifact. When omitted, falls back to location_brief.location_id (1AD's deterministicGuid)."),
       location_brief: LocationBriefSchema.optional().describe("Location brief from 1AD. Auto-fetched via MCP if omitted and AGENT_1AD_URL is set."),
       director_vision: DirectorVisionInputSchema.optional().describe("Director vision from Director agent. Auto-fetched via MCP if omitted and AGENT_DIRECTOR_URL is set."),
-      location_name: z.string().optional().describe("Location name hint for brief matching during auto-resolve"),
+      location_name: z.string().optional().describe("Location name hint for brief matching during auto-resolve. When empty or no match found, the first available brief is used."),
       priority: z.enum(["low", "normal", "high", "critical"]).default("normal"),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     async (rawParams) => {
-      const { project_id, location_name } = rawParams;
+      const { project_id, location_name, location_id: callerLocationId } = rawParams;
       let resolvedBrief = rawParams.location_brief;
       let resolvedVision = rawParams.director_vision;
 
@@ -200,12 +201,28 @@ export function registerLocationTools(server: McpServer) {
           });
           if (briefs && !("error" in (briefs as object))) {
             const arr = Array.isArray(briefs) ? briefs : ((briefs as Record<string, unknown>).locations as unknown[] ?? []);
-            const match = arr.find((b: unknown) => {
-              const entry = b as Record<string, unknown>;
-              return String(entry.location_name ?? "").toLowerCase().includes((location_name ?? "").toLowerCase());
-            });
+            const trimmedName = (location_name ?? "").trim();
+            // Treat slug-shaped names like "loc_xyz" as "no hint" — the UI sometimes
+            // passes the storage-side location_id (e.g. `loc_${projectId}`) as the
+            // name hint when the user lands on /references with no specific brief
+            // selected. Matching that slug against the human-readable names 1AD
+            // produces ("BAR", "MARLOWE'S OFFICE", …) would always fail and surface
+            // the developer-facing "location_brief required" error in the UI.
+            const looksLikeSlug = /^loc[_-]/i.test(trimmedName);
+            const hasHint = trimmedName.length > 0 && !looksLikeSlug;
+            let match: unknown = undefined;
+            if (hasHint) {
+              match = arr.find((b: unknown) => {
+                const entry = b as Record<string, unknown>;
+                return String(entry.location_name ?? "").toLowerCase().includes(trimmedName.toLowerCase());
+              });
+              if (!match) console.warn(`[scout_location] auto-resolve: no matching brief for location_name="${location_name}" in project ${project_id} — falling back to first brief`);
+            }
+            // Fallback: first available brief. This is correct for the demo path
+            // where the UI doesn't know which specific location to scout yet.
+            if (!match) match = arr[0];
             if (match) resolvedBrief = match as z.infer<typeof LocationBriefSchema>;
-            else console.warn(`[scout_location] auto-resolve: no matching brief for location_name="${location_name}" in project ${project_id}`);
+            else console.warn(`[scout_location] auto-resolve: agent://1ad/location-briefs/${project_id} returned an empty briefs collection`);
           } else {
             console.warn(`[scout_location] auto-resolve: agent://1ad/location-briefs/${project_id} returned null or error`);
           }
@@ -276,7 +293,13 @@ export function registerLocationTools(server: McpServer) {
             [{ role: "user", content: `Location: ${JSON.stringify(location_brief)}\nDirector vision: ${JSON.stringify(director_vision)}\nResearch: (not available — write from general knowledge of the period: ${location_brief.era})` }],
             { maxTokens: 4096 },
           );
-          const bibleId = location_brief.location_id;
+          // Storage key precedence: caller-supplied location_id wins. This is the
+          // contract surface that matters for downstream UI lookup — the LS UI
+          // looks up the Bible via get_bible({bible_id: loc_<project_id>}), so the
+          // bible MUST be saved under that same slug. Falling through to the
+          // brief's 1AD-side deterministicGuid would store under a UUID the UI
+          // never asks for, leaving every demo run failed-but-no-error.
+          const bibleId = callerLocationId ?? location_brief.location_id;
           const llmBiblePipeline = JSON.parse(stripCodeFence(bible.content));
           // Coerce LLM type mismatches before spreading
           if (typeof llmBiblePipeline.atmosphere === "object" && llmBiblePipeline.atmosphere !== null) {
@@ -326,7 +349,9 @@ export function registerLocationTools(server: McpServer) {
       return {
         content: [{
           type: "text" as const,
-          text: JSON.stringify({ task_id, status: "accepted", location_id: location_brief.location_id }),
+          // Return the storage-side location_id (== bible_id) so the UI can use it
+          // directly with get_bible without an extra mapping step.
+          text: JSON.stringify({ task_id, status: "accepted", location_id: callerLocationId ?? location_brief.location_id }),
         }],
       };
     },

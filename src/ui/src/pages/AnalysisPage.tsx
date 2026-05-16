@@ -38,8 +38,14 @@ export function AnalysisPage() {
     });
   };
 
-  /** Map a Location Bible v2 JSON to the UI's AnalysisState shape. */
-  const bibleToAnalysis = (b: Record<string, unknown>): Partial<AnalysisState> => {
+  /** Map a Location Bible v2 JSON to the UI's AnalysisState shape.
+   * Defensive: the caller may pass `undefined`/`null`/non-object on transient
+   * states (failed scout_location task, MCP returning empty contents, race
+   * with cache invalidation). Without this guard the property reads below
+   * surface as "Cannot read properties of undefined (reading 'id')" / similar
+   * in the production bundle. */
+  const bibleToAnalysis = (b: Record<string, unknown> | null | undefined): Partial<AnalysisState> => {
+    if (!b || typeof b !== "object") return {};
     const desc = (b.space_description as string) ?? "";
 
     // atmosphere may be a string or an object with sensory_summary etc.

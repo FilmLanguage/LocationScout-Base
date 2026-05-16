@@ -352,18 +352,25 @@ export function ReferencesPage() {
         }
       }
 
-      // 3. Start a fresh scout_location task. We pass project_id + location
-      // name only — the backend auto-resolves the brief + director vision
-      // via MCP from upstream agents (AGENT_1AD_URL, AGENT_DIRECTOR_URL).
-      // No inline location_brief here because we don't have one at this
-      // mount path (user may have landed on /references directly).
+      // 3. Start a fresh scout_location task. We pass project_id + the storage-
+      // side location_id only — the backend auto-resolves the brief + director
+      // vision via MCP from upstream agents (AGENT_1AD_URL, AGENT_DIRECTOR_URL)
+      // and saves the resulting Bible under our location_id so the get_bible
+      // lookup above finds it.
+      //
+      // We do NOT pass location_name: 1AD-side briefs use human-readable names
+      // ("BAR", "MARLOWE'S OFFICE") whereas our LOCATION_ID is a slug
+      // ("loc_<project_id>"); supplying the slug as a name hint guarantees the
+      // matcher misses and the demo path errors. Leaving location_name unset
+      // makes the backend pick the first available brief, which is correct for
+      // the demo path where the user hasn't picked a specific location yet.
       setBibleBoot({ kind: "generating", status: null, task_id: "" });
       try {
         const result = await callTool<{ task_id?: string; error?: string }>(
           "scout_location",
           {
             project_id: projectId,
-            location_name: LOCATION_ID,
+            location_id: LOCATION_ID,
             priority: "normal",
           },
         );
