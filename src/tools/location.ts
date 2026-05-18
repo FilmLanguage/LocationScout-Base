@@ -1252,6 +1252,36 @@ export function registerLocationTools(server: McpServer) {
           updateTask(task_id, { progress: 0.3, current_step: "Generating setup plan via LLM" });
           const passport = (bible.passport as Record<string, unknown> | undefined) ?? {};
 
+          // Resolve scenes for this location. The setup-planner LLM is instructed
+          // to cover every scene in `passport.scenes`, so an empty/missing list
+          // causes the model to return `[]`. Fall back to the 1AD brief when the
+          // bible passport has no scenes (older write_bible runs sometimes dropped
+          // them) so we always feed the planner at least one scene.
+          let resolvedScenes = Array.isArray(passport.scenes) ? (passport.scenes as string[]).filter((s) => typeof s === "string" && s.length > 0) : [];
+          if (resolvedScenes.length === 0 && project_id) {
+            const url1AD = process.env.AGENT_1AD_URL;
+            if (url1AD) {
+              const briefs = await readAgentResource(url1AD, `agent://1ad/location-briefs/${project_id}`).catch(() => null);
+              if (briefs && !("error" in (briefs as object))) {
+                const arr = Array.isArray(briefs) ? briefs : ((briefs as Record<string, unknown>).locations as unknown[] ?? []);
+                const briefId = bible.brief_id as string | undefined;
+                const match = arr.find((b: unknown) => {
+                  const entry = b as Record<string, unknown>;
+                  return briefId && entry.location_id === briefId;
+                }) ?? arr[0];
+                if (match) {
+                  const briefScenes = (match as Record<string, unknown>).scenes;
+                  if (Array.isArray(briefScenes)) {
+                    resolvedScenes = briefScenes.filter((s) => typeof s === "string" && (s as string).length > 0) as string[];
+                    if (resolvedScenes.length > 0) {
+                      console.warn(`[extract_setups] passport.scenes was empty for bible=${bibleId}; recovered ${resolvedScenes.length} scenes from 1AD brief`);
+                    }
+                  }
+                }
+              }
+            }
+          }
+
           // Fetch DoP shot specs from Editor if project_id and AGENT_EDITOR_URL are available.
           // Filters EDL shots to only those belonging to this location's scenes, then groups
           // unique (angle, movement, shot_size, lens) combos per scene for the setup planner.
@@ -1261,7 +1291,7 @@ export function registerLocationTools(server: McpServer) {
             const edl = await readAgentResource(editorUrl, `agent://editor/edl/${project_id}`).catch(() => null);
             if (edl && !("error" in (edl as object))) {
               const shots = ((edl as Record<string, unknown>).shots as Record<string, unknown>[] | undefined) ?? [];
-              const sceneIds = new Set<string>((passport.scenes as string[] | undefined) ?? []);
+              const sceneIds = new Set<string>(resolvedScenes);
               const byScene: Record<string, Set<string>> = {};
               for (const shot of shots) {
                 const sid = shot.scene_id as string | undefined;
@@ -1287,20 +1317,59 @@ export function registerLocationTools(server: McpServer) {
             }
           }
 
+          // Build a synthetic single-scene fallback if we still have no scene IDs.
+          // Without this the planner is told to "cover every scene in []" and
+          // legitimately returns an empty array; instead, give it an anonymous
+          // "default" scene so the user always gets at least one setup tile to
+          // iterate on.
+          const planScenes = resolvedScenes.length > 0
+            ? resolvedScenes
+            : [`scene_default_${bibleId}`];
+          if (resolvedScenes.length === 0) {
+            console.warn(`[extract_setups] no scenes resolved for bible=${bibleId} (passport.scenes empty + brief lookup failed); using synthetic default scene so planner still produces a setup`);
+          }
+
           // Schema lives in the system prompt (setup-planner-system.md) so prompt
           // caching can reuse it across requests. User message carries only the
           // variable Bible + mood state data (+ optional DoP shot requirements).
-          const llmResult = await llmComplete(
-            PROMPT_SETUP_PLANNER,
-            [{ role: "user", content: `Location Bible:\n${JSON.stringify({ bible_id: bible.bible_id, spaces: bible.spaces, space_description: (bible.space_description as string | undefined)?.slice(0, 600), scenes: passport.scenes, light_base_state: bible.light_base_state })}\n\nMood States:\n${JSON.stringify(moodStates)}${dopShotSection}` }],
-            { maxTokens: 4096, temperature: 0.6 },
-          );
+          const buildUserMessage = (extra: string) =>
+            `Location Bible:\n${JSON.stringify({ bible_id: bible.bible_id, spaces: bible.spaces, space_description: (bible.space_description as string | undefined)?.slice(0, 600), scenes: planScenes, light_base_state: bible.light_base_state })}\n\nMood States:\n${JSON.stringify(moodStates)}${dopShotSection}${extra}`;
 
-          let setups: Array<Record<string, unknown>>;
-          try {
-            setups = JSON.parse(stripCodeFence(llmResult.content));
-            if (!Array.isArray(setups)) throw flError(FL_ERRORS.LLM_ERROR, "LLM did not return array", { retryable: true, suggestion: "Re-run extract_setups" });
-          } catch (err) { updateTask(task_id, { status: "failed", error: `Parse error: ${err instanceof Error ? err.message : String(err)}` }); return; }
+          let setups: Array<Record<string, unknown>> = [];
+          let attempt = 0;
+          const maxAttempts = 2;
+          while (attempt < maxAttempts) {
+            attempt += 1;
+            const extra = attempt === 1
+              ? ""
+              : `\n\nIMPORTANT: previous attempt returned an empty array. You MUST return at least one setup object per scene listed above. Use plausible default coordinates (camera_x=0, camera_y=0, angle_deg=0, lens_mm=35) if the Bible lacks spatial detail. Do NOT return an empty array.`;
+            const llmResult = await llmComplete(
+              PROMPT_SETUP_PLANNER,
+              [{ role: "user", content: buildUserMessage(extra) }],
+              { maxTokens: 4096, temperature: 0.6 },
+            );
+            try {
+              const parsed = JSON.parse(stripCodeFence(llmResult.content));
+              if (!Array.isArray(parsed)) throw flError(FL_ERRORS.LLM_ERROR, "LLM did not return array", { retryable: true, suggestion: "Re-run extract_setups" });
+              setups = parsed;
+            } catch (err) {
+              if (attempt >= maxAttempts) {
+                updateTask(task_id, { status: "failed", error: `Parse error: ${err instanceof Error ? err.message : String(err)}` });
+                return;
+              }
+              continue;
+            }
+            if (setups.length > 0) break;
+            console.warn(`[extract_setups] attempt ${attempt}/${maxAttempts} produced 0 setups for bible=${bibleId}; retrying with explicit minimum-one instruction`);
+          }
+
+          if (setups.length === 0) {
+            updateTask(task_id, {
+              status: "failed",
+              error: `Setup planner returned no setups for bible ${bibleId} after ${maxAttempts} attempts. Bible may lack spatial detail (spaces/space_description) — try regenerating the Bible with richer scene context, or extend it manually before re-running setup extraction.`,
+            });
+            return;
+          }
 
           updateTask(task_id, { progress: 0.7, current_step: `Saving ${setups.length} setups` });
           const artifacts: Array<{ uri: string; mime_type: string; created_at: string }> = [];
