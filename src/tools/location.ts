@@ -138,6 +138,128 @@ function stripCodeFence(text: string): string {
 }
 
 /**
+ * Treat slug-shaped (`loc_…`) and UUID-shaped strings as "no hint" during
+ * brief matching. The UI sometimes passes the storage-side `location_id`
+ * (e.g. `loc_<projectId>`) or a 1AD-side `deterministicGuid` UUID as the
+ * `location_name` field. Matching those opaque IDs against the human-readable
+ * names 1AD produces ("BAR", "MARLOWE'S OFFICE", …) always misses and used to
+ * surface the developer-facing "location_brief required" error in the UI.
+ * Recognising both shapes here lets the auto-resolve skip the doomed matcher
+ * step and go straight to the `arr[0]` fallback, which is the correct demo
+ * behaviour when the caller hasn't picked a specific location.
+ */
+function isOpaqueIdHint(name: string): boolean {
+  if (/^loc[_-]/i.test(name)) return true;
+  // RFC 4122 UUID (8-4-4-4-12 hex) — case-insensitive.
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name)) return true;
+  return false;
+}
+
+/**
+ * Outcome of {@link resolveLocationBriefFromUpstream}. The `reason` field is
+ * always set when `brief` is `null` so callers can surface a diagnostic error
+ * pointing at the specific failure mode instead of the misleading umbrella
+ * "location_brief required" message.
+ */
+type BriefResolveResult = {
+  brief: z.infer<typeof LocationBriefSchema> | null;
+  reason?:
+    | "agent_url_unset"          // AGENT_1AD_URL not configured
+    | "upstream_unreachable"      // MCP read returned null (network / error response)
+    | "empty_briefs_collection"   // 1AD returned a briefs payload with no entries
+    | "match_failed_used_first"   // diagnostic only — fallback succeeded
+    | "ok";
+  matched?: "name" | "first";
+};
+
+/**
+ * Auto-resolve a Location Brief from upstream 1AD for the given project.
+ *
+ * Returns a structured result so callers can decide how to surface failure:
+ *   - `brief: null` + `reason: 'agent_url_unset'`       → tell user to configure AGENT_1AD_URL
+ *   - `brief: null` + `reason: 'upstream_unreachable'`  → 1AD is unreachable / no data for project
+ *   - `brief: null` + `reason: 'empty_briefs_collection'` → 1AD ran but produced 0 briefs
+ *   - `brief: <brief>` + `matched: 'name' | 'first'`    → resolution succeeded
+ *
+ * The caller passes a `tag` (tool name) used only in log lines.
+ */
+async function resolveLocationBriefFromUpstream(
+  tag: string,
+  project_id: string,
+  location_name: string | undefined,
+): Promise<BriefResolveResult> {
+  const url1AD = process.env.AGENT_1AD_URL;
+  if (!url1AD) {
+    console.warn(`[${tag}] auto-resolve: AGENT_1AD_URL not set — cannot resolve brief for project ${project_id}`);
+    return { brief: null, reason: "agent_url_unset" };
+  }
+
+  const uri = `agent://1ad/location-briefs/${project_id}`;
+  const briefs = await readAgentResource(url1AD, uri).catch((e) => {
+    console.warn(`[${tag}] MCP read failed for ${uri}:`, e instanceof Error ? e.message : e);
+    return null;
+  });
+
+  if (!briefs || ("error" in (briefs as object))) {
+    console.warn(`[${tag}] auto-resolve: ${uri} returned null or error — 1AD likely has no briefs for this project (run extract_locations upstream)`);
+    return { brief: null, reason: "upstream_unreachable" };
+  }
+
+  const arr = Array.isArray(briefs)
+    ? briefs
+    : ((briefs as Record<string, unknown>).locations as unknown[] ?? []);
+
+  if (arr.length === 0) {
+    console.warn(`[${tag}] auto-resolve: ${uri} returned an empty briefs collection`);
+    return { brief: null, reason: "empty_briefs_collection" };
+  }
+
+  const trimmedName = (location_name ?? "").trim();
+  const hasHint = trimmedName.length > 0 && !isOpaqueIdHint(trimmedName);
+
+  let match: unknown = undefined;
+  if (hasHint) {
+    match = arr.find((b: unknown) => {
+      const entry = b as Record<string, unknown>;
+      return String(entry.location_name ?? "").toLowerCase().includes(trimmedName.toLowerCase());
+    });
+    if (!match) {
+      console.warn(`[${tag}] auto-resolve: no matching brief for location_name="${location_name}" in project ${project_id} — falling back to first brief`);
+    }
+  }
+
+  if (match) {
+    return { brief: match as z.infer<typeof LocationBriefSchema>, reason: "ok", matched: "name" };
+  }
+  // Fallback: first available brief. Correct for the demo path where the UI
+  // hasn't yet picked a specific location to scout.
+  return {
+    brief: arr[0] as z.infer<typeof LocationBriefSchema>,
+    reason: hasHint ? "match_failed_used_first" : "ok",
+    matched: "first",
+  };
+}
+
+/**
+ * Map a {@link BriefResolveResult} `reason` to a human-readable error message
+ * for the MCP tool response. Keeps the error specific instead of the legacy
+ * "location_brief required: provide inline or set project_id + AGENT_1AD_URL"
+ * umbrella that lied when AGENT_1AD_URL *was* set.
+ */
+function briefResolveErrorMessage(reason: BriefResolveResult["reason"]): string {
+  switch (reason) {
+    case "agent_url_unset":
+      return "location_brief required: AGENT_1AD_URL is not configured. Either provide location_brief inline or set the env var.";
+    case "upstream_unreachable":
+      return "location_brief required: 1AD has no location-briefs for this project (run extract_locations upstream first, or provide location_brief inline).";
+    case "empty_briefs_collection":
+      return "location_brief required: 1AD returned 0 briefs for this project (extract_locations produced no locations, or the breakdown is empty).";
+    default:
+      return "location_brief required: provide inline or set project_id + AGENT_1AD_URL for auto-resolve";
+  }
+}
+
+/**
  * Build a one-sentence layout hint string from a Location Bible to inject
  * into the anchor prompt as a spatial guide. Replaces the old isometric.png
  * image-reference path that bled isometric aesthetics into nano-banana
@@ -192,41 +314,11 @@ export function registerLocationTools(server: McpServer) {
       let resolvedBrief = rawParams.location_brief;
       let resolvedVision = rawParams.director_vision;
 
+      let resolveReason: BriefResolveResult["reason"] | undefined;
       if (!resolvedBrief && project_id) {
-        const url1AD = process.env.AGENT_1AD_URL;
-        if (url1AD) {
-          const briefs = await readAgentResource(url1AD, `agent://1ad/location-briefs/${project_id}`).catch((e) => {
-            console.warn(`[scout_location] MCP read failed for agent://1ad/location-briefs/${project_id}:`, e instanceof Error ? e.message : e);
-            return null;
-          });
-          if (briefs && !("error" in (briefs as object))) {
-            const arr = Array.isArray(briefs) ? briefs : ((briefs as Record<string, unknown>).locations as unknown[] ?? []);
-            const trimmedName = (location_name ?? "").trim();
-            // Treat slug-shaped names like "loc_xyz" as "no hint" — the UI sometimes
-            // passes the storage-side location_id (e.g. `loc_${projectId}`) as the
-            // name hint when the user lands on /references with no specific brief
-            // selected. Matching that slug against the human-readable names 1AD
-            // produces ("BAR", "MARLOWE'S OFFICE", …) would always fail and surface
-            // the developer-facing "location_brief required" error in the UI.
-            const looksLikeSlug = /^loc[_-]/i.test(trimmedName);
-            const hasHint = trimmedName.length > 0 && !looksLikeSlug;
-            let match: unknown = undefined;
-            if (hasHint) {
-              match = arr.find((b: unknown) => {
-                const entry = b as Record<string, unknown>;
-                return String(entry.location_name ?? "").toLowerCase().includes(trimmedName.toLowerCase());
-              });
-              if (!match) console.warn(`[scout_location] auto-resolve: no matching brief for location_name="${location_name}" in project ${project_id} — falling back to first brief`);
-            }
-            // Fallback: first available brief. This is correct for the demo path
-            // where the UI doesn't know which specific location to scout yet.
-            if (!match) match = arr[0];
-            if (match) resolvedBrief = match as z.infer<typeof LocationBriefSchema>;
-            else console.warn(`[scout_location] auto-resolve: agent://1ad/location-briefs/${project_id} returned an empty briefs collection`);
-          } else {
-            console.warn(`[scout_location] auto-resolve: agent://1ad/location-briefs/${project_id} returned null or error`);
-          }
-        }
+        const result = await resolveLocationBriefFromUpstream("scout_location", project_id, location_name);
+        resolvedBrief = result.brief ?? undefined;
+        resolveReason = result.reason;
       }
 
       if (!resolvedVision && project_id) {
@@ -246,7 +338,7 @@ export function registerLocationTools(server: McpServer) {
 
       if (!resolvedBrief) {
         return {
-          content: [{ type: "text" as const, text: JSON.stringify({ error: "location_brief required: provide inline or set project_id + AGENT_1AD_URL for auto-resolve" }) }],
+          content: [{ type: "text" as const, text: JSON.stringify({ error: briefResolveErrorMessage(resolveReason) }) }],
           isError: true,
         };
       }
@@ -373,25 +465,11 @@ export function registerLocationTools(server: McpServer) {
       let resolvedBrief = rawParams.location_brief;
       let resolvedVision = rawParams.director_vision;
 
+      let resolveReason: BriefResolveResult["reason"] | undefined;
       if (!resolvedBrief && project_id) {
-        const url1AD = process.env.AGENT_1AD_URL;
-        if (url1AD) {
-          const briefs = await readAgentResource(url1AD, `agent://1ad/location-briefs/${project_id}`).catch((e) => {
-            console.warn(`[research_era] MCP read failed for agent://1ad/location-briefs/${project_id}:`, e instanceof Error ? e.message : e);
-            return null;
-          });
-          if (briefs && !("error" in (briefs as object))) {
-            const arr = Array.isArray(briefs) ? briefs : ((briefs as Record<string, unknown>).locations as unknown[] ?? []);
-            const match = arr.find((b: unknown) => {
-              const entry = b as Record<string, unknown>;
-              return String(entry.location_name ?? "").toLowerCase().includes((location_name ?? "").toLowerCase());
-            });
-            if (match) resolvedBrief = match as z.infer<typeof LocationBriefSchema>;
-            else console.warn(`[research_era] auto-resolve: no matching brief for location_name="${location_name}" in project ${project_id}`);
-          } else {
-            console.warn(`[research_era] auto-resolve: agent://1ad/location-briefs/${project_id} returned null or error`);
-          }
-        }
+        const result = await resolveLocationBriefFromUpstream("research_era", project_id, location_name);
+        resolvedBrief = result.brief ?? undefined;
+        resolveReason = result.reason;
       }
 
       if (!resolvedVision && project_id) {
@@ -411,7 +489,7 @@ export function registerLocationTools(server: McpServer) {
 
       if (!resolvedBrief) {
         return {
-          content: [{ type: "text" as const, text: JSON.stringify({ error: "location_brief required: provide inline or set project_id + AGENT_1AD_URL for auto-resolve" }) }],
+          content: [{ type: "text" as const, text: JSON.stringify({ error: briefResolveErrorMessage(resolveReason) }) }],
           isError: true,
         };
       }
@@ -477,25 +555,11 @@ export function registerLocationTools(server: McpServer) {
       let resolvedBrief = rawParams.location_brief;
       let resolvedVision = rawParams.director_vision;
 
+      let resolveReason: BriefResolveResult["reason"] | undefined;
       if (!resolvedBrief && project_id) {
-        const url1AD = process.env.AGENT_1AD_URL;
-        if (url1AD) {
-          const briefs = await readAgentResource(url1AD, `agent://1ad/location-briefs/${project_id}`).catch((e) => {
-            console.warn(`[write_bible] MCP read failed for agent://1ad/location-briefs/${project_id}:`, e instanceof Error ? e.message : e);
-            return null;
-          });
-          if (briefs && !("error" in (briefs as object))) {
-            const arr = Array.isArray(briefs) ? briefs : ((briefs as Record<string, unknown>).locations as unknown[] ?? []);
-            const match = arr.find((b: unknown) => {
-              const entry = b as Record<string, unknown>;
-              return String(entry.location_name ?? "").toLowerCase().includes((location_name ?? "").toLowerCase());
-            });
-            if (match) resolvedBrief = match as z.infer<typeof LocationBriefSchema>;
-            else console.warn(`[write_bible] auto-resolve: no matching brief for location_name="${location_name}" in project ${project_id}`);
-          } else {
-            console.warn(`[write_bible] auto-resolve: agent://1ad/location-briefs/${project_id} returned null or error`);
-          }
-        }
+        const result = await resolveLocationBriefFromUpstream("write_bible", project_id, location_name);
+        resolvedBrief = result.brief ?? undefined;
+        resolveReason = result.reason;
       }
 
       if (!resolvedVision && project_id) {
@@ -515,7 +579,7 @@ export function registerLocationTools(server: McpServer) {
 
       if (!resolvedBrief) {
         return {
-          content: [{ type: "text" as const, text: JSON.stringify({ error: "location_brief required: provide inline or set project_id + AGENT_1AD_URL for auto-resolve" }) }],
+          content: [{ type: "text" as const, text: JSON.stringify({ error: briefResolveErrorMessage(resolveReason) }) }],
           isError: true,
         };
       }
