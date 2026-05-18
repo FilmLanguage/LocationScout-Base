@@ -23,6 +23,7 @@ import { ImageOverlay } from "../components/ImageOverlay";
 import { BibleProgressPanel } from "../components/BibleProgressPanel";
 import { useGallery } from "../hooks/useGallery";
 import { useAssemblePrompt } from "../hooks/useAssemblePrompt";
+import { useDebouncedAction } from "../hooks/useDebouncedAction";
 import { useProjectContext, buildArtifactUrl } from "../hooks/useProjectContext";
 
 type AnchorState =
@@ -503,9 +504,9 @@ export function ReferencesPage() {
   // this session. We no longer auto-load from S3 on mount; the cascade gate
   // (isometric must be ready) is enforced at the click site in runGeneration.
 
-  const handleRegenerateAnchor = async () => {
+  const handleRegenerateAnchor = useDebouncedAction(async () => {
     runGeneration(anchorPrompt || undefined);
-  };
+  });
 
   // ─── Floorplan: user-triggered via the Generate button ──────────
   const runFloorplan = async () => {

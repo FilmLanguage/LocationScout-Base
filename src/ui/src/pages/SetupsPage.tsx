@@ -22,6 +22,7 @@ import { ImageOverlay } from "../components/ImageOverlay";
 import { useGallery } from "../hooks/useGallery";
 import { useAssemblePrompt } from "../hooks/useAssemblePrompt";
 import { useProjectContext } from "../hooks/useProjectContext";
+import { useDebouncedAction } from "../hooks/useDebouncedAction";
 const setupUri = (id: string) => `agent://location-scout/setup/${id}`;
 const setupImgPath = (id: string) => `/artifacts/setup/${id}.png`;
 
@@ -295,7 +296,7 @@ export function SetupsPage() {
     }
   };
 
-  const handleRegenerateSelected = async () => {
+  const handleRegenerateSelected = useDebouncedAction(async () => {
     if (!selected) return;
     const tile = setupsArg.find((s) => s.id === selected.id);
     if (!tile) return;
@@ -349,9 +350,9 @@ export function SetupsPage() {
         return next;
       });
     }
-  };
+  });
 
-  const handleGenerateAll = async () => {
+  const handleGenerateAll = useDebouncedAction(async () => {
     // Generate all tiles that don't yet have an image on disk. Reuses the
     // batch tool so progress + cancel flow into the existing batch banner.
     const targets = setupsArg.filter((s) => tileCacheBust[s.id] === undefined);
@@ -361,9 +362,9 @@ export function SetupsPage() {
     for (const t of targets) {
       dispatch({ type: "SET_SETUP_STATUS", id: t.id, status: "draft" });
     }
-  };
+  });
 
-  const handleRegenerateRejected = async () => {
+  const handleRegenerateRejected = useDebouncedAction(async () => {
     const targets = setupsArg.filter((s) =>
       tiles.find((t) => t.id === s.id)?.status === "rejected",
     );
@@ -405,7 +406,7 @@ export function SetupsPage() {
         return next;
       });
     }
-  };
+  });
 
   const handleSetupAutoFill = async () => {
     if (!selected) return;
