@@ -30,6 +30,49 @@ export interface SetupLike {
  * carry the explicit constraints needed to keep floorplan→isometric→anchor→
  * setups visually consistent.
  */
+/**
+ * BETA — Bug I (anchor ≠ isometry coherence, 2026-05-18):
+ * Build a one-line spatial layout summary that is fed identically into BOTH
+ * the anchor and isometric prompts. The intent is that whatever architectural
+ * facts drive the isometric/floorplan generation (room dimensions, named
+ * spaces, openings, key spatial features) ALSO drive the anchor — so the
+ * eye-level photo and the top-down floorplan/isometric describe the SAME
+ * room, not two different "visions" of the same name.
+ *
+ * Pure text — no image input, no img2img conditioning. (Approach 2 from the
+ * task brief; approach 1 was already tried in run-019/020 and rolled back
+ * because nano-banana bleeds isometric aesthetics when an isometric PNG is
+ * passed as image_input.)
+ */
+export function buildLayoutSummary(bible: LocationBibleLike): string {
+  const passport = (bible.passport ?? {}) as Record<string, unknown>;
+  const spaces = (bible.spaces as unknown[] | undefined) ?? [];
+  const parts: string[] = [];
+
+  const dim =
+    (passport.dimensions as string | undefined) ??
+    (passport.size as string | undefined) ??
+    (passport.area as string | undefined);
+  if (dim) parts.push(`approximate dimensions ${dim}`);
+
+  if (Array.isArray(spaces) && spaces.length > 0) {
+    const spaceNames = spaces
+      .map((s) => (s && typeof s === "object" ? ((s as Record<string, unknown>).name as string | undefined) : undefined))
+      .filter((s): s is string => typeof s === "string" && s.length > 0);
+    if (spaceNames.length > 0) {
+      parts.push(`comprises ${spaceNames.slice(0, 4).join(", ")}`);
+    }
+  }
+
+  const features =
+    (passport.features as string | undefined) ??
+    (passport.openings as string | undefined) ??
+    (passport.layout as string | undefined);
+  if (features) parts.push(features);
+
+  return parts.length > 0 ? parts.join("; ") : "";
+}
+
 function extractBibleFacts(bible: LocationBibleLike): {
   location_name: string;
   era: string;
@@ -40,6 +83,7 @@ function extractBibleFacts(bible: LocationBibleLike): {
   atmosphere: string;
   key_details: string;
   negative_list_text: string;
+  layout_summary: string;
 } {
   const passport = (bible.passport ?? {}) as Record<string, unknown>;
   const light = (bible.light_base_state ?? {}) as Record<string, unknown>;
@@ -72,6 +116,7 @@ function extractBibleFacts(bible: LocationBibleLike): {
     atmosphere,
     key_details: keyDetailsArr.slice(0, 6).join("; ") || "as described in the location bible",
     negative_list_text: negativeArr.slice(0, 8).join(", ") || "anachronisms, unrelated objects",
+    layout_summary: buildLayoutSummary(bible),
   };
 }
 
@@ -83,6 +128,14 @@ function extractBibleFacts(bible: LocationBibleLike): {
  */
 export function buildAnchorPromptVars(bible: LocationBibleLike): Record<string, string> {
   const facts = extractBibleFacts(bible);
+  // Bug I (2026-05-18): expose the shared layout_summary so the anchor template
+  // can render a FLOORPLAN LAYOUT block that mirrors what the isometric prompt
+  // sees. Empty string is rendered as a fallback line so the template still
+  // flows cleanly when the bible has no passport-level layout facts.
+  const layoutSummary = facts.layout_summary || "as established by the floorplan and isometric chain";
+  const layoutSummaryClause = facts.layout_summary
+    ? `\n\nFLOORPLAN LAYOUT — must match the isometric chain (same room, same scale):\n- ${facts.layout_summary}`
+    : "";
   return {
     location_name: facts.location_name,
     era_clause: facts.era_clause,
@@ -93,6 +146,8 @@ export function buildAnchorPromptVars(bible: LocationBibleLike): Record<string, 
     key_details: facts.key_details,
     negative_list_text: facts.negative_list_text,
     space_description: (bible.space_description as string | undefined) ?? "",
+    layout_summary: layoutSummary,
+    layout_summary_clause: layoutSummaryClause,
   };
 }
 
@@ -120,6 +175,10 @@ export function buildIsometricPromptVars(
     // also expose `space_description_clause` for the new KEY FACTS template.
     space_description: spaceDesc ? ` ${spaceDesc}` : "",
     space_description_clause: spaceDesc ? ` Spatial reference: ${spaceDesc}` : "",
+    // Bug I (2026-05-18): share the same layout summary that the anchor sees,
+    // so isometric + anchor describe the same room.
+    layout_summary: facts.layout_summary || "as established by the floorplan",
+    layout_summary_clause: facts.layout_summary ? ` Layout: ${facts.layout_summary}.` : "",
   };
 }
 

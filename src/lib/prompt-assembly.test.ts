@@ -13,6 +13,7 @@ import {
   buildAnchorPromptVars,
   buildIsometricPromptVars,
   buildSetupPromptVars,
+  buildLayoutSummary,
   stripPersonTokens,
   isOverheadCamera,
 } from "./prompt-assembly.js";
@@ -181,6 +182,65 @@ describe("isOverheadCamera", () => {
   it("detects 'bird's eye'", () => expect(isOverheadCamera("bird's eye view")).toBe(true));
   it("returns false for eye-level", () => expect(isOverheadCamera("wide, eye-level")).toBe(false));
   it("returns false for empty string", () => expect(isOverheadCamera("")).toBe(false));
+});
+
+// Bug I (2026-05-18) — anchor + isometric must describe the SAME room.
+// The shared layout_summary derived from the bible passport is what closes
+// the coherence gap. Both prompts must reference the same spatial facts.
+describe("Bug I: anchor ↔ isometric layout coherence", () => {
+  const spatialBible = {
+    bible_id: "loc_002",
+    passport: {
+      location_name: "Diner",
+      era: "1955 Roadside",
+      dimensions: "8m x 6m",
+      features: "two windows on south wall, single door on east wall, counter along west wall",
+    },
+    space_description: "A small mid-century roadside diner with chrome counter and red vinyl booths",
+  };
+
+  it("buildLayoutSummary surfaces dimensions + features from the passport", () => {
+    const summary = buildLayoutSummary(spatialBible);
+    expect(summary).toContain("8m x 6m");
+    expect(summary).toContain("two windows on south wall");
+  });
+
+  it("anchor and isometric receive the same layout_summary value", () => {
+    const anchorVars = buildAnchorPromptVars(spatialBible);
+    const isoVars = buildIsometricPromptVars(spatialBible);
+    expect(anchorVars.layout_summary).toBe(isoVars.layout_summary);
+    expect(anchorVars.layout_summary).toContain("8m x 6m");
+    expect(anchorVars.layout_summary).toContain("two windows on south wall");
+  });
+
+  it("anchor prompt renders the FLOORPLAN LAYOUT coherence block with the shared summary", () => {
+    const prompt = fillTemplate(ANCHOR_TPL, buildAnchorPromptVars(spatialBible));
+    expect(prompt).toContain("FLOORPLAN LAYOUT");
+    expect(prompt).toContain("isometric chain");
+    expect(prompt).toContain("8m x 6m");
+    expect(prompt).toContain("two windows on south wall");
+    // The architecture-identical directive must reach FAL.
+    expect(prompt).toMatch(/architecture is identical/i);
+    expect(prompt).not.toContain("{{");
+  });
+
+  it("isometric prompt renders the same layout_summary inline", () => {
+    const prompt = fillTemplate(ISOMETRIC_TPL, buildIsometricPromptVars(spatialBible));
+    expect(prompt).toContain("Layout:");
+    expect(prompt).toContain("8m x 6m");
+    expect(prompt).toContain("two windows on south wall");
+    expect(prompt).not.toContain("{{");
+  });
+
+  it("anchor prompt falls back gracefully when bible has no layout facts", () => {
+    const minimalBible = { passport: { location_name: "X" }, space_description: "y" };
+    const prompt = fillTemplate(ANCHOR_TPL, buildAnchorPromptVars(minimalBible));
+    // The FLOORPLAN LAYOUT block is suppressed when there is nothing to say.
+    expect(prompt).not.toContain("FLOORPLAN LAYOUT");
+    // But the inline reference still renders a sensible fallback string.
+    expect(prompt).toContain("established by the floorplan");
+    expect(prompt).not.toContain("{{");
+  });
 });
 
 describe("stripPersonTokens", () => {

@@ -11,6 +11,7 @@ import {
   buildAnchorPromptVars,
   buildIsometricPromptVars,
   buildSetupPromptVars,
+  buildLayoutSummary,
 } from "../lib/prompt-assembly.js";
 import { spawnSync } from "node:child_process";
 import { resolve as pathResolve, dirname, join } from "node:path";
@@ -264,34 +265,14 @@ function briefResolveErrorMessage(reason: BriefResolveResult["reason"]): string 
  * into the anchor prompt as a spatial guide. Replaces the old isometric.png
  * image-reference path that bled isometric aesthetics into nano-banana
  * outputs (run-019 Bug D). Pure text — eye-level photoreal generation.
+ *
+ * Bug I (2026-05-18): delegates to the shared `buildLayoutSummary` so that
+ * the runtime hint, the anchor prompt template, and the isometric prompt
+ * template all derive spatial facts from a single source. This keeps the
+ * anchor and isometric describing the SAME room.
  */
 function buildLayoutHintFromBible(bible: Record<string, unknown>): string {
-  const passport = (bible.passport ?? {}) as Record<string, unknown>;
-  const spaces = (bible.spaces as unknown[] | undefined) ?? [];
-  const parts: string[] = [];
-
-  const dim =
-    (passport.dimensions as string | undefined) ??
-    (passport.size as string | undefined) ??
-    (passport.area as string | undefined);
-  if (dim) parts.push(`approximate dimensions ${dim}`);
-
-  if (Array.isArray(spaces) && spaces.length > 0) {
-    const spaceNames = spaces
-      .map((s) => (s && typeof s === "object" ? ((s as Record<string, unknown>).name as string | undefined) : undefined))
-      .filter((s): s is string => typeof s === "string" && s.length > 0);
-    if (spaceNames.length > 0) {
-      parts.push(`comprises ${spaceNames.slice(0, 4).join(", ")}`);
-    }
-  }
-
-  const features =
-    (passport.features as string | undefined) ??
-    (passport.openings as string | undefined) ??
-    (passport.layout as string | undefined);
-  if (features) parts.push(features);
-
-  return parts.length > 0 ? parts.join("; ") : "";
+  return buildLayoutSummary(bible);
 }
 
 export function registerLocationTools(server: McpServer) {
