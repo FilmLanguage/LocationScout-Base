@@ -39,183 +39,36 @@ type BatchState =
   | { kind: "error"; message: string };
 
 /**
- * Empty-state wrapper that auto-triggers extract_setups when prerequisites
- * are met (Bible + floorplan exist for this project). Replaces the static
- * "go to References" message — the user navigating to /setups now means
- * "I want setups" so we run the extraction instead of making them click
- * back.
+ * Empty-state wrapper. Renders the current setupsExtraction lifecycle that
+ * was started by the Approve Anchor button on References (LS Setups
+ * Discipline 2026-05-19).
  *
- * Lives in its own component so the main <SetupsPage> can early-return
- * here without violating the rules-of-hooks (no hooks before the guard).
- *
- * Guards:
- *   - HEAD /artifacts/floorplan/<location>.png?project_id=… — 404 ⇒ inline
- *     hint, no auto-fire.
- *   - get_bible({ bible_id }) — 404 / not found ⇒ inline hint.
- *   - sessionStorage flag `ls.setups_autoextract.<location>` so we don't
- *     re-fire on every mount within the same session. Cleared on failure
- *     so the user can retry, set to "done" on success.
+ * This component does NOT auto-fire extract_setups. The trigger is on
+ * References, not on tab mount. If `setupsExtraction.kind === "idle"`, we
+ * tell the user to approve the anchor first.
  */
 function SetupsPageEmpty({
-  locationId,
-  projectId,
-  dispatch,
+  extraction,
 }: {
-  locationId: string;
-  projectId: string;
-  dispatch: ReturnType<typeof usePipeline>["dispatch"];
+  extraction: import("./setupsExtraction").SetupsExtractionState;
 }) {
-  type AutoState =
-    | { kind: "checking" }
-    | { kind: "needs-bible" }
-    | { kind: "needs-floorplan" }
-    | { kind: "extracting"; status: TaskStatus | null; task_id?: string }
-    | { kind: "error"; message: string };
-  const [auto, setAuto] = useState<AutoState>({ kind: "checking" });
-  const flagKey = `ls.setups_autoextract.${locationId}`;
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      // Guard semantics (Bug Z-2, 2026-05-19): the `done` flag exists to stop
-      // tab-churn re-firing extraction AFTER a successful run, not to block
-      // legitimate retries. SetupsPageEmpty only renders when the pipeline
-      // state's tile array is empty — so by the time we reach this effect,
-      // either the previous extraction never populated tiles or the user
-      // cleared them. In both cases we want to fire again, not bail out.
-      //
-      // We still drop the stale flag so it doesn't accumulate across sessions.
-      const flag = sessionStorage.getItem(flagKey);
-      if (flag === "done") {
-        sessionStorage.removeItem(flagKey);
-      }
-      // Bible probe — get_bible returns capability_not_available or a hint
-      // payload; we read the success flag rather than HEAD-ing a route.
-      try {
-        const r = await callTool<{ error?: string; bible_id?: string }>(
-          "get_bible",
-          { bible_id: locationId },
-        );
-        if (cancelled) return;
-        // get_bible returns { error: "not_found", bible_id } when missing,
-        // or the full Bible JSON (which has no `error` field) when present.
-        const found = r.data !== null && r.data !== undefined && !r.data.error;
-        if (!found) {
-          setAuto({ kind: "needs-bible" });
-          return;
-        }
-      } catch {
-        if (!cancelled) setAuto({ kind: "needs-bible" });
-        return;
-      }
-      // Floorplan probe.
-      const fpUrl = buildArtifactUrl("floorplan", `${locationId}.png`, projectId);
-      let fpExists = false;
-      try {
-        const res = await fetch(fpUrl, { method: "HEAD", cache: "no-store" });
-        fpExists = res.ok;
-      } catch {
-        fpExists = false;
-      }
-      if (cancelled) return;
-      if (!fpExists) {
-        setAuto({ kind: "needs-floorplan" });
-        return;
-      }
-      // Both prerequisites met — fire extract_setups.
-      setAuto({ kind: "extracting", status: null });
-      try {
-        const r = await callTool<{ task_id: string }>("extract_setups", {
-          floorplan_uri: `agent://location-scout/floorplan/${locationId}`,
-          mood_state_uris: [],
-          project_id: projectId,
-        });
-        const taskId = r.data?.task_id;
-        if (!taskId) {
-          if (!cancelled) setAuto({ kind: "error", message: "extract_setups returned no task_id" });
-          return;
-        }
-        sessionStorage.setItem(flagKey, `in-flight:${taskId}`);
-        if (!cancelled) setAuto({ kind: "extracting", status: null, task_id: taskId });
-        const final = await pollTask(
-          taskId,
-          (s) => { if (!cancelled) setAuto({ kind: "extracting", status: s, task_id: taskId }); },
-          1500,
-          180000,
-        );
-        if (cancelled) return;
-        if (final.status === "failed") {
-          sessionStorage.removeItem(flagKey);
-          setAuto({ kind: "error", message: final.error || "Extract failed" });
-          return;
-        }
-        const artifacts = (final as { artifacts?: Array<{ uri: string }> }).artifacts ?? [];
-        if (artifacts.length === 0) {
-          sessionStorage.removeItem(flagKey);
-          // Surface backend's actionable error (see ReferencesPage:709 for why).
-          const errMsg = (final as { error?: string }).error
-            || (final as { current_step?: string }).current_step
-            || "Setup extraction returned no setups. Try regenerating the Location Bible with richer scene/space descriptions.";
-          setAuto({ kind: "error", message: errMsg });
-          return;
-        }
-        const tiles = await Promise.all(
-          artifacts.map(async (a) => {
-            const sid = a.uri.split("/").pop() || "";
-            try {
-              const url = `/artifacts/setup/${sid}.json?project_id=${encodeURIComponent(projectId)}`;
-              const resp = await fetch(url, { cache: "no-store" });
-              if (!resp.ok) return { id: sid, status: "none" as const, scene: "", mood: "" };
-              const data = await resp.json() as Record<string, unknown>;
-              return {
-                id: sid,
-                status: "none" as const,
-                scene: (typeof data.scene_id === "string" && data.scene_id) || (typeof data.setup_name === "string" && data.setup_name) || "",
-                mood: (typeof data.mood === "string" && data.mood) || (typeof data.mood_id === "string" && data.mood_id) || "",
-              };
-            } catch {
-              return { id: sid, status: "none" as const, scene: "", mood: "" };
-            }
-          }),
-        );
-        if (cancelled) return;
-        dispatch({ type: "SET_SETUPS_TILES", tiles });
-        sessionStorage.setItem(flagKey, "done");
-        // Component will unmount once tiles populate, no need to setAuto.
-      } catch (err) {
-        sessionStorage.removeItem(flagKey);
-        if (!cancelled) setAuto({ kind: "error", message: err instanceof Error ? err.message : String(err) });
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locationId, projectId]);
-
   const body = (() => {
-    switch (auto.kind) {
-      case "checking":
-        return "Checking prerequisites…";
-      case "needs-bible":
+    switch (extraction.kind) {
+      case "idle":
         return (
           <>
-            Generate a Location Bible first.
-            <br />
-            Go to <a href="/" style={{ color: "var(--accent)" }}>References</a>.
-          </>
-        );
-      case "needs-floorplan":
-        return (
-          <>
-            Generate the floorplan in <a href="/" style={{ color: "var(--accent)" }}>References</a> first — setups depend on it.
+            Approve the Anchor on the{" "}
+            <a href="/" style={{ color: "var(--accent)" }}>References</a> tab to
+            extract setups automatically.
           </>
         );
       case "extracting": {
-        const progress = auto.status?.progress;
-        const step = auto.status?.current_step;
+        const progress = extraction.progress;
+        const step = extraction.current_step;
         return (
           <>
             Extracting setups…
-            {typeof progress === "number" && (
+            {typeof progress === "number" && progress > 0 && (
               <> {Math.round(progress * 100)}%</>
             )}
             {step && (
@@ -227,14 +80,25 @@ function SetupsPageEmpty({
           </>
         );
       }
-      case "error":
+      case "failed":
         return (
           <>
-            <span style={{ color: "#F7927E" }}>{auto.message}</span>
+            <span style={{ color: "#F7927E" }}>{extraction.message}</span>
             <br />
             <span style={{ opacity: 0.7 }}>
-              Retry from <a href="/" style={{ color: "var(--accent)" }}>References</a>.
+              Re-approve the anchor from{" "}
+              <a href="/" style={{ color: "var(--accent)" }}>References</a> to retry.
             </span>
+          </>
+        );
+      case "ready":
+        // ready but tiles empty — shouldn't normally reach here because the
+        // handler dispatches SET_SETUPS_TILES before SET_SETUPS_EXTRACTION ready,
+        // but render a calm message just in case.
+        return (
+          <>
+            Setups extracted but no tiles were produced. Re-approve from{" "}
+            <a href="/" style={{ color: "var(--accent)" }}>References</a> to retry.
           </>
         );
     }
@@ -247,7 +111,7 @@ function SetupsPageEmpty({
       style={{ padding: 32, textAlign: "center" }}
     >
       <h3 style={{ fontSize: 14, marginBottom: 8, color: "var(--text)" }}>
-        {auto.kind === "extracting" ? "Extracting setups…" : "No setups extracted yet"}
+        {extraction.kind === "extracting" ? "Extracting setups…" : "No setups extracted yet"}
       </h3>
       <p style={{ fontSize: 12, opacity: 0.9, lineHeight: 1.6 }}>{body}</p>
     </div>
@@ -265,12 +129,11 @@ export function SetupsPage() {
   // throws `TypeError: Cannot read properties of undefined (reading 'id')` and
   // the route renders a blank iframe. Reproduced live 2026-05-16.
   //
-  // Wave 0 fix (2026-05-19): instead of showing a static "go to References"
-  // message, delegate to <SetupsPageEmpty> which checks prerequisites and
-  // auto-fires extract_setups when they are met. Keeps hooks rules clean
-  // by deferring all the SetupsPage hooks below this guard.
+  // LS Setups Discipline (2026-05-19): the empty wrapper now just reads the
+  // shared setupsExtraction lifecycle (started by Approve Anchor on
+  // References). No more tab-mount auto-fire.
   if (!selected) {
-    return <SetupsPageEmpty locationId={LOCATION_ID} projectId={projectId} dispatch={dispatch} />;
+    return <SetupsPageEmpty extraction={state.setupsExtraction} />;
   }
   const approvedCount = tiles.filter((t) => t.status === "approved").length;
   // "Reviewable" = not yet approved (covers both legacy "draft" and the
