@@ -1255,17 +1255,11 @@ export function ReferencesPage() {
                     setup_ids={state.setups.tiles.map((t) => t.id)}
                     value={anchorRefs}
                     onChange={setAnchorRefs}
-                    lockedAutoRefs={
-                      isometric.kind === "ready"
-                        ? [
-                            {
-                              parentLabel: "isometric",
-                              imageUrl: `${artifactUrl("isometric", isometric.cacheBust)}`,
-                              kind: "isometric",
-                            },
-                          ]
-                        : undefined
-                    }
+                    // No lockedAutoRefs on the anchor card: the backend
+                    // intentionally runs text-to-image for the anchor
+                    // (run-019/020 D, nano-banana ISO ref issues), so
+                    // showing a 🔒 ISO pill would lie to the user.
+                    // runGeneration only forwards user-attached anchorRefs.
                     autoCascadeHint={isometric.kind !== "ready" ? ["isometric (auto)"] : undefined}
                     label="Refs for anchor"
                     disabled={anchor.kind === "generating" || anchor.kind === "checking"}
