@@ -30,6 +30,11 @@ import { useGallery } from "../hooks/useGallery";
 import { useAssemblePrompt } from "../hooks/useAssemblePrompt";
 import { useDebouncedAction } from "../hooks/useDebouncedAction";
 import { useProjectContext, buildArtifactUrl } from "../hooks/useProjectContext";
+import {
+  classifyExtractResult,
+  shouldFireExtractSetups,
+  type SetupsExtractionState,
+} from "./setupsExtraction";
 
 type AnchorState =
   | { kind: "checking" }
@@ -110,16 +115,10 @@ export function ReferencesPage() {
   // Bumped to force a Bible re-check + re-trigger after the user clicks Retry.
   const [bibleRetryNonce, setBibleRetryNonce] = useState(0);
 
-  // Setup extraction — drives the "Extract Setups" button in the Setup
-  // Extraction card. Replaces the dead "Manual Input?" affordance that shipped
-  // in v1.0.31-v1.0.35; with no handler the user had no way to populate
-  // state.setups.tiles and the /setups page rendered a TypeError.
-  type ExtractState =
-    | { kind: "idle" }
-    | { kind: "running"; status: TaskStatus | null; task_id?: string }
-    | { kind: "ready"; count: number }
-    | { kind: "error"; message: string };
-  const [extract, setExtract] = useState<ExtractState>({ kind: "idle" });
+  // Setup extraction — triggered automatically when the user clicks Approve
+  // Anchor (LS Setups Discipline, 2026-05-19). Status lives in PipelineState
+  // so the Setups page can read it. There is intentionally no manual
+  // "Extract Setups" button on this page — the trigger is the Approve click.
 
   const [anchor, setAnchor] = useState<AnchorState>({ kind: "missing" });
   const [floorplan, setFloorplan] = useState<AnchorState>({ kind: "missing" });
@@ -656,7 +655,24 @@ export function ReferencesPage() {
   // Fresh-start contract: isometric stays empty until the user presses
   // Generate (no S3 auto-load on floorplan transition).
 
+  /**
+   * Approve Anchor click handler. Three responsibilities:
+   *   1) Flip the local stage gate (references → approved).
+   *   2) Call approve_artifact on the backend.
+   *   3) Fire extract_setups in the background, store progress in
+   *      PipelineState.setupsExtraction so /setups can render it.
+   *   4) Navigate to /setups.
+   *
+   * Idempotency: shouldFireExtractSetups() blocks re-fires if extraction is
+   * already running or already ready. A double-click on Approve approves
+   * once (idempotent on backend) and triggers extraction once.
+   */
   const handleApprove = async () => {
+    const willFire = shouldFireExtractSetups({
+      floorplanReady: floorplan.kind === "ready",
+      currentKind: state.setupsExtraction.kind,
+    });
+
     dispatch({ type: "APPROVE_STAGE", stage: "references" });
     try {
       const r = await callTool("approve_artifact", {
@@ -667,21 +683,36 @@ export function ReferencesPage() {
     } catch (err) {
       console.error("[approve_artifact anchor] failed:", err);
     }
+
+    // Kick off extraction in background (not awaited) so the user can move
+    // to /setups and watch the progress there. Failures land in
+    // PipelineState.setupsExtraction.kind === "failed".
+    if (willFire) {
+      void runExtractSetupsInBackground();
+    } else if (floorplan.kind !== "ready" && state.setupsExtraction.kind === "idle") {
+      // Surface the precondition failure as the failed state so the user
+      // sees actionable text on /setups instead of a stuck spinner.
+      dispatch({
+        type: "SET_SETUPS_EXTRACTION",
+        state: { kind: "failed", message: "Generate the floorplan first — setups depend on it." },
+      });
+    }
+
     navigate("/setups");
   };
 
   /**
-   * Trigger backend extract_setups. Floorplan must exist (hard gate). On
-   * success we resolve each artifact URI to a SetupTile by reading the
-   * /artifacts/setup/<id>.json sidecar and stamping scene + mood so the
-   * Setups page tiles render with real data instead of empty pills.
+   * Background extract_setups runner. Updates PipelineState.setupsExtraction
+   * on every poll. On success, also populates state.setups.tiles by reading
+   * each artifact's sidecar JSON. classifyExtractResult is the single source
+   * of truth for the success-vs-error decision — preventing the
+   * "3 setups extracted" red banner regression.
    */
-  const handleExtractSetups = async () => {
-    if (floorplan.kind !== "ready") {
-      setExtract({ kind: "error", message: "Generate the floorplan first — setups depend on it." });
-      return;
-    }
-    setExtract({ kind: "running", status: null });
+  const runExtractSetupsInBackground = async (): Promise<void> => {
+    dispatch({
+      type: "SET_SETUPS_EXTRACTION",
+      state: { kind: "extracting", progress: 0, current_step: "Queueing extract_setups" },
+    });
     try {
       const r = await callTool<{ task_id: string }>("extract_setups", {
         floorplan_uri: `agent://location-scout/floorplan/${LOCATION_ID}`,
@@ -690,56 +721,78 @@ export function ReferencesPage() {
       });
       const taskId = r.data?.task_id;
       if (!taskId) {
-        setExtract({ kind: "error", message: "extract_setups returned no task_id" });
+        dispatch({
+          type: "SET_SETUPS_EXTRACTION",
+          state: { kind: "failed", message: "extract_setups returned no task_id" },
+        });
         return;
       }
-      setExtract({ kind: "running", status: null, task_id: taskId });
       const final = await pollTask(
         taskId,
-        (s) => setExtract({ kind: "running", status: s, task_id: taskId }),
+        (s) =>
+          dispatch({
+            type: "SET_SETUPS_EXTRACTION",
+            state: {
+              kind: "extracting",
+              progress: s.progress ?? 0,
+              current_step: s.current_step ?? "Extracting…",
+              task_id: taskId,
+            },
+          }),
         1500,
         180000,
       );
-      if (final.status === "failed") {
-        setExtract({ kind: "error", message: final.error || "Extract failed" });
-        return;
+
+      const classified: SetupsExtractionState = classifyExtractResult({
+        status: final.status,
+        progress: final.progress,
+        current_step: final.current_step,
+        error: final.error,
+        artifacts: (final as { artifacts?: Array<{ uri: string }> }).artifacts,
+      });
+
+      if (classified.kind === "ready") {
+        // Populate tile data BEFORE dispatching ready so /setups doesn't
+        // briefly render "0 tiles" between events.
+        const artifacts =
+          (final as { artifacts?: Array<{ uri: string }> }).artifacts ?? [];
+        const tiles = await Promise.all(
+          artifacts.map(async (a) => {
+            const sid = a.uri.split("/").pop() || "";
+            try {
+              const url = `/artifacts/setup/${sid}.json?project_id=${encodeURIComponent(projectId)}`;
+              const resp = await fetch(url, { cache: "no-store" });
+              if (!resp.ok) return { id: sid, status: "none" as const, scene: "", mood: "" };
+              const data = (await resp.json()) as Record<string, unknown>;
+              return {
+                id: sid,
+                status: "none" as const,
+                scene:
+                  (typeof data.scene_id === "string" && data.scene_id) ||
+                  (typeof data.setup_name === "string" && data.setup_name) ||
+                  "",
+                mood:
+                  (typeof data.mood === "string" && data.mood) ||
+                  (typeof data.mood_id === "string" && data.mood_id) ||
+                  "",
+              };
+            } catch {
+              return { id: sid, status: "none" as const, scene: "", mood: "" };
+            }
+          }),
+        );
+        dispatch({ type: "SET_SETUPS_TILES", tiles });
       }
-      const artifacts = (final as { artifacts?: Array<{ uri: string }> }).artifacts ?? [];
-      if (artifacts.length === 0) {
-        // Don't guess at the cause — surface backend's actionable error if present.
-        // Backend's `extract_setups` sets `status:"failed"` with a specific error
-        // when its 3-layer fallback (T09 fix `ed8ea93`) still can't produce setups
-        // — but a stale task snapshot may leave `status:"completed"` with empty
-        // artifacts. Use whatever signal the backend gave us, not a hardcoded guess.
-        const errMsg = (final as { error?: string }).error
-          || (final as { current_step?: string }).current_step
-          || "Setup extraction returned no setups. Try regenerating the Location Bible with richer scene/space descriptions, or check the agent logs.";
-        setExtract({ kind: "error", message: errMsg });
-        return;
-      }
-      const tiles = await Promise.all(
-        artifacts.map(async (a) => {
-          const sid = a.uri.split("/").pop() || "";
-          try {
-            const url = `/artifacts/setup/${sid}.json?project_id=${encodeURIComponent(projectId)}`;
-            const resp = await fetch(url, { cache: "no-store" });
-            if (!resp.ok) return { id: sid, status: "none" as const, scene: "", mood: "" };
-            const data = await resp.json() as Record<string, unknown>;
-            return {
-              id: sid,
-              status: "none" as const,
-              scene: (typeof data.scene_id === "string" && data.scene_id) || (typeof data.setup_name === "string" && data.setup_name) || "",
-              mood: (typeof data.mood === "string" && data.mood) || (typeof data.mood_id === "string" && data.mood_id) || "",
-            };
-          } catch {
-            return { id: sid, status: "none" as const, scene: "", mood: "" };
-          }
-        }),
-      );
-      dispatch({ type: "SET_SETUPS_TILES", tiles });
-      setExtract({ kind: "ready", count: tiles.length });
+
+      dispatch({ type: "SET_SETUPS_EXTRACTION", state: classified });
     } catch (err) {
-      setExtract({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+      dispatch({
+        type: "SET_SETUPS_EXTRACTION",
+        state: {
+          kind: "failed",
+          message: err instanceof Error ? err.message : String(err),
+        },
+      });
     }
   };
 
@@ -1381,107 +1434,19 @@ export function ReferencesPage() {
           </article>
         </div>
 
-        <div className="input-page__column">
-          <div className="section-header">
-            <span className="section-header__title">Setup Extraction</span>
-            <span className="tech-badge tech-badge--green">CLAUDE</span>
-          </div>
-          <article className="card">
-            <div className="card__body" style={{ gap: "var(--sp-2)" }}>
-              {state.setups.tiles.length > 0 ? (
-                state.setups.tiles.map((s) => (
-                  <div key={s.id} className="setup-row">
-                    <span className="setup-row__badge">{s.id}</span>
-                    <div className="setup-row__info">
-                      <span className="setup-row__line">Scene: {s.scene || "—"}</span>
-                      <span className="setup-row__sub">Mood: {s.mood || "—"}</span>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="placeholder-box" style={{ fontSize: 12, opacity: 0.7, padding: 12 }}>
-                  No setups extracted yet
-                </div>
-              )}
-
-              {extract.kind === "running" && (
-                <div
-                  role="status"
-                  aria-live="polite"
-                  style={{
-                    padding: "8px 10px",
-                    borderRadius: 6,
-                    fontSize: 12,
-                    background: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.1)",
-                  }}
-                >
-                  ⏳ {extract.status?.current_step ?? "Extracting setups…"}{" "}
-                  {extract.status?.progress !== undefined
-                    ? `· ${Math.round((extract.status.progress ?? 0) * 100)}%`
-                    : ""}
-                </div>
-              )}
-              {extract.kind === "error" && (
-                <div
-                  role="status"
-                  style={{
-                    padding: "8px 10px",
-                    borderRadius: 6,
-                    fontSize: 12,
-                    background: "rgba(220,60,60,0.08)",
-                    border: "1px solid rgba(220,60,60,0.4)",
-                    color: "var(--red)",
-                  }}
-                >
-                  ✗ {extract.message}
-                </div>
-              )}
-              {extract.kind === "ready" && (
-                <div
-                  role="status"
-                  style={{
-                    padding: "8px 10px",
-                    borderRadius: 6,
-                    fontSize: 12,
-                    background: "rgba(166,247,126,0.12)",
-                    border: "1px solid rgba(166,247,126,0.4)",
-                    color: "#A6F77E",
-                  }}
-                >
-                  ✓ {extract.count} setup{extract.count === 1 ? "" : "s"} extracted —
-                  open the <strong>Setups</strong> tab to review.
-                </div>
-              )}
-
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  onClick={handleExtractSetups}
-                  disabled={extract.kind === "running" || floorplan.kind !== "ready"}
-                  title={
-                    floorplan.kind !== "ready"
-                      ? "Generate the floorplan first — setups depend on it"
-                      : state.setups.tiles.length > 0
-                        ? "Re-run extraction (overwrites the current setup list)"
-                        : "Run extract_setups against the floorplan + Bible"
-                  }
-                >
-                  {extract.kind === "running"
-                    ? "Extracting…"
-                    : state.setups.tiles.length > 0
-                      ? "Re-extract Setups"
-                      : "Extract Setups"}
-                </button>
-              </div>
-            </div>
-          </article>
-        </div>
       </div>
 
       <div className="page-footer">
         <span className="page-footer__spacer" />
+        {state.setupsExtraction.kind === "extracting" && (
+          <span
+            role="status"
+            aria-live="polite"
+            style={{ fontSize: 12, opacity: 0.75, marginRight: "var(--sp-3)" }}
+          >
+            Extracting setups in background…
+          </span>
+        )}
         <button
           type="button"
           className="btn btn--primary"
