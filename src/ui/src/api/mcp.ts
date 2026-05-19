@@ -115,15 +115,34 @@ export interface TaskStatus {
   status: "accepted" | "processing" | "completed" | "failed";
   progress: number;
   current_step: string;
-  error?: string;
+  error?: string | null;
+  /**
+   * Populated by `pollTask` on terminal states (completed | failed) by
+   * merging in the get_task_result payload. NOT present on get_task_status
+   * snapshots directly — get_task_status returns the lightweight status
+   * only. See `pollTask` for the merge logic.
+   *
+   * The polling-bug fix (LS Setups Discipline, 2026-05-19): before this,
+   * pollTask returned the bare status snapshot on completed, so callers
+   * saw artifacts: undefined and painted backend's successful
+   * current_step ("3 setups extracted") as the error message.
+   */
+  artifacts?: Array<{ uri: string }>;
+  // Tool-specific result fields that get_task_result returns.
+  // Kept open-ended so the helper can carry them through to callers.
+  [extra: string]: unknown;
 }
 
 /**
  * Poll get_task_status until the task reaches a terminal state
  * (completed | failed) or `timeoutMs` elapses.
  *
- * On failure, also fetches get_task_result to retrieve the error message
- * (which get_task_status omits).
+ * On EITHER terminal state, also calls get_task_result and merges the
+ * result payload (artifacts + tool-specific fields) into the returned
+ * object. get_task_status itself does not include those fields — only
+ * get_task_result does — and the UI relies on `artifacts` to render the
+ * success state. Skipping the result fetch was the root cause of the
+ * "3 setups extracted" red banner (LS Setups Discipline, 2026-05-19).
  *
  * @param onProgress  called every poll with the latest status
  * @param intervalMs  poll cadence in ms (default 1000)
@@ -140,17 +159,24 @@ export async function pollTask(
     const { data } = await callTool<TaskStatus>("get_task_status", { task_id: taskId });
     if (data) onProgress?.(data);
 
-    if (data?.status === "completed") {
-      return data;
-    }
-
-    if (data?.status === "failed") {
-      // get_task_status doesn't include `error` — fetch the full result to surface it.
+    if (data?.status === "completed" || data?.status === "failed") {
+      // get_task_status omits `artifacts` (and tool-specific result fields
+      // like mood_state_ids, setup_map, etc.). Backfill from get_task_result
+      // on terminal states. Best-effort — if the call fails, return what we
+      // have so the UI can still render something.
       try {
-        const { data: result } = await callTool<{ error?: string }>("get_task_result", {
-          task_id: taskId,
-        });
-        return { ...data, error: result?.error || data.error };
+        const { data: result } = await callTool<Record<string, unknown>>(
+          "get_task_result",
+          { task_id: taskId },
+        );
+        return {
+          ...data,
+          ...(result ?? {}),
+          // The status snapshot's status wins (it was the trigger) — but in
+          // practice get_task_result also reports the same status, so the
+          // spread above is harmless.
+          status: data.status,
+        };
       } catch {
         return data;
       }
