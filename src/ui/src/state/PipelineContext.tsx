@@ -57,6 +57,12 @@ function loadPersisted(projectId: string): PipelineState | null {
     // Light shape check — if persisted shape predates a schema change, fall
     // back to INITIAL_STATE rather than crash on first dispatch.
     if (!parsed || typeof parsed !== "object" || !parsed.statuses || !parsed.setups) return null;
+    // Forward-compatibility: setupsExtraction was added 2026-05-19 (LS Setups
+    // Discipline). Persisted snapshots from older sessions lack it — patch in
+    // a safe default so the reducer never sees undefined.
+    if (!parsed.setupsExtraction) {
+      parsed.setupsExtraction = { kind: "idle" };
+    }
     return parsed as PipelineState;
   } catch {
     return null;

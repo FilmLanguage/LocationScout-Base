@@ -6,6 +6,9 @@
  */
 
 import type { StageId } from "../stages";
+import type { SetupsExtractionState } from "../pages/setupsExtraction";
+
+export type { SetupsExtractionState } from "../pages/setupsExtraction";
 
 export type StageStatus = "locked" | "draft" | "approved";
 
@@ -119,6 +122,13 @@ export interface PipelineState {
   analysis: AnalysisState;
   references: ReferenceState;
   setups: SetupsState;
+  /**
+   * Lifecycle of the in-background extract_setups run triggered by the
+   * Approve Anchor button. Persisted via PipelineContext sessionStorage so
+   * the Setups page can render progress / failure / success even if the
+   * user navigates away and back. See LS Setups Discipline 2026-05-19.
+   */
+  setupsExtraction: SetupsExtractionState;
   lightStates: LightStatesState;
 }
 
@@ -200,6 +210,8 @@ export const INITIAL_STATE: PipelineState = {
     tiles: [],
   },
 
+  setupsExtraction: { kind: "idle" },
+
   lightStates: {
     sources: [],
     activeSourceId: "",
@@ -228,6 +240,7 @@ export type PipelineAction =
   | { type: "ADD_FACT"; title: string; subtitle: string }
   | { type: "ADD_ANACHRONISM"; text: string }
   | { type: "SET_SETUPS_TILES"; tiles: SetupTile[] }
+  | { type: "SET_SETUPS_EXTRACTION"; state: SetupsExtractionState }
   | { type: "SET_SETUP_STATUS"; id: string; status: SetupTileStatus }
   | { type: "SELECT_SETUP"; id: string }
   | { type: "APPROVE_ALL_SETUPS" }
@@ -314,6 +327,9 @@ export function pipelineReducer(
           selectedId: action.tiles[0]?.id ?? "",
         },
       };
+
+    case "SET_SETUPS_EXTRACTION":
+      return { ...state, setupsExtraction: action.state };
 
     case "SET_SETUP_STATUS":
       return {
