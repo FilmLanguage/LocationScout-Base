@@ -27,10 +27,10 @@ const setupUri = (id: string) => `agent://location-scout/setup/${id}`;
 const setupImgPath = (id: string) => `/artifacts/setup/${id}.png`;
 
 // Camera descriptions previously hardcoded per Figma mock IDs (S1-A through S3-C)
-// containing Walter's-living-room specifics like "TV reflection in eyes" and
-// "kitchen archway frame". Removed 2026-05-15 — real setups come from the backend
-// state.setups.tiles[].camera, populated upstream by Cinematographer/Editor.
-// When tile.camera is missing the UI shows an empty/dash, not a fixture.
+// containing fixture-specific text from the Figma mock — removed 2026-05-15. Real
+// setups now come from the backend state.setups.tiles[].camera, populated upstream
+// by Cinematographer/Editor. When tile.camera is missing the UI shows an empty
+// dash, not a fixture.
 
 type BatchState =
   | { kind: "checking" }

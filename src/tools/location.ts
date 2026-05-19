@@ -111,7 +111,7 @@ const LocationBriefSchema = z.object({
   location_name: z.string().describe("Human-readable name, e.g. 'Jesse Apartment - Living Room'"),
   location_type: z.enum(["INT", "EXT", "INT/EXT"]).describe("Interior, exterior, or both"),
   time_of_day: z.array(z.string()).describe("When scenes take place: DAY, NIGHT, DAWN, etc."),
-  era: z.string().describe("Historical period, e.g. '2004 Albuquerque'"),
+  era: z.string().describe("Historical period, e.g. '1980s London'"),
   scenes: z.array(z.string()).min(1).describe("Scene IDs where this location appears"),
   recurring: z.boolean().describe("Whether location appears in multiple scenes"),
   character_actions: z.array(z.string()).optional().describe("Key physical actions characters perform here"),
