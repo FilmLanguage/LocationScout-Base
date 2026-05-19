@@ -67,6 +67,19 @@ function bibleTaskKey(locationId: string) {
   return `ls.bible_task.${locationId}`;
 }
 
+/**
+ * sessionStorage key for a sticky "scout_location already failed for this
+ * project+location" record. Set when the eager Bible bootstrap errors out
+ * (typically because 1AD has no upstream brief for this project). Until the
+ * user explicitly clicks Retry, subsequent re-mounts of /references skip the
+ * scout_location call and just surface the cached error — otherwise navigating
+ * References → Setups → References re-fires write_bible and the user sees the
+ * "location_brief required" message every time (Bug X-2, 2026-05-19).
+ */
+function bibleErrorKey(locationId: string) {
+  return `ls.bible_error.${locationId}`;
+}
+
 /** Fire-and-forget cancel; the existing poll loop will react to status=cancelled. */
 async function cancelTask(task_id: string) {
   try {
@@ -193,8 +206,44 @@ export function ReferencesPage() {
 
   // Reference picker state — extra refs attached by the user on top of the
   // default img2img cascade (floorplan→isometric→anchor).
-  const [anchorRefs, setAnchorRefs] = useState<ReferenceRef[]>([]);
-  const [isometricRefs, setIsometricRefs] = useState<ReferenceRef[]>([]);
+  //
+  // Persisted to localStorage (per project+location+kind) because the backend
+  // sidecar contract (prompt-gallery-contract §1, `references` field) is NOT
+  // populated by generate_anchor / generate_isometric_reference today — only
+  // generate_setup_images writes ref tokens. Without this client-side cache,
+  // closing+reopening the iframe loses the refs the user attached, even though
+  // the image they generated is preserved (Bug refs-lost, 2026-05-19). This is
+  // a UI-side workaround; the proper fix is to persist `references` in the
+  // anchor/isometric sidecar — tracked separately, server-side.
+  const anchorRefsKey = `ls.anchor_refs.${projectId}.${LOCATION_ID}`;
+  const isometricRefsKey = `ls.isometric_refs.${projectId}.${LOCATION_ID}`;
+  const [anchorRefs, setAnchorRefs] = useState<ReferenceRef[]>(() => {
+    try {
+      const raw = localStorage.getItem(anchorRefsKey);
+      return raw ? (JSON.parse(raw) as ReferenceRef[]) : [];
+    } catch { return []; }
+  });
+  const [isometricRefs, setIsometricRefs] = useState<ReferenceRef[]>(() => {
+    try {
+      const raw = localStorage.getItem(isometricRefsKey);
+      return raw ? (JSON.parse(raw) as ReferenceRef[]) : [];
+    } catch { return []; }
+  });
+
+  // Persist refs to localStorage on change. Keep keys project+location scoped
+  // so other projects' refs never leak in.
+  useEffect(() => {
+    try {
+      if (anchorRefs.length === 0) localStorage.removeItem(anchorRefsKey);
+      else localStorage.setItem(anchorRefsKey, JSON.stringify(anchorRefs));
+    } catch { /* quota / private mode */ }
+  }, [anchorRefs, anchorRefsKey]);
+  useEffect(() => {
+    try {
+      if (isometricRefs.length === 0) localStorage.removeItem(isometricRefsKey);
+      else localStorage.setItem(isometricRefsKey, JSON.stringify(isometricRefs));
+    } catch { /* quota / private mode */ }
+  }, [isometricRefs, isometricRefsKey]);
 
   // ─── Edit mode state (see updates/edit-mode-contract.md) ───
   const [anchorEditMode, setAnchorEditMode] = useState(false);
@@ -281,6 +330,15 @@ export function ReferencesPage() {
   useEffect(() => {
     let cancelled = false;
     const key = bibleTaskKey(LOCATION_ID);
+    const errKey = bibleErrorKey(LOCATION_ID);
+
+    // Centralized error-setter that ALSO stamps a sticky sessionStorage flag
+    // so subsequent re-mounts surface the same error instead of re-firing the
+    // pipeline. Retry clears it (see retryBibleBoot).
+    const setBibleError = (message: string) => {
+      try { sessionStorage.setItem(errKey, message); } catch { /* quota / private */ }
+      setBibleBoot({ kind: "error", message });
+    };
 
     const pollExistingTask = async (taskId: string) => {
       setBibleBoot({ kind: "generating", status: null, task_id: taskId });
@@ -296,7 +354,7 @@ export function ReferencesPage() {
         if (cancelled) return;
         sessionStorage.removeItem(key);
         if (final.status === "failed") {
-          setBibleBoot({ kind: "error", message: final.error || "Bible generation failed" });
+          setBibleError(final.error || "Bible generation failed");
           return;
         }
         // Re-verify the artifact landed before flipping to ready — guards
@@ -309,24 +367,21 @@ export function ReferencesPage() {
         if (cancelled) return;
         if (verify.data && !verify.data.error) {
           setBibleBoot({ kind: "ready" });
+          sessionStorage.removeItem(errKey);
         } else {
-          setBibleBoot({
-            kind: "error",
-            message: "Pipeline reported success but Bible is not readable. Try again.",
-          });
+          setBibleError("Pipeline reported success but Bible is not readable. Try again.");
         }
       } catch (err) {
         if (cancelled) return;
         sessionStorage.removeItem(key);
-        setBibleBoot({
-          kind: "error",
-          message: err instanceof Error ? err.message : String(err),
-        });
+        setBibleError(err instanceof Error ? err.message : String(err));
       }
     };
 
     const run = async () => {
-      // 1. Does the bible already exist?
+      // 1. Does the bible already exist? This is the rehydrate path — covers
+      // the References → Setups → References remount where component state is
+      // reset but the Bible artifact is intact in PG/S3 (Bug X-2).
       try {
         const res = await callTool<Record<string, unknown> & { error?: string }>(
           "get_bible",
@@ -335,16 +390,24 @@ export function ReferencesPage() {
         if (cancelled) return;
         if (res.data && !res.data.error) {
           setBibleBoot({ kind: "ready" });
-          // Clear any stale task pointer — bible is here, no need to track.
+          // Clear any stale task pointer + sticky error — bible is here.
           sessionStorage.removeItem(key);
+          sessionStorage.removeItem(errKey);
           return;
         }
       } catch (err) {
         if (cancelled) return;
-        setBibleBoot({
-          kind: "error",
-          message: `Failed to check Bible: ${err instanceof Error ? err.message : String(err)}`,
-        });
+        setBibleError(`Failed to check Bible: ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
+
+      // Bible genuinely missing. If scout_location already failed once for
+      // this project+location in this session (e.g. 1AD has no upstream
+      // location-brief), surface the cached error instead of re-firing the
+      // pipeline — Retry clears the sticky error and forces a fresh attempt.
+      const stickyError = sessionStorage.getItem(errKey);
+      if (stickyError) {
+        if (!cancelled) setBibleBoot({ kind: "error", message: stickyError });
         return;
       }
 
@@ -397,17 +460,14 @@ export function ReferencesPage() {
           const errMsg =
             (typeof result.data?.error === "string" && result.data.error) ||
             "scout_location returned no task_id (upstream brief may be missing)";
-          setBibleBoot({ kind: "error", message: errMsg });
+          setBibleError(errMsg);
           return;
         }
         sessionStorage.setItem(key, taskId);
         await pollExistingTask(taskId);
       } catch (err) {
         if (cancelled) return;
-        setBibleBoot({
-          kind: "error",
-          message: err instanceof Error ? err.message : String(err),
-        });
+        setBibleError(err instanceof Error ? err.message : String(err));
       }
     };
 
@@ -420,6 +480,7 @@ export function ReferencesPage() {
 
   const retryBibleBoot = () => {
     sessionStorage.removeItem(bibleTaskKey(LOCATION_ID));
+    sessionStorage.removeItem(bibleErrorKey(LOCATION_ID));
     setBibleBoot({ kind: "checking" });
     setBibleRetryNonce((n) => n + 1);
   };

@@ -77,13 +77,17 @@ function SetupsPageEmpty({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // Don't re-fire if we already completed this session for this location.
+      // Guard semantics (Bug Z-2, 2026-05-19): the `done` flag exists to stop
+      // tab-churn re-firing extraction AFTER a successful run, not to block
+      // legitimate retries. SetupsPageEmpty only renders when the pipeline
+      // state's tile array is empty — so by the time we reach this effect,
+      // either the previous extraction never populated tiles or the user
+      // cleared them. In both cases we want to fire again, not bail out.
+      //
+      // We still drop the stale flag so it doesn't accumulate across sessions.
       const flag = sessionStorage.getItem(flagKey);
       if (flag === "done") {
-        // The pipeline state may have been cleared (different tab, etc.);
-        // surface a hint so the user can retry from References.
-        if (!cancelled) setAuto({ kind: "error", message: "Already extracted in this session. Re-extract from References if needed." });
-        return;
+        sessionStorage.removeItem(flagKey);
       }
       // Bible probe — get_bible returns capability_not_available or a hint
       // payload; we read the success flag rather than HEAD-ing a route.
