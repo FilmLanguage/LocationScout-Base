@@ -137,10 +137,20 @@ app.post("/mcp", async (req, res) => {
   const tool = body?.params?.name;
   const uri = body?.params?.uri;
   const action = tool ? `tool:${tool}` : uri ? `resource_read:${uri}` : `mcp:${rpcMethod}`;
-  // Per-project isolation: pull project_id off the tool arguments (when the
-  // caller passed one) and put it on the request context so storage layer
-  // namespaces artifacts under that project for the whole async chain.
-  const rawProjectId = body?.params?.arguments?.project_id;
+  // Per-project isolation: pull project_id off the request and put it on the
+  // request context so storage layer namespaces artifacts under that project
+  // for the whole async chain. Two extraction paths, both already canonical
+  // elsewhere in the project:
+  //   1. tools/call → `body.params.arguments.project_id` (since 2026-05-16)
+  //   2. resources/read → `?project_id=` query string on the URI (same
+  //      convention as `/artifacts/...` HTTP routes, used by GeneralUI)
+  // Without (2), resource handlers fell back to DEFAULT_PROJECT_KEY and
+  // 404'd reads of artifacts written under a real project namespace.
+  const argProjectId = body?.params?.arguments?.project_id;
+  const uriProjectId = extractProjectIdFromUri(body?.params?.uri);
+  const rawProjectId =
+    (typeof argProjectId === "string" && argProjectId.trim()) ? argProjectId
+    : uriProjectId;
   const project_id = typeof rawProjectId === "string" && rawProjectId.trim() ? rawProjectId.trim() : undefined;
 
   await withRequestContext(request_id, tool, async () => {
@@ -169,6 +179,19 @@ function projectIdFromQuery(req: import("express").Request): string | undefined 
   const raw = req.query.project_id;
   if (typeof raw === "string" && raw.trim()) return raw.trim();
   return undefined;
+}
+
+/** Pull ?project_id=… off an MCP resource URI like
+ *  `agent://location-scout/bible/{id}?project_id=white-room-001`. Returns the
+ *  resolved id (undefined when missing or malformed). Mirrors the convention
+ *  already used by `/artifacts/...` HTTP routes and the GeneralUI client. */
+function extractProjectIdFromUri(uri: string | undefined): string | undefined {
+  if (typeof uri !== "string") return undefined;
+  const qIdx = uri.indexOf("?");
+  if (qIdx === -1) return undefined;
+  const params = new URLSearchParams(uri.slice(qIdx + 1));
+  const raw = params.get("project_id");
+  return raw && raw.trim() ? raw.trim() : undefined;
 }
 
 // Serve a specific image version by its short image_id — used by PromptCard
