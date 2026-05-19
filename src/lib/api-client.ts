@@ -117,9 +117,24 @@ interface ImageGenResult {
 
 export async function generateImage(params: ImageGenParams): Promise<ImageGenResult> {
   if (!FAL_AI_API_KEY) {
+    // MOCK_FAL escape hatch for local dev. Returns a deterministic placeholder
+    // URL so scout_location → generate_anchor → bible save chain still completes
+    // and downstream agents see *something* in the anchor slot. The image is
+    // not photorealistic — it's a 800×800 grey square. Toggle with MOCK_FAL=1.
+    if (process.env.MOCK_FAL === "1") {
+      const seed = params.seed ?? Math.floor(Math.random() * 1_000_000);
+      return {
+        images: [{
+          url: `https://placehold.co/800x800/2B2E31/EAEBEC/png?text=MOCK+anchor+${seed}`,
+          content_type: "image/png",
+        }],
+        seed,
+        model: params.model ?? "mock-fal",
+      };
+    }
     throw flError(FL_ERRORS.GENERATION_ERROR, "FAL_AI_API_KEY not configured", {
       retryable: false,
-      suggestion: "Set FAL_AI_API_KEY in .env",
+      suggestion: "Set FAL_AI_API_KEY in .env or MOCK_FAL=1 for local-dev",
     });
   }
 
