@@ -2,10 +2,15 @@
  * Stage 4 — Reference Generation.
  * Mirrors Figma frame "Reference Generation" (node 433:26).
  *
- * Fresh-start contract: every mount starts empty for floorplan, isometric,
- * and anchor. We do not auto-load existing artifacts from S3 — that pulled
- * stale images into "new projects" because the artifact slot is shared.
- * Cards only fill after the user clicks Generate in this session.
+ * Rehydration contract (Wave 0 fix, 2026-05-19):
+ *   On mount, HEAD-probe the per-project artifact paths for floorplan,
+ *   isometric, and anchor (via `buildArtifactUrl`, which appends
+ *   `?project_id=…`). For each 200 hit we flip the corresponding card to
+ *   `ready` so closing + reopening the iframe doesn't blow away images
+ *   that exist on disk. Cross-project leak is prevented at the URL level
+ *   (the route namespaces storage on `project_id`), not by refusing to
+ *   read. New locations still start empty because nothing is at those
+ *   paths yet.
  *
  * Generation chain (each step user-triggered):
  *   floorplan  → create_floorplan (Python/matplotlib, top-down)
@@ -500,9 +505,33 @@ export function ReferencesPage() {
     }
   };
 
-  // Fresh-start contract: anchor only appears after explicit Generate in
-  // this session. We no longer auto-load from S3 on mount; the cascade gate
-  // (isometric must be ready) is enforced at the click site in runGeneration.
+  // Rehydrate floorplan / isometric / anchor from disk on mount + when the
+  // project context changes. The previous "fresh-start" rule was too broad:
+  // PipelineState lives in sessionStorage (since the 2026-05-16 fix) but
+  // these three card states are component-local, so closing the iframe and
+  // reopening the modal lost them. The cross-project leak risk that
+  // motivated the original block is already handled by `buildArtifactUrl`
+  // pinning every request to `?project_id=` — a different project sees a
+  // genuine 404 here, not a stale image.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [fp, iso, anc] = await Promise.all([
+        checkExists(FLOORPLAN_IMG_PATH),
+        checkExists(ISOMETRIC_IMG_PATH),
+        checkExists(ANCHOR_IMG_PATH),
+      ]);
+      if (cancelled) return;
+      const now = Date.now();
+      if (fp) setFloorplan({ kind: "ready", cacheBust: now });
+      if (iso) setIsometric({ kind: "ready", cacheBust: now });
+      if (anc) setAnchor({ kind: "ready", cacheBust: now });
+    })();
+    return () => { cancelled = true; };
+    // checkExists is a stable closure (no deps); the URLs are derived from
+    // LOCATION_ID + projectId, which we list explicitly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [LOCATION_ID, projectId]);
 
   const handleRegenerateAnchor = useDebouncedAction(async () => {
     runGeneration(anchorPrompt || undefined);
@@ -523,9 +552,9 @@ export function ReferencesPage() {
     } catch (err) { setFloorplan({ kind: "error", message: err instanceof Error ? err.message : String(err) }); }
   };
 
-  // Fresh-start contract: floorplan stays empty until the user presses
-  // Generate. Previously auto-fired on mount; that pulled stale artifacts
-  // from S3 and made every "new project" look pre-populated.
+  // Floorplan does not auto-generate. Mount-rehydration (above) flips it
+  // to `ready` if a previously-generated PNG exists for this project_id;
+  // otherwise the user clicks Generate.
 
   // ─── Isometric: user-triggered via the Generate button ─────────
   const runIsometric = async (promptOverride?: string) => {
