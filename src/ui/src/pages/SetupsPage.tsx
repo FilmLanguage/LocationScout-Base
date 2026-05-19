@@ -21,7 +21,7 @@ import { ReferencePicker, type ReferenceRef } from "../components/ReferencePicke
 import { ImageOverlay } from "../components/ImageOverlay";
 import { useGallery } from "../hooks/useGallery";
 import { useAssemblePrompt } from "../hooks/useAssemblePrompt";
-import { useProjectContext } from "../hooks/useProjectContext";
+import { useProjectContext, buildArtifactUrl } from "../hooks/useProjectContext";
 import { useDebouncedAction } from "../hooks/useDebouncedAction";
 const setupUri = (id: string) => `agent://location-scout/setup/${id}`;
 const setupImgPath = (id: string) => `/artifacts/setup/${id}.png`;
@@ -38,33 +38,231 @@ type BatchState =
   | { kind: "ready" }
   | { kind: "error"; message: string };
 
+/**
+ * Empty-state wrapper that auto-triggers extract_setups when prerequisites
+ * are met (Bible + floorplan exist for this project). Replaces the static
+ * "go to References" message — the user navigating to /setups now means
+ * "I want setups" so we run the extraction instead of making them click
+ * back.
+ *
+ * Lives in its own component so the main <SetupsPage> can early-return
+ * here without violating the rules-of-hooks (no hooks before the guard).
+ *
+ * Guards:
+ *   - HEAD /artifacts/floorplan/<location>.png?project_id=… — 404 ⇒ inline
+ *     hint, no auto-fire.
+ *   - get_bible({ bible_id }) — 404 / not found ⇒ inline hint.
+ *   - sessionStorage flag `ls.setups_autoextract.<location>` so we don't
+ *     re-fire on every mount within the same session. Cleared on failure
+ *     so the user can retry, set to "done" on success.
+ */
+function SetupsPageEmpty({
+  locationId,
+  projectId,
+  dispatch,
+}: {
+  locationId: string;
+  projectId: string;
+  dispatch: ReturnType<typeof usePipeline>["dispatch"];
+}) {
+  type AutoState =
+    | { kind: "checking" }
+    | { kind: "needs-bible" }
+    | { kind: "needs-floorplan" }
+    | { kind: "extracting"; status: TaskStatus | null; task_id?: string }
+    | { kind: "error"; message: string };
+  const [auto, setAuto] = useState<AutoState>({ kind: "checking" });
+  const flagKey = `ls.setups_autoextract.${locationId}`;
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // Don't re-fire if we already completed this session for this location.
+      const flag = sessionStorage.getItem(flagKey);
+      if (flag === "done") {
+        // The pipeline state may have been cleared (different tab, etc.);
+        // surface a hint so the user can retry from References.
+        if (!cancelled) setAuto({ kind: "error", message: "Already extracted in this session. Re-extract from References if needed." });
+        return;
+      }
+      // Bible probe — get_bible returns capability_not_available or a hint
+      // payload; we read the success flag rather than HEAD-ing a route.
+      try {
+        const r = await callTool<{ error?: string; bible_id?: string }>(
+          "get_bible",
+          { bible_id: locationId },
+        );
+        if (cancelled) return;
+        // get_bible returns { error: "not_found", bible_id } when missing,
+        // or the full Bible JSON (which has no `error` field) when present.
+        const found = r.data !== null && r.data !== undefined && !r.data.error;
+        if (!found) {
+          setAuto({ kind: "needs-bible" });
+          return;
+        }
+      } catch {
+        if (!cancelled) setAuto({ kind: "needs-bible" });
+        return;
+      }
+      // Floorplan probe.
+      const fpUrl = buildArtifactUrl("floorplan", `${locationId}.png`, projectId);
+      let fpExists = false;
+      try {
+        const res = await fetch(fpUrl, { method: "HEAD", cache: "no-store" });
+        fpExists = res.ok;
+      } catch {
+        fpExists = false;
+      }
+      if (cancelled) return;
+      if (!fpExists) {
+        setAuto({ kind: "needs-floorplan" });
+        return;
+      }
+      // Both prerequisites met — fire extract_setups.
+      setAuto({ kind: "extracting", status: null });
+      try {
+        const r = await callTool<{ task_id: string }>("extract_setups", {
+          floorplan_uri: `agent://location-scout/floorplan/${locationId}`,
+          mood_state_uris: [],
+          project_id: projectId,
+        });
+        const taskId = r.data?.task_id;
+        if (!taskId) {
+          if (!cancelled) setAuto({ kind: "error", message: "extract_setups returned no task_id" });
+          return;
+        }
+        sessionStorage.setItem(flagKey, `in-flight:${taskId}`);
+        if (!cancelled) setAuto({ kind: "extracting", status: null, task_id: taskId });
+        const final = await pollTask(
+          taskId,
+          (s) => { if (!cancelled) setAuto({ kind: "extracting", status: s, task_id: taskId }); },
+          1500,
+          180000,
+        );
+        if (cancelled) return;
+        if (final.status === "failed") {
+          sessionStorage.removeItem(flagKey);
+          setAuto({ kind: "error", message: final.error || "Extract failed" });
+          return;
+        }
+        const artifacts = (final as { artifacts?: Array<{ uri: string }> }).artifacts ?? [];
+        if (artifacts.length === 0) {
+          sessionStorage.removeItem(flagKey);
+          setAuto({ kind: "error", message: "No setups produced — the LLM returned an empty plan." });
+          return;
+        }
+        const tiles = await Promise.all(
+          artifacts.map(async (a) => {
+            const sid = a.uri.split("/").pop() || "";
+            try {
+              const url = `/artifacts/setup/${sid}.json?project_id=${encodeURIComponent(projectId)}`;
+              const resp = await fetch(url, { cache: "no-store" });
+              if (!resp.ok) return { id: sid, status: "none" as const, scene: "", mood: "" };
+              const data = await resp.json() as Record<string, unknown>;
+              return {
+                id: sid,
+                status: "none" as const,
+                scene: (typeof data.scene_id === "string" && data.scene_id) || (typeof data.setup_name === "string" && data.setup_name) || "",
+                mood: (typeof data.mood === "string" && data.mood) || (typeof data.mood_id === "string" && data.mood_id) || "",
+              };
+            } catch {
+              return { id: sid, status: "none" as const, scene: "", mood: "" };
+            }
+          }),
+        );
+        if (cancelled) return;
+        dispatch({ type: "SET_SETUPS_TILES", tiles });
+        sessionStorage.setItem(flagKey, "done");
+        // Component will unmount once tiles populate, no need to setAuto.
+      } catch (err) {
+        sessionStorage.removeItem(flagKey);
+        if (!cancelled) setAuto({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locationId, projectId]);
+
+  const body = (() => {
+    switch (auto.kind) {
+      case "checking":
+        return "Checking prerequisites…";
+      case "needs-bible":
+        return (
+          <>
+            Generate a Location Bible first.
+            <br />
+            Go to <a href="/" style={{ color: "var(--accent)" }}>References</a>.
+          </>
+        );
+      case "needs-floorplan":
+        return (
+          <>
+            Generate the floorplan in <a href="/" style={{ color: "var(--accent)" }}>References</a> first — setups depend on it.
+          </>
+        );
+      case "extracting": {
+        const progress = auto.status?.progress;
+        const step = auto.status?.current_step;
+        return (
+          <>
+            Extracting setups…
+            {typeof progress === "number" && (
+              <> {Math.round(progress * 100)}%</>
+            )}
+            {step && (
+              <>
+                <br />
+                <span style={{ opacity: 0.6, fontSize: 11 }}>{step}</span>
+              </>
+            )}
+          </>
+        );
+      }
+      case "error":
+        return (
+          <>
+            <span style={{ color: "#F7927E" }}>{auto.message}</span>
+            <br />
+            <span style={{ opacity: 0.7 }}>
+              Retry from <a href="/" style={{ color: "var(--accent)" }}>References</a>.
+            </span>
+          </>
+        );
+    }
+  })();
+
+  return (
+    <div
+      className="input-page"
+      data-figma-node="436:33"
+      style={{ padding: 32, textAlign: "center" }}
+    >
+      <h3 style={{ fontSize: 14, marginBottom: 8, color: "var(--text)" }}>
+        {auto.kind === "extracting" ? "Extracting setups…" : "No setups extracted yet"}
+      </h3>
+      <p style={{ fontSize: 12, opacity: 0.9, lineHeight: 1.6 }}>{body}</p>
+    </div>
+  );
+}
+
 export function SetupsPage() {
   const { state, dispatch } = usePipeline();
   const { tiles, selectedId } = state.setups;
-  const { locationId: LOCATION_ID } = useProjectContext();
+  const { locationId: LOCATION_ID, projectId } = useProjectContext();
   const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
   const ANCHOR_URI = `agent://location-scout/anchor/${LOCATION_ID}`;
   const selected = tiles.find((t) => t.id === selectedId) ?? tiles[0];
   // Empty-tiles guard: without this, every JSX access to `selected.id` below
   // throws `TypeError: Cannot read properties of undefined (reading 'id')` and
   // the route renders a blank iframe. Reproduced live 2026-05-16.
+  //
+  // Wave 0 fix (2026-05-19): instead of showing a static "go to References"
+  // message, delegate to <SetupsPageEmpty> which checks prerequisites and
+  // auto-fires extract_setups when they are met. Keeps hooks rules clean
+  // by deferring all the SetupsPage hooks below this guard.
   if (!selected) {
-    return (
-      <div
-        className="input-page"
-        data-figma-node="436:33"
-        style={{ padding: 32, textAlign: "center" }}
-      >
-        <h3 style={{ fontSize: 14, marginBottom: 8, color: "var(--text)" }}>
-          No setups extracted yet
-        </h3>
-        <p style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.6 }}>
-          Go to <a href="/" style={{ color: "var(--accent)" }}>References</a> and
-          click <strong>Extract Setups</strong> after the floorplan + anchor are
-          ready. Setups depend on a Location Bible plus a generated floorplan.
-        </p>
-      </div>
-    );
+    return <SetupsPageEmpty locationId={LOCATION_ID} projectId={projectId} dispatch={dispatch} />;
   }
   const approvedCount = tiles.filter((t) => t.status === "approved").length;
   // "Reviewable" = not yet approved (covers both legacy "draft" and the
