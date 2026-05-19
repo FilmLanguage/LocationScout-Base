@@ -153,6 +153,17 @@ app.post("/mcp", async (req, res) => {
     : uriProjectId;
   const project_id = typeof rawProjectId === "string" && rawProjectId.trim() ? rawProjectId.trim() : undefined;
 
+  // Strip the ?project_id= query off the URI before the MCP transport tries
+  // to match it against a ResourceTemplate — RFC 6570 path templates don't
+  // tolerate trailing query strings, so without this the request silently
+  // falls through to no handler (empty contents, no error). Verified locally
+  // 2026-05-19: without strip, resource handler never fires; with strip the
+  // full chain (URI extract → ALS stamp → per-project loadArtifact) succeeds.
+  if (body?.params && typeof body.params.uri === "string") {
+    const qIdx = body.params.uri.indexOf("?");
+    if (qIdx !== -1) body.params.uri = body.params.uri.slice(0, qIdx);
+  }
+
   await withRequestContext(request_id, tool, async () => {
     const start = Date.now();
     log({ category: "mcp_in", action, status: "started" });
