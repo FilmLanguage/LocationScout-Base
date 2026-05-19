@@ -706,7 +706,15 @@ export function ReferencesPage() {
       }
       const artifacts = (final as { artifacts?: Array<{ uri: string }> }).artifacts ?? [];
       if (artifacts.length === 0) {
-        setExtract({ kind: "error", message: "No setups produced — the LLM returned an empty plan." });
+        // Don't guess at the cause — surface backend's actionable error if present.
+        // Backend's `extract_setups` sets `status:"failed"` with a specific error
+        // when its 3-layer fallback (T09 fix `ed8ea93`) still can't produce setups
+        // — but a stale task snapshot may leave `status:"completed"` with empty
+        // artifacts. Use whatever signal the backend gave us, not a hardcoded guess.
+        const errMsg = (final as { error?: string }).error
+          || (final as { current_step?: string }).current_step
+          || "Setup extraction returned no setups. Try regenerating the Location Bible with richer scene/space descriptions, or check the agent logs.";
+        setExtract({ kind: "error", message: errMsg });
         return;
       }
       const tiles = await Promise.all(

@@ -152,7 +152,11 @@ function SetupsPageEmpty({
         const artifacts = (final as { artifacts?: Array<{ uri: string }> }).artifacts ?? [];
         if (artifacts.length === 0) {
           sessionStorage.removeItem(flagKey);
-          setAuto({ kind: "error", message: "No setups produced — the LLM returned an empty plan." });
+          // Surface backend's actionable error (see ReferencesPage:709 for why).
+          const errMsg = (final as { error?: string }).error
+            || (final as { current_step?: string }).current_step
+            || "Setup extraction returned no setups. Try regenerating the Location Bible with richer scene/space descriptions.";
+          setAuto({ kind: "error", message: errMsg });
           return;
         }
         const tiles = await Promise.all(
