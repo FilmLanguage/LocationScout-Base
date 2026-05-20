@@ -1,14 +1,31 @@
 /**
  * Stage 3 — Analysis.
  * Mirrors Figma frame "Analysis" (node 429:19).
+ *
+ * State ownership (Variant A, Phase 3b-4):
+ *   - The Location Bible is owned by the backend. `useArtifact("bible", id)`
+ *     refetches on mount; when the artifact arrives, the analysis slice on
+ *     PipelineState is populated via SET_ANALYSIS so the (unchanged) JSX
+ *     keeps rendering from `state.analysis`. This closes the previous
+ *     state-loss bug where reloading the iframe wiped Analysis even though
+ *     the bible was still in PG/S3.
+ *   - The write_bible task uses `useTask`; on terminal `completed` we
+ *     invalidate the bible cache so `useArtifact` refetches, which in turn
+ *     re-fires the SET_ANALYSIS sync effect. No standalone get_bible call
+ *     follows the task anymore.
+ *   - `feedback` stays as `useState` — it's transient toast state, the
+ *     architecture's allowed tier-3 use.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { callTool, pollTask } from "../api/mcp";
+import { callTool } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
 import type { AnalysisState } from "../state/pipeline";
 import { useProjectContext } from "../hooks/useProjectContext";
+import { useArtifact } from "../hooks/useArtifact";
+import { useTask } from "../hooks/useTask";
+import { useArtifactCache } from "../state/artifactCache";
 
 type ToolFeedback =
   | { kind: "idle" }
@@ -21,9 +38,48 @@ export function AnalysisPage() {
   const navigate = useNavigate();
   const a = state.analysis;
   const [feedback, setFeedback] = useState<ToolFeedback>({ kind: "idle" });
-  const { locationId: LOCATION_ID } = useProjectContext();
+  const { locationId: LOCATION_ID, projectId } = useProjectContext();
   const RESEARCH_PACK_URI = `agent://location-scout/research/research_${LOCATION_ID}`;
   const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
+  const cache = useArtifactCache();
+
+  // Variant A: the bible is the canonical artifact; useArtifact fetches on
+  // mount + on cache invalidation. The page used to depend on a prior
+  // Generate-Bible click + dispatch to populate state.analysis; reloading
+  // the iframe lost analysis even when PG/S3 still had the bible. Now mount
+  // is rehydrate.
+  const bibleArtifact = useArtifact<Record<string, unknown> & { error?: string }>({
+    type: "bible",
+    id: LOCATION_ID,
+    project_id: projectId,
+  });
+
+  // write_bible task lifecycle. setBibleTaskId flips when user clicks
+  // Generate Bible below; useTask self-starts polling. onComplete invalidates
+  // the bible cache so useArtifact above refetches → the SET_ANALYSIS sync
+  // effect below dispatches the new analysis shape.
+  const [bibleTaskId, setBibleTaskId] = useState<string | null>(null);
+  const bibleTask = useTask(bibleTaskId, {
+    pollIntervalMs: 1500,
+    timeoutMs: 240_000,
+    onComplete: () => {
+      cache.invalidate({ type: "bible", id: LOCATION_ID, project_id: projectId });
+      setBibleTaskId(null);
+      setFeedback({
+        kind: "success",
+        tool: "write_bible",
+        message: "Bible generated — data updated",
+      });
+    },
+    onFailed: (msg) => {
+      setBibleTaskId(null);
+      setFeedback({
+        kind: "error",
+        tool: "write_bible",
+        message: msg || "Bible generation failed",
+      });
+    },
+  });
 
   /** Normalize an array that may contain strings or objects with label/item/name. */
   const toStringArray = (arr: unknown): string[] => {
@@ -108,43 +164,40 @@ export function AnalysisPage() {
       console.log("[write_bible] →", r.data);
       const taskId = r.data?.task_id;
       if (!taskId) {
-        setFeedback({ kind: "success", tool: "write_bible", message: "Bible request accepted" });
-        return;
-      }
-
-      setFeedback({
-        kind: "loading",
-        tool: "write_bible",
-      });
-
-      // Poll until task completes
-      const final = await pollTask(taskId, (s) => {
         setFeedback({
-          kind: "loading",
+          kind: "success",
           tool: "write_bible",
+          message: "Bible request accepted (no task_id returned)",
         });
-        console.log(`[write_bible] poll: ${s.current_step} (${Math.round(s.progress * 100)}%)`);
-      });
-
-      if (final.status === "failed") {
-        setFeedback({ kind: "error", tool: "write_bible", message: final.error ?? "Bible generation failed" });
         return;
       }
-
-      // Fetch the generated Bible and update state
-      const bible = await callTool<Record<string, unknown>>("get_bible", { bible_id: LOCATION_ID });
-      if (bible.data && !("error" in bible.data)) {
-        dispatch({ type: "SET_ANALYSIS", patch: bibleToAnalysis(bible.data) });
-        setFeedback({ kind: "success", tool: "write_bible", message: "Bible generated — data updated" });
-      } else {
-        setFeedback({ kind: "error", tool: "write_bible", message: "Bible saved but could not be loaded" });
-      }
+      // Flip task_id; useTask self-starts. onComplete will invalidate the
+      // bible cache, useArtifact will refetch, and the sync effect will
+      // dispatch SET_ANALYSIS. Toast updates land in onComplete/onFailed.
+      setBibleTaskId(taskId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[write_bible] failed:", err);
       setFeedback({ kind: "error", tool: "write_bible", message: msg });
     }
   };
+
+  // Sync: whenever the bible artifact resolves, project it onto the
+  // PipelineState.analysis slice so the (unchanged) JSX renders from
+  // `a.spaceDescription` / `a.keyDetails` / etc. The mapper is defensive
+  // against partial / error payloads so transient bibleArtifact states
+  // (loading → ready, missing → ready after Generate, ready → re-ready
+  // after Edit) don't blank the analysis card.
+  useEffect(() => {
+    if (bibleArtifact.status !== "ready" || !bibleArtifact.data) return;
+    const patch = bibleToAnalysis(bibleArtifact.data);
+    if (Object.keys(patch).length > 0) {
+      dispatch({ type: "SET_ANALYSIS", patch });
+    }
+    // bibleToAnalysis is locally defined and stable; the dep we care about
+    // is the bibleArtifact data identity. dispatch is also stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bibleArtifact.status, bibleArtifact.data]);
 
   const handleValidate = async () => {
     setFeedback({ kind: "loading", tool: "check_era_accuracy" });
@@ -170,7 +223,7 @@ export function AnalysisPage() {
     }
   };
 
-  const isBusy = feedback.kind === "loading";
+  const isBusy = feedback.kind === "loading" || bibleTask.status === "running";
 
   const handleApprove = async () => {
     dispatch({ type: "APPROVE_STAGE", stage: "analysis" });
