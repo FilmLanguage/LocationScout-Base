@@ -732,15 +732,21 @@ describe("STATE-OWNERSHIP: useTask-cancels-on-unmount-only-when-instructed", () 
 // green direction.
 
 describe("STATE-OWNERSHIP: legacy mechanisms expected to be deleted by Phase 3", () => {
-  it("legacy-mechanisms-A: ReferencesPage has bibleTaskKey/bibleErrorKey sessionStorage shims", async () => {
-    // PRE-Phase-3 this passes (the shims exist). Phase 3 must delete them,
-    // at which point the grep should be inverted — see the bible-bootstrap-no-refire
-    // test above which is the post-state assertion.
+  it("legacy-mechanisms-A: ReferencesPage no longer defines bibleTaskKey/bibleErrorKey helpers", async () => {
+    // Phase 3b (2026-05-20) deleted the bibleTaskKey/bibleErrorKey
+    // sessionStorage shims; useArtifact("bible") + useTask own the bootstrap
+    // now. This is the post-Phase-3b assertion — the inverse direction the
+    // original test author called out:
+    //   "Phase 3 must delete them, at which point the grep should be
+    //    inverted — see the bible-bootstrap-no-refire test above"
+    // The companion bible-bootstrap-doesnt-refire-on-tab-return test (above)
+    // covers the runtime side: no sessionStorage.setItem("ls.bible_task..."|
+    // "ls.bible_error...") writes. This one covers the source-grep side:
+    // even the helper names are gone.
     const fs = await import("node:fs");
     const path = new URL("../pages/ReferencesPage.tsx", import.meta.url).pathname.replace(/^\//, "");
     const normalized = process.platform === "win32" ? path.replace(/\//g, "\\") : path;
     const src = fs.readFileSync(normalized, "utf8");
-    // Currently expected present (will fail after Phase 3 strips them — desired).
-    expect(src).toMatch(/bibleTaskKey|bibleErrorKey/);
+    expect(src).not.toMatch(/function bibleTaskKey|function bibleErrorKey/);
   });
 });
