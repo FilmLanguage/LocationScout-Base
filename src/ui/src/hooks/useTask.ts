@@ -20,7 +20,10 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { callTool } from "../api/mcp";
+// Lazy MCP resolver — see callToolLazy.ts. Per-call dynamic import lets
+// state-ownership.test.tsx install `vi.doMock("../api/mcp", ...)` after
+// importing this hook and still intercept future MCP calls.
+import { callToolLazy } from "./callToolLazy";
 
 export type TaskStatus =
   | "idle"
@@ -30,13 +33,24 @@ export type TaskStatus =
   | "cancelled"
   | "timeout";
 
-export interface UseTaskParams {
-  /** When null, the hook stays idle. Flip to a string to begin polling. */
-  task_id: string | null;
+export interface UseTaskOptions {
   pollIntervalMs?: number; // default 1000
   timeoutMs?: number; // default 180000
   onComplete?: (result: TaskResult) => void;
   onFailed?: (error: string) => void;
+  /**
+   * When true, on component unmount the hook fires `callTool("cancel_task")`
+   * for any in-flight task. Default is FALSE — background tasks survive
+   * remount and the next mount picks up via `useArtifact` from the backend
+   * state (architecture doc §3). Opt in only when the cost of an orphaned
+   * task is real (e.g., expensive FAL.ai generation a user explicitly closed).
+   */
+  cancelOnUnmount?: boolean;
+}
+
+export interface UseTaskParams extends UseTaskOptions {
+  /** When null, the hook stays idle. Flip to a string to begin polling. */
+  task_id: string | null;
 }
 
 export interface TaskResult {
@@ -73,13 +87,32 @@ interface RawStatus {
   [extra: string]: unknown;
 }
 
-export function useTask(params: UseTaskParams): UseTaskReturn {
+/**
+ * useTask — accepts either a structured `{ task_id, ...options }` or a
+ * shorthand `useTask(task_id, options?)`. Shorthand is the canonical call
+ * shape for the acceptance tests; the structured form is convenient when
+ * options come from props.
+ */
+export function useTask(params: UseTaskParams): UseTaskReturn;
+export function useTask(
+  taskId: string | null,
+  options?: UseTaskOptions,
+): UseTaskReturn;
+export function useTask(
+  paramsOrId: UseTaskParams | string | null,
+  optionsArg?: UseTaskOptions,
+): UseTaskReturn {
+  const params: UseTaskParams =
+    typeof paramsOrId === "string" || paramsOrId === null
+      ? { task_id: paramsOrId, ...(optionsArg ?? {}) }
+      : paramsOrId;
   const {
     task_id,
     pollIntervalMs = DEFAULT_POLL_MS,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     onComplete,
     onFailed,
+    cancelOnUnmount = false,
   } = params;
 
   const [state, setState] = useState<TaskResult>({ status: "idle" });
@@ -108,7 +141,7 @@ export function useTask(params: UseTaskParams): UseTaskReturn {
       statusSnap: RawStatus,
     ): Promise<void> => {
       try {
-        const { data: result } = await callTool<Record<string, unknown>>(
+        const { data: result } = await callToolLazy<Record<string, unknown>>(
           "get_task_result",
           { task_id: tid },
         );
@@ -159,7 +192,7 @@ export function useTask(params: UseTaskParams): UseTaskReturn {
     cancelledRef.current = true;
     sessionIdRef.current += 1; // invalidate any in-flight poll
     // Best-effort backend notify — failure here doesn't block UI.
-    void callTool("cancel_task", { task_id }).catch(() => {
+    void callToolLazy("cancel_task", { task_id }).catch(() => {
       /* swallow; UI already stopped polling locally */
     });
   }, [task_id]);
@@ -182,7 +215,7 @@ export function useTask(params: UseTaskParams): UseTaskReturn {
     const tick = async (): Promise<void> => {
       if (cancelledRef.current || mySessionId !== sessionIdRef.current) return;
       try {
-        const { data } = await callTool<RawStatus>("get_task_status", {
+        const { data } = await callToolLazy<RawStatus>("get_task_status", {
           task_id,
         });
         if (cancelledRef.current || mySessionId !== sessionIdRef.current) return;
@@ -225,13 +258,21 @@ export function useTask(params: UseTaskParams): UseTaskReturn {
 
     return () => {
       // On dep-change (task_id flip) or unmount, cancel any pending callback.
-      // We do NOT call cancel_task — the spec says background tasks survive
-      // unmount unless the caller opts into cancelOnUnmount (a Phase 3b
-      // refinement; default behavior here matches §3 of the arch doc).
+      // Default behavior (cancelOnUnmount=false): we do NOT call cancel_task —
+      // background tasks survive unmount and the next mount picks up via
+      // useArtifact from backend state (architecture doc §3). When
+      // cancelOnUnmount=true (acceptance test useTask-cancels-on-unmount-only-
+      // when-instructed), best-effort fire cancel_task so the backend can stop
+      // expensive work the user explicitly abandoned.
       if (timer) clearTimeout(timer);
       sessionIdRef.current += 1;
+      if (cancelOnUnmount && task_id) {
+        void callToolLazy("cancel_task", { task_id }).catch(() => {
+          /* best-effort; UI is already gone */
+        });
+      }
     };
-  }, [task_id, pollIntervalMs, timeoutMs, fetchTerminalResult]);
+  }, [task_id, pollIntervalMs, timeoutMs, fetchTerminalResult, cancelOnUnmount]);
 
   return { ...state, cancel };
 }

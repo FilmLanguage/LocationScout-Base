@@ -5,7 +5,7 @@
  * the source of truth; the UI never holds canonical artifact state.
  *
  * Mechanics:
- *  1. On mount + on (type, id, project_id) change: consult artifactCache.
+ *  1. On mount + on (type, id, project_id) change: consult cache.
  *     - Cache hit with fetchedAt < 30 s old → return cached, NO network.
  *     - Cache miss or stale → fire callTool("get_<type>", { <type>_id, project_id }).
  *  2. 404 / `{ error: "not_found" }` payload → status="missing" (distinguishes
@@ -22,9 +22,15 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { callTool } from "../api/mcp";
+// Lazy MCP resolver — see callToolLazy.ts for the rationale. The acceptance
+// suite (state-ownership.test.tsx) installs `vi.doMock("../api/mcp", ...)`
+// *after* dynamically importing this hook; only a per-call dynamic import
+// honours that mock. Static `import { callTool }` would freeze the binding
+// before the mock is installed and every test that asserts MCP arguments
+// would silently bypass the spy.
+import { callToolLazy } from "./callToolLazy";
 import {
-  artifactCache,
+  useArtifactCache,
   type CacheEntry,
   type CacheStatus,
 } from "../state/artifactCache";
@@ -45,7 +51,11 @@ export interface UseArtifactSpec {
 export interface UseArtifactResult<T> {
   status: CacheStatus;
   data?: T;
-  error?: string;
+  /** `null` when the artifact is intentionally absent (status="missing") —
+   *  distinguishes "doesn't exist yet" from "backend errored". `undefined`
+   *  while the request is in flight or before mount. A string when status is
+   *  "error" (transport / unhandled). */
+  error: string | null | undefined;
   refetch: () => void;
 }
 
@@ -53,6 +63,7 @@ export function useArtifact<T = unknown>(
   spec: UseArtifactSpec,
 ): UseArtifactResult<T> {
   const ctx = useProjectContext();
+  const cache = useArtifactCache();
   const project_id = (spec.project_id ?? ctx.projectId).trim();
   const enabled = spec.enabled !== false;
   const { type, id } = spec;
@@ -65,27 +76,27 @@ export function useArtifact<T = unknown>(
 
   // Read latest cache snapshot. Returning a literal idle entry when no entry
   // exists keeps consumers' typeof checks simple.
-  const entry = artifactCache.get<T>(key) ?? ({ status: "idle" } as CacheEntry<T>);
+  const entry = cache.get<T>(key) ?? ({ status: "idle" } as CacheEntry<T>);
 
   const fetchOnce = useCallback(async (): Promise<void> => {
     const myReqId = ++reqIdRef.current;
-    artifactCache.set<T>(key, { status: "loading" });
+    cache.set<T>(key, { status: "loading" });
     try {
-      const { data } = await callTool<Record<string, unknown>>(
+      const { data } = await callToolLazy<Record<string, unknown>>(
         `get_${type}`,
         { [`${type}_id`]: id, project_id },
       );
       // Out-of-order guard: a later refetch began before we resolved → drop.
       if (myReqId !== reqIdRef.current) return;
       if (data && typeof data === "object" && (data as { error?: string }).error === "not_found") {
-        artifactCache.set<T>(key, {
+        cache.set<T>(key, {
           status: "missing",
           data: undefined,
           fetchedAt: Date.now(),
         });
         return;
       }
-      artifactCache.set<T>(key, {
+      cache.set<T>(key, {
         status: "ready",
         data: data as T,
         fetchedAt: Date.now(),
@@ -93,25 +104,25 @@ export function useArtifact<T = unknown>(
     } catch (e: unknown) {
       if (myReqId !== reqIdRef.current) return;
       const msg = e instanceof Error ? e.message : String(e);
-      artifactCache.set<T>(key, {
+      cache.set<T>(key, {
         status: "error",
         error: msg,
         fetchedAt: Date.now(),
       });
     }
-  }, [type, id, project_id]);
+  }, [type, id, project_id, cache]);
 
   // Subscribe to cache mutations for this key (set / invalidate from anywhere).
   // On invalidate (entry removed), trigger a refetch — this is how external
   // mutations (e.g. useTask.onTerminal after Regenerate) cascade into a refresh
   // here. setTick forces a re-render so the caller reads the new entry.
   useEffect(() => {
-    const unsub = artifactCache.subscribe(key, () => {
+    const unsub = cache.subscribe(key, () => {
       setTick((n) => n + 1);
       // Only refetch on full removal (invalidate); a `set` to "loading" /
       // "ready" / "missing" / "error" leaves an entry present and is the
       // result of fetchOnce itself — refetching here would loop forever.
-      const after = artifactCache.get(key);
+      const after = cache.get(key);
       if (after === undefined && enabled && id) {
         void fetchOnce();
       }
@@ -126,12 +137,18 @@ export function useArtifact<T = unknown>(
   // Mount + (type/id/project_id) change effect: decide cache-hit vs fetch.
   useEffect(() => {
     if (!enabled || !id) return;
-    const current = artifactCache.get<T>(key);
+    const current = cache.get<T>(key);
     const fresh =
       current?.status === "ready" &&
       current.fetchedAt !== undefined &&
       Date.now() - current.fetchedAt < CACHE_TTL_MS;
     if (fresh) return; // cache hit, do nothing
+    // De-dup concurrent mounts: if another caller already started a fetch
+    // for the same key (status="loading"), don't fire a duplicate. The
+    // running fetch will populate the cache and our subscriber will fire.
+    // Closes acceptance test cache-hit-no-refetch where two probes mount in
+    // parallel for the same artifact.
+    if (current?.status === "loading") return;
     void fetchOnce();
     // Same intentional dep list as the subscribe effect above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -140,7 +157,10 @@ export function useArtifact<T = unknown>(
   return {
     status: entry.status,
     data: entry.data,
-    error: entry.error,
+    // Status "missing" → explicit null (artifact intentionally absent). Other
+    // statuses pass through whatever the cache holds — undefined for idle /
+    // loading / ready, string for error.
+    error: entry.status === "missing" ? null : entry.error,
     refetch: () => {
       void fetchOnce();
     },

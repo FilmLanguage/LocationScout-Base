@@ -17,8 +17,11 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { callTool } from "../api/mcp";
-import { artifactCache, type CacheStatus } from "../state/artifactCache";
+// Lazy MCP resolver — per-call dynamic import lets the acceptance suite
+// install `vi.doMock("../api/mcp", ...)` and have it apply on subsequent
+// list_* calls. See callToolLazy.ts.
+import { callToolLazy } from "./callToolLazy";
+import { useArtifactCache, type CacheStatus } from "../state/artifactCache";
 import { useProjectContext } from "./useProjectContext";
 
 export interface UseProjectArtifactsParams {
@@ -38,10 +41,36 @@ export interface UseProjectArtifactsResult<T> {
 /** Internal cache id used for the list slot — collides with no real entity id. */
 const LIST_ID = "__list__";
 
+/**
+ * useProjectArtifacts — list-with-filter hook.
+ *
+ * Two call shapes:
+ *   useProjectArtifacts({ type, project_id?, enabled? })  // structured
+ *   useProjectArtifacts(type, project_id?, enabled?)       // shorthand
+ *
+ * The shorthand matches the acceptance-test contract
+ * (state-ownership.test.tsx) and reads naturally for the common case where
+ * only the type varies. project_id falls back to useProjectContext().
+ */
 export function useProjectArtifacts<T = unknown>(
   params: UseProjectArtifactsParams,
+): UseProjectArtifactsResult<T>;
+export function useProjectArtifacts<T = unknown>(
+  type: string,
+  project_id?: string,
+  enabled?: boolean,
+): UseProjectArtifactsResult<T>;
+export function useProjectArtifacts<T = unknown>(
+  paramsOrType: UseProjectArtifactsParams | string,
+  projectIdArg?: string,
+  enabledArg?: boolean,
 ): UseProjectArtifactsResult<T> {
+  const params: UseProjectArtifactsParams =
+    typeof paramsOrType === "string"
+      ? { type: paramsOrType, project_id: projectIdArg, enabled: enabledArg }
+      : paramsOrType;
   const ctx = useProjectContext();
+  const cache = useArtifactCache();
   const resolvedProjectId =
     params.project_id !== undefined ? params.project_id : ctx.projectId;
   const project_id = resolvedProjectId.trim();
@@ -56,7 +85,7 @@ export function useProjectArtifacts<T = unknown>(
   // Reporting via the hook return (not throw) lets pages render a banner.
   const isEmptyProject = project_id === "";
 
-  const entry = artifactCache.get(cacheKey);
+  const entry = cache.get(cacheKey);
   const status: CacheStatus = isEmptyProject
     ? "error"
     : (entry?.status ?? "idle");
@@ -68,14 +97,14 @@ export function useProjectArtifacts<T = unknown>(
   const fetchOnce = useCallback(async (): Promise<void> => {
     if (isEmptyProject) return;
     const myReqId = ++reqIdRef.current;
-    artifactCache.set(cacheKey, { status: "loading" });
+    cache.set(cacheKey, { status: "loading" });
     try {
-      const { data } = await callTool<Record<string, unknown>>(
+      const { data } = await callToolLazy<Record<string, unknown>>(
         `list_${type}s`,
         { project_id },
       );
       if (myReqId !== reqIdRef.current) return;
-      artifactCache.set(cacheKey, {
+      cache.set(cacheKey, {
         status: "ready",
         data: (data ?? { items: [] }) as Record<string, unknown>,
         fetchedAt: Date.now(),
@@ -83,23 +112,23 @@ export function useProjectArtifacts<T = unknown>(
     } catch (e: unknown) {
       if (myReqId !== reqIdRef.current) return;
       const msg = e instanceof Error ? e.message : String(e);
-      artifactCache.set(cacheKey, {
+      cache.set(cacheKey, {
         status: "error",
         error: msg,
         fetchedAt: Date.now(),
       });
     }
-  }, [type, project_id, isEmptyProject]);
+  }, [type, project_id, isEmptyProject, cache]);
 
   // Subscribe to direct mutations of the list slot AND to invalidateType
   // for the underlying type (which clears both list-slot and per-item
   // entries — see ArtifactCache.invalidateType).
   useEffect(() => {
     if (isEmptyProject) return;
-    const unsubList = artifactCache.subscribe(cacheKey, () => {
+    const unsubList = cache.subscribe(cacheKey, () => {
       setTick((n) => n + 1);
       // On invalidation (entry removed), refetch.
-      const after = artifactCache.get(cacheKey);
+      const after = cache.get(cacheKey);
       if (after === undefined && enabled) {
         void fetchOnce();
       }
@@ -111,7 +140,7 @@ export function useProjectArtifacts<T = unknown>(
   // Initial / dep-change fetch.
   useEffect(() => {
     if (!enabled || isEmptyProject) return;
-    const current = artifactCache.get(cacheKey);
+    const current = cache.get(cacheKey);
     if (current?.status === "ready") return; // cache hit, no refetch
     void fetchOnce();
     // eslint-disable-next-line react-hooks/exhaustive-deps

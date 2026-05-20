@@ -138,6 +138,20 @@ export class ArtifactCache {
  *  a fresh ArtifactCache() to avoid cross-test pollution. */
 export const artifactCache = new ArtifactCache();
 
+/**
+ * Seed the singleton cache with a known entry. Intended for tests that need
+ * to prime cache state (e.g. simulate a stale entry that should trigger a
+ * background refetch under the cache-stale-refetch acceptance contract). Not
+ * used by production code — pages MUST go through `useArtifact` so the cache
+ * + subscriber invariants stay intact.
+ *
+ * Spec: state-ownership.test.tsx ("cache-stale-refetch") expects this helper
+ * to exist; the implementation is a trivial pass-through.
+ */
+export function seed<T>(key: CacheKey, entry: CacheEntry<T>): void {
+  artifactCache.set<T>(key, entry);
+}
+
 // ─── React Context wrapper (forward-compatible, Phase 3a) ──────────────────
 //
 // The architecture doc (§2) calls for a `<PipelineContext>`-style provider so
@@ -153,22 +167,33 @@ export const artifactCache = new ArtifactCache();
 // from the same place hooks use it. Module sits under `src/ui/src/state/`
 // which is jsdom/browser-only territory.
 
-import { createContext, useContext, type ReactNode, createElement } from "react";
+import { createContext, useContext, useMemo, type ReactNode, createElement } from "react";
 
 const ArtifactCacheContext = createContext<ArtifactCache>(artifactCache);
 
 export interface ArtifactCacheProviderProps {
-  /** Optional override for tests / nested scopes. Defaults to the singleton. */
+  /** Optional override for tests / nested scopes. When supplied, used as-is;
+   *  when omitted, the Provider creates its own per-mount cache. */
   cache?: ArtifactCache;
   children: ReactNode;
 }
 
-/** Pass-through Provider — Phase 3a uses the singleton, but pages and tests
- *  can wrap a subtree with a custom ArtifactCache for isolation. */
+/**
+ * Provider that hosts a per-mount ArtifactCache. Production apps wrap their
+ * root subtree once (so the whole UI shares cache state); tests wrap each
+ * `render()` separately and so get fresh, isolated caches automatically.
+ *
+ * If `cache` prop is supplied, that instance is used verbatim — escape hatch
+ * for tests that want to inspect cache state across a render boundary.
+ */
 export function ArtifactCacheProvider(
   props: ArtifactCacheProviderProps,
 ): ReturnType<typeof createElement> {
-  const cache = props.cache ?? artifactCache;
+  // useMemo with an empty dep list pins this cache instance to the Provider's
+  // lifetime — remounting the Provider gives a fresh cache, which is the test-
+  // isolation behaviour the state-ownership acceptance tests rely on.
+  const owned = useMemo(() => new ArtifactCache(), []);
+  const cache = props.cache ?? owned;
   return createElement(
     ArtifactCacheContext.Provider,
     { value: cache },
@@ -176,8 +201,9 @@ export function ArtifactCacheProvider(
   );
 }
 
-/** Hook accessor — currently returns the singleton, but routes through
- *  Context so future per-tree caches Just Work. */
+/** Hook accessor — returns the contextual ArtifactCache. Outside any
+ *  Provider, falls back to the module singleton so legacy code paths and
+ *  unit tests that bypass the provider still resolve to a valid cache. */
 export function useArtifactCache(): ArtifactCache {
   return useContext(ArtifactCacheContext);
 }
