@@ -1,6 +1,24 @@
 /**
  * Stage 2 — Research Cycle.
  * Mirrors Figma frame "Research Cycle" (node 408:12).
+ *
+ * State ownership (Variant A status, Phase 3b-3):
+ *   This page is already aligned with Variant A. It owns no canonical
+ *   artifact state:
+ *     - `newFact` / `newAnachronism` are unsubmitted user drafts —
+ *       legitimate `useState` per architecture §1 tier 3.
+ *     - Facts / anachronisms / elements are read via `usePipeline` (the
+ *       reducer); the reducer is route metadata + form state, not artifact
+ *       state, so it stays in-memory per architecture §6.
+ *     - Backend writes go through `callTool` as imperative side-effects
+ *       (add_fact / add_anachronism / research_era / approve_artifact);
+ *       there is no async task lifecycle and no pollTask, so no `useTask`
+ *       wrapping is needed.
+ *   The Research Pack artifact has no `get_research_pack` MCP tool today
+ *   (the backend exposes write paths only); when read access is added,
+ *   migrate to `useArtifact({ type: "research_pack", id })` to drive
+ *   mount-time rehydration. No change needed in Phase 3b — the existing
+ *   reducer-driven shape is correct under Variant A.
  */
 
 import { useState } from "react";
