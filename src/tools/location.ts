@@ -261,6 +261,49 @@ function briefResolveErrorMessage(reason: BriefResolveResult["reason"]): string 
 }
 
 /**
+ * Phase 5D fallback: when 1AD has no upstream briefs for the project but the
+ * LS UI still wants to drive the demo path forward (location panel mount auto-
+ * triggers scout_location), synthesize a thin LocationBrief from the caller's
+ * `location_id` slug and optional `location_name` hint. The resulting bible
+ * is generated with intentionally minimal context — the LLM falls back to its
+ * general knowledge from the era string + name hint.
+ *
+ * Only safe for `scout_location` (the composite pipeline tool): research_era
+ * and write_bible still error when upstream is missing because they are pure
+ * research operations where thin context produces bad output.
+ *
+ * Returns null when there is no sensible seed (no caller location_id, no name
+ * hint, and no opaque slug to fall back on).
+ */
+function synthesizeFallbackBrief(
+  callerLocationId: string | undefined,
+  location_name: string | undefined,
+  project_id: string,
+): z.infer<typeof LocationBriefSchema> | null {
+  // We need at least *something* to anchor the bible to. If the caller passed
+  // neither a location_id nor a name hint we have nothing to seed with.
+  const seedId = callerLocationId ?? (location_name ? `loc_${project_id}` : undefined);
+  if (!seedId) return null;
+
+  // Build a human-readable name. Prefer the explicit hint; otherwise derive
+  // one from the slug (`loc_<project_id>` → "Location <project_id>"). When the
+  // hint *is* the opaque slug, treat it as no-hint too.
+  const trimmedHint = (location_name ?? "").trim();
+  const hintIsOpaque = !trimmedHint || isOpaqueIdHint(trimmedHint);
+  const derivedName = hintIsOpaque ? `Location ${project_id}` : trimmedHint;
+
+  return {
+    location_id: seedId,
+    location_name: derivedName,
+    location_type: "INT" as const,
+    time_of_day: ["DAY"],
+    era: "present day",
+    scenes: ["scene_001"],
+    recurring: false,
+  };
+}
+
+/**
  * Build a one-sentence layout hint string from a Location Bible to inject
  * into the anchor prompt as a spatial guide. Replaces the old isometric.png
  * image-reference path that bled isometric aesthetics into nano-banana
@@ -314,6 +357,21 @@ export function registerLocationTools(server: McpServer) {
           } else {
             console.warn(`[scout_location] auto-resolve: agent://director/location-vision/${project_id} returned null or error`);
           }
+        }
+      }
+
+      // Phase 5D: gracefully degrade when 1AD has no upstream briefs for the
+      // demo path. The LS UI auto-triggers scout_location on Location panel
+      // mount with only `project_id` + `location_id` — when extract_locations
+      // never ran upstream, we still want a thin bible rather than a hard
+      // error. Only kicks in for the two "1AD reachable but empty" reasons;
+      // `agent_url_unset` is still a real misconfiguration worth surfacing.
+      if (!resolvedBrief && project_id &&
+        (resolveReason === "upstream_unreachable" || resolveReason === "empty_briefs_collection")) {
+        const fallback = synthesizeFallbackBrief(callerLocationId, location_name, project_id);
+        if (fallback) {
+          console.warn(`[scout_location] auto-resolve: synthesizing fallback brief from location_id=${fallback.location_id} (reason=${resolveReason}) — bible will be generated from thin context`);
+          resolvedBrief = fallback;
         }
       }
 
@@ -788,6 +846,15 @@ export function registerLocationTools(server: McpServer) {
             // Download and persist — saveImage writes the PNG + sidecar JSON per the prompt-gallery contract.
             const imgRes = await fetch(lastImageUrl);
             const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+            // Build sidecar reference tokens so the gallery UI can show what
+            // each version was generated against (survives close+reopen without
+            // any UI-side localStorage workaround).
+            const anchorRefTokens: string[] = [];
+            if (editing && editBase) {
+              anchorRefTokens.push(`edit_base:${editBase.image_id}`);
+            } else if (reference_images) {
+              anchorRefTokens.push(...reference_images.map((r: ReferenceRef) => `${r.kind}:${r.image_id}`));
+            }
             lastSaveResult = await saveImage("anchor", imgBuf, {
               entity_id: bibleId,
               location_id: bibleId,
@@ -797,6 +864,7 @@ export function registerLocationTools(server: McpServer) {
               negative_prompt: negativePrompt || undefined,
               seed: generation_params?.seed != null ? generation_params.seed + (attempt - 1) : undefined,
               source_task_id: task_id,
+              references: anchorRefTokens.length > 0 ? anchorRefTokens : undefined,
               ...(editing && editBase ? { parent_version_id: editBase.image_id } : {}),
             });
 
@@ -1093,6 +1161,9 @@ export function registerLocationTools(server: McpServer) {
           }
 
           updateTask(task_id, { progress: 0.85, current_step: "Saving floorplan PNG" });
+          // Floorplan is derived deterministically from the approved Bible; record
+          // that lineage in the sidecar so the gallery UI can show what each
+          // version was generated against without UI-side persistence hacks.
           const saveResult = await saveImage("floorplan", pngBuffer, {
             entity_id: bibleId,
             location_id: bibleId,
@@ -1100,6 +1171,7 @@ export function registerLocationTools(server: McpServer) {
             model: "matplotlib",
             source_tool: "create_floorplan",
             source_task_id: task_id,
+            references: [`bible:${bibleId}`],
           });
 
           updateTask(task_id, {
@@ -1231,6 +1303,19 @@ export function registerLocationTools(server: McpServer) {
 
           const imgRes = await fetch(result.images[0].url);
           const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+          // Build sidecar reference tokens: in edit mode anchor on the prior
+          // version; otherwise capture the floorplan chain ref plus any user
+          // reference_images so the gallery UI can show what each version was
+          // generated against (survives close+reopen without UI persistence).
+          const isoRefTokens: string[] = [];
+          if (editing && editBase) {
+            isoRefTokens.push(`edit_base:${editBase.image_id}`);
+          } else {
+            if (auto_resolve !== false) isoRefTokens.push(`floorplan:${floorplanId}`);
+            if (reference_images) {
+              isoRefTokens.push(...reference_images.map((r: ReferenceRef) => `${r.kind}:${r.image_id}`));
+            }
+          }
           const saveResult = await saveImage("isometric", imgBuf, {
             entity_id: floorplanId,
             location_id: floorplanId,
@@ -1239,6 +1324,7 @@ export function registerLocationTools(server: McpServer) {
             source_tool: "generate_isometric_reference",
             seed: generation_params?.seed,
             source_task_id: task_id,
+            references: isoRefTokens.length > 0 ? isoRefTokens : undefined,
             ...(editing && editBase ? { parent_version_id: editBase.image_id } : {}),
           });
 
@@ -2097,6 +2183,10 @@ export function registerLocationTools(server: McpServer) {
           updateTask(task_id, { progress: 0.8, current_step: "Saving variation image" });
           const imgRes = await fetch(result.images[0].url);
           const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+          // Capture the anchor chain ref if it was used as img2img base so the
+          // gallery UI can show what each variation was generated against.
+          const moodRefTokens: string[] = [];
+          if (anchorDataUrl) moodRefTokens.push(`anchor:${bibleId}`);
           const saveResult = await saveImage("mood_variation", imgBuf, {
             entity_id: variation_id,
             location_id: bibleId,
@@ -2104,6 +2194,7 @@ export function registerLocationTools(server: McpServer) {
             model: resolvedModel,
             source_tool: "add_mood_variation",
             source_task_id: task_id,
+            references: moodRefTokens.length > 0 ? moodRefTokens : undefined,
           });
 
           updateTask(task_id, {
