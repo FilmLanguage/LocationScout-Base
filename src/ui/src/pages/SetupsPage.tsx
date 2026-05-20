@@ -2,13 +2,28 @@
  * Stage 5 — Setups Generation.
  * Mirrors Figma frame "Setups Generation" (node 436:33).
  *
- * On mount, checks whether each setup tile already has an image at
- * /artifacts/setup/<id>.png. If any are missing, fires the backend
- * generate_setup_images tool (runs all missing setups in parallel via
- * FAL.ai) and polls until complete. Each tile shows its own image,
- * the detail panel shows a full-resolution preview of the selected
- * setup, and the "PROMPT (click to expand)" link loads the exact
- * prompt used for the selected setup from get_setup_prompt.
+ * State ownership (Variant A status, Phase 3b-2):
+ *   - The extract_setups lifecycle was already moved off SetupsPage in the
+ *     2026-05-19 LS Setups Discipline pass. SetupsPage no longer auto-fires
+ *     anything on mount; it reads PipelineState.setupsExtraction (populated
+ *     by the Approve Anchor handler on ReferencesPage) and renders the
+ *     SetupsPageEmpty wrapper below if no tiles are present.
+ *   - Per-tile setup PNGs have no JSON `get_setup` MCP tool today (Phase 5
+ *     backend gap), so the mount `useEffect` still HEAD-probes
+ *     /artifacts/setup/<id>.png to flip tile statuses. Cross-project leak
+ *     is closed at the URL layer by buildArtifactUrl. Once `get_setup`
+ *     lands server-side, swap to `useArtifact({ type: "setup", id })`.
+ *   - The pollTask calls inside runBatch / handleRegenerateSelected /
+ *     handleRegenerateRejected are imperative await flows that don't
+ *     cross page boundaries; converting them to declarative `useTask`
+ *     subscriptions requires hoisting taskId state per-tile (Phase 4 task
+ *     when CD/AD/ShotGen get the same treatment, since their generation
+ *     flows have the same shape). Left as-is.
+ *
+ *   The setupsExtraction slice on PipelineState stays — it's the
+ *   cross-page handoff between Approve-Anchor (on ReferencesPage) and the
+ *   empty-state renderer here. useTask in ReferencesPage already drives
+ *   that slice's progression; SetupsPage just reads.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
