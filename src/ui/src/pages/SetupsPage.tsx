@@ -136,7 +136,18 @@ function SetupsPageEmpty({
 export function SetupsPage() {
   const { state, dispatch } = usePipeline();
   const { tiles, selectedId } = state.setups;
-  const { locationId: LOCATION_ID, projectId } = useProjectContext();
+  const { locationId: LOCATION_ID, projectId, projectIdReady } = useProjectContext();
+  // Per Bug 1 (2026-05-22): project_id reaches the backend via two channels:
+  //   1. callTool() in api/mcp.ts auto-injects args.project_id from the URL
+  //      → MCP middleware stamps it on AsyncLocalStorage → resolveProjectKey
+  //      picks it up.
+  //   2. We pass project_id explicitly in the generate_setup_images args
+  //      below (belt-and-braces; defends against future refactors that drop
+  //      the auto-inject helper).
+  // The URI fragments themselves carry the per-project location id
+  // (loc_${projectId}) so the bibleId resolves to the right slot. Adding
+  // ?project_id=… to the URI string would break the backend's
+  // `.split("/").pop()` bible-id extraction, so we don't do that.
   const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
   const ANCHOR_URI = `agent://location-scout/anchor/${LOCATION_ID}`;
   const selected = tiles.find((t) => t.id === selectedId) ?? tiles[0];
@@ -262,6 +273,7 @@ export function SetupsPage() {
       const result = await callTool<{ task_id: string }>("generate_setup_images", {
         bible_uri: BIBLE_URI,
         setups: targetTiles,
+        project_id: projectId,
       });
       const taskId = result.data?.task_id;
       if (!taskId) {
@@ -393,6 +405,7 @@ export function SetupsPage() {
       const result = await callTool<{ task_id: string }>("generate_setup_images", {
         bible_uri: BIBLE_URI,
         setups: [tile],
+        project_id: projectId,
         ...(override ? { prompt_overrides: { [tile.id]: override } } : {}),
         ...(refs && refs.length > 0 && !editing ? { reference_images: { [tile.id]: refs } } : {}),
         ...(editing
@@ -464,6 +477,7 @@ export function SetupsPage() {
       const result = await callTool<{ task_id: string }>("generate_setup_images", {
         bible_uri: BIBLE_URI,
         setups: targets,
+        project_id: projectId,
       });
       const taskId = result.data?.task_id;
       if (!taskId) throw new Error("no task_id");

@@ -7,17 +7,21 @@
  * mandated by docs/sessions/2026-05-21-wave2/bug-1-audit.md §"Recommended fix
  * scope":
  *
- *   1) BIBLE_URI MUST carry `?project_id=${projectId}` so the backend HTTP
- *      route / MCP resource resolver namespace the storage lookup correctly.
- *      Without it, `loc_${projectId}` ends up against a default-project
- *      namespace and the user sees
- *      "Location Bible not found: agent://location-scout/bible/loc_default-project".
- *
- *   2) `callTool("generate_setup_images", …)` MUST include an explicit
+ *   1) `callTool("generate_setup_images", …)` MUST include an explicit
  *      `project_id: projectId` argument. The MCP middleware reads
  *      args.project_id first; URL fallback (`callTool` auto-injection) covers
  *      the common case but the SetupsPage call-site explicitly threading the
  *      id removes any ambiguity for downstream auditors.
+ *
+ *   2) The SetupsPage / ReferencesPage modules MUST destructure `projectId`
+ *      from `useProjectContext()` — proving they consume the namespace marker
+ *      that the hook now reports. The old code (`const { locationId } =
+ *      useProjectContext()`) would still type-check after the fix but would
+ *      silently drop the project namespace at call sites.
+ *
+ *   3) `useProjectContext()` MUST NOT contain a fallback substitution that
+ *      yields `default-project` — that was the literal source of the
+ *      `loc_default-project` leak.
  *
  * Why structural / regex? PipelineContext-wired RTL tests are 50+ lines of
  * scaffolding for this one shape; a regex over the source catches regressions
@@ -33,24 +37,18 @@ import { dirname, join } from "node:path";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SETUPS_PAGE_PATH = join(HERE, "..", "SetupsPage.tsx");
 const REFERENCES_PAGE_PATH = join(HERE, "..", "ReferencesPage.tsx");
+const HOOK_PATH = join(HERE, "..", "..", "hooks", "useProjectContext.ts");
 
-describe("Bug 1 — SetupsPage carries project_id", () => {
-  it("BIBLE_URI literal includes a ?project_id= query parameter", () => {
+describe("Bug 1 — SetupsPage threads project_id into MCP args", () => {
+  it("destructures projectId from useProjectContext()", () => {
     const src = readFileSync(SETUPS_PAGE_PATH, "utf8");
-    // Accept either inline template (`...?project_id=${projectId}`) or a
-    // helper that builds the URI. The forbidden shape is the bare URI with
-    // no project marker anywhere on the same line.
-    const bibleUriLine = src
-      .split(/\r?\n/)
-      .find((l) => /const\s+BIBLE_URI\s*=/.test(l));
-    expect(bibleUriLine, "BIBLE_URI declaration not found in SetupsPage.tsx").toBeTruthy();
-    expect(bibleUriLine!).toMatch(/project_id/);
+    expect(src).toMatch(/projectId[^=]*=\s*useProjectContext\(\)/);
   });
 
-  it("generate_setup_images callTool args mention project_id explicitly", () => {
+  it("every callTool('generate_setup_images', …) args object passes project_id", () => {
     const src = readFileSync(SETUPS_PAGE_PATH, "utf8");
     // Find every callTool("generate_setup_images", …) literal and check the
-    // args object 8 lines forward includes project_id. (Multi-line args
+    // args object 14 lines forward includes project_id. (Multi-line args
     // objects are common — bound the search window.)
     const lines = src.split(/\r?\n/);
     const callIndexes: number[] = [];
@@ -59,7 +57,7 @@ describe("Bug 1 — SetupsPage carries project_id", () => {
     });
     expect(callIndexes.length, "no generate_setup_images callTool found").toBeGreaterThan(0);
     for (const i of callIndexes) {
-      const window = lines.slice(i, Math.min(i + 14, lines.length)).join("\n");
+      const window = lines.slice(i, Math.min(i + 18, lines.length)).join("\n");
       expect(
         window,
         `generate_setup_images args at line ${i + 1} missing project_id`,
@@ -68,13 +66,28 @@ describe("Bug 1 — SetupsPage carries project_id", () => {
   });
 });
 
-describe("Bug 1 — ReferencesPage BIBLE_URI also carries project_id (sibling fix)", () => {
-  it("ReferencesPage BIBLE_URI line mentions project_id", () => {
+describe("Bug 1 — ReferencesPage destructures projectId from useProjectContext()", () => {
+  it("ReferencesPage destructures projectId from the hook", () => {
     const src = readFileSync(REFERENCES_PAGE_PATH, "utf8");
-    const bibleUriLine = src
-      .split(/\r?\n/)
-      .find((l) => /const\s+BIBLE_URI\s*=/.test(l));
-    expect(bibleUriLine, "BIBLE_URI declaration not found in ReferencesPage.tsx").toBeTruthy();
-    expect(bibleUriLine!).toMatch(/project_id/);
+    expect(src).toMatch(/projectId[^=]*=\s*useProjectContext\(\)/);
+  });
+});
+
+describe("Bug 1 — useProjectContext has no default-project fallback", () => {
+  it("hook source contains no 'default-project' literal", () => {
+    const src = readFileSync(HOOK_PATH, "utf8");
+    // Comments referencing the historical bug are OK, but no code literal.
+    // Strip line + block comments before scanning.
+    const stripped = src
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
+    expect(stripped).not.toMatch(/"default-project"/);
+    expect(stripped).not.toMatch(/'default-project'/);
+    expect(stripped).not.toMatch(/`default-project`/);
+  });
+
+  it("hook returns projectIdReady boolean (callers can branch instead of silently defaulting)", () => {
+    const src = readFileSync(HOOK_PATH, "utf8");
+    expect(src).toMatch(/projectIdReady/);
   });
 });

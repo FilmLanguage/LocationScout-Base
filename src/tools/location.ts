@@ -85,14 +85,26 @@ const PROMPT_COMPARE_SETUP_ANCHOR = loadPrompt(import.meta.url, "compare-setup-a
  * Throws GATE_REJECTED if the bible is missing or not approved.
  *
  * Accepts either a full URI (`agent://location-scout/bible/loc_001`) or a bare bible_id.
+ *
+ * Wave 2 / Bug 1 (2026-05-22): the optional `projectId` arg is passed through to
+ * loadArtifact so callers that know the project can be explicit; when omitted
+ * we still rely on the MCP-middleware-set RequestContext.project_id (ALS) and
+ * the storage layer's `resolveProjectKey` fallback. This belt-and-braces
+ * threading defends against future call sites that bypass the middleware.
  */
-async function requireApprovedBible(bible_uri: string): Promise<Record<string, unknown>> {
+async function requireApprovedBible(
+  bible_uri: string,
+  projectId?: string,
+): Promise<Record<string, unknown>> {
   const bibleId = bible_uri.includes("/") ? (bible_uri.split("/").pop() ?? "") : bible_uri;
-  const bible = await loadArtifact<Record<string, unknown>>("bible", bibleId);
+  const bible = await loadArtifact<Record<string, unknown>>("bible", bibleId, projectId);
   if (!bible) {
+    const suggestion = projectId
+      ? "Provide a valid bible URI. Create one with write_bible first."
+      : "Provide a valid bible URI AND pass project_id explicitly — without it the storage layer cannot disambiguate which project's bible to load. Create one with write_bible first.";
     throw flError(FL_ERRORS.MISSING_DEPENDENCY, `Location Bible not found: ${bible_uri}`, {
       retryable: false,
-      suggestion: "Provide a valid bible URI. Create one with write_bible first.",
+      suggestion,
     });
   }
   if (bible.approval_status !== "approved") {
@@ -1551,15 +1563,16 @@ export function registerLocationTools(server: McpServer) {
       reference_images: z.record(z.string(), z.array(ReferenceRefSchema)).optional().describe("Optional per-setup reference image arrays keyed by setup id. Appended after the default anchor chain ref."),
       auto_resolve: z.boolean().default(true).describe("If true (default), use the approved anchor image as the chain ref for every setup. Set false to skip and rely solely on `reference_images`."),
       edit_mode: z.record(z.string(), EditModeSchema).optional().describe("Per-setup edit-mode config keyed by setup id. When enabled for a setup, treats prompt_overrides[setup.id] as a change directive and anchors on a previous setup version."),
+      project_id: z.string().optional().describe("Caller-supplied project id. When set, passed through to loadArtifact/saveArtifact so the storage layer namespaces under this project. The MCP entry middleware also stamps it onto AsyncLocalStorage as a belt-and-braces guard; either path closes Bug 1 (loc_default-project leak, 2026-05-21)."),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async ({ bible_uri, setups, prompt_overrides, reference_images, auto_resolve, edit_mode }) => {
+    async ({ bible_uri, setups, prompt_overrides, reference_images, auto_resolve, edit_mode, project_id }) => {
       const task_id = crypto.randomUUID();
       createTask(task_id, "Generating setup images");
       (async () => {
         try {
           updateTask(task_id, { status: "processing", progress: 0.05, current_step: "Checking Bible approval gate" });
-          const bible = await requireApprovedBible(bible_uri);
+          const bible = await requireApprovedBible(bible_uri, project_id);
           const bibleId = bible_uri.includes("/") ? (bible_uri.split("/").pop() ?? "") : bible_uri;
 
           // Load anchor image for img2img visual consistency (ERD: SETUP_IMAGE ← ANCHOR_IMAGE)
