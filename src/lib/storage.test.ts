@@ -324,8 +324,9 @@ describe("per-project image namespacing (Fix A)", () => {
     expect(typeof fn).toBe("function");
     const loaded = await storage.loadImageBytes!("setup", saved.image_id, "proj_bytes");
     expect(loaded).not.toBeNull();
-    // Match on the unique byte we wrote so we know it's the right blob.
-    expect(loaded!.includes(Buffer.from([0xCC, 0xDD]))).toBe(true);
+    expect(loaded!.contentType).toMatch(/image\//);
+    // Match on the unique bytes we wrote so we know it's the right blob.
+    expect(loaded!.data.includes(Buffer.from([0xCC, 0xDD]))).toBe(true);
   });
 
   it("upload_reference threads project_id through ALS into saveImage", async () => {

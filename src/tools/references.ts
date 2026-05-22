@@ -28,9 +28,10 @@ export function registerReferenceTools(server: McpServer) {
       base64_data: z.string().describe("Image bytes, base64-encoded (no data: prefix)"),
       content_type: z.string().default("image/png"),
       note: z.string().optional().describe("Why user uploaded this; shown in gallery"),
+      project_id: z.string().optional().describe("Per-project namespace. The MCP middleware auto-stamps this onto the request context, so callers normally don't need to pass it explicitly; declared on the schema for documentation and direct-test callers. saveImage falls back to the ALS context when omitted, so uploads land under the caller's project namespace, not the global slot."),
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    async ({ kind, entity_id, location_id, base64_data, content_type, note }) => {
+    async ({ kind, entity_id, location_id, base64_data, content_type, note, project_id }) => {
       const buf = Buffer.from(base64_data, "base64");
 
       // Resolve location_id when caller didn't pass it. For bible_id it's a
@@ -40,7 +41,7 @@ export function registerReferenceTools(server: McpServer) {
       let resolvedLocationId = location_id;
       if (!resolvedLocationId) {
         try {
-          const setup = await loadArtifact<{ bible_id?: string; location_id?: string }>("setup", entity_id);
+          const setup = await loadArtifact<{ bible_id?: string; location_id?: string }>("setup", entity_id, project_id);
           if (setup?.bible_id) resolvedLocationId = setup.bible_id;
           else if (setup?.location_id) resolvedLocationId = setup.location_id;
         } catch { /* setup miss → entity_id is likely a bible_id, fall through */ }
@@ -57,6 +58,7 @@ export function registerReferenceTools(server: McpServer) {
           model: "user_upload",
           source_tool: "upload_reference",
           entity_type: "user_reference",
+          ...(project_id ? { project_id } : {}),
         },
         content_type,
       );

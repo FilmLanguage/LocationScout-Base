@@ -291,6 +291,14 @@ export interface SidecarEntry {
    * this field existed. Readers should use attributedLocationId() to backfill.
    */
   location_id?: string;
+  /**
+   * Per-project namespace key. Stamped by saveImage at write time so cold-start
+   * sidecar loads can disambiguate two projects that share the same image_id
+   * (matches CD storage.ts SidecarEntry.project_id after the v1.0.31 namespace
+   * refactor). Older sidecars written before Fix A (LS v1.0.45) lack this
+   * field — callers must treat missing as "legacy / unknown project".
+   */
+  project_id?: string;
   kind: string;
   prompt: string;
   negative_prompt?: string;
@@ -456,11 +464,19 @@ export async function saveImage(
   const image_id = shortUuid();
   const created_at = new Date().toISOString();
   const basename = `${opts.entity_id}_${tsSafe(new Date(created_at))}_${image_id}`;
-  const imagePath = `${kind}/${basename}.${ext}`;
-  const sidecarPath = `${kind}/${basename}.json`;
 
-  // Legacy "latest" key so in-memory reads and /artifacts/{kind}/{entity_id}.png keep working.
-  const latestKey = `${kind}/${opts.entity_id}.${ext}`;
+  // Fix A (v1.0.45): namespace all image storage by project_id, matching
+  // the JSON loadArtifact path. Falls back to ALS request context when the
+  // caller didn't pass it explicitly so MCP middleware-stamped project_id
+  // propagates through upload_reference / generate_* without per-call
+  // threading. Before this, saveImage wrote to a single global slot — the
+  // bucket-root `user-ref/loc_001_*.png` evidence in invest-b task B5.
+  const projectKey = resolveProjectKey(opts.project_id);
+  const imagePath = `${projectKey}/${kind}/${basename}.${ext}`;
+  const sidecarPath = `${projectKey}/${kind}/${basename}.json`;
+  // "Latest" alias key under the same project namespace. Two projects can
+  // now both have an entity_id of "loc_001" without overwriting each other.
+  const latestKey = `${projectKey}/${kind}/${opts.entity_id}.${ext}`;
   memoryStore.set(imagePath, { data: data.toString("base64"), contentType });
   memoryStore.set(latestKey, { data: data.toString("base64"), contentType });
 
@@ -468,7 +484,6 @@ export async function saveImage(
   await writeLocal(latestKey, data);
 
   // ── Two-phase blob write (S3 content-addressed + PG metadata) ───
-  const projectId = opts.project_id || process.env.LS_DEFAULT_PROJECT_KEY || "default-project";
   let s3_path: string | null = null;
 
   try {
@@ -476,7 +491,7 @@ export async function saveImage(
       data,
       kind,
       opts.entity_id,
-      projectId,
+      projectKey,
       {
         prompt: opts.prompt,
         model: opts.model,
@@ -518,6 +533,7 @@ export async function saveImage(
     entity_type: opts.entity_type ?? kind,
     entity_id: opts.entity_id,
     location_id: opts.location_id,
+    project_id: projectKey,
     kind,
     prompt: opts.prompt,
     model: opts.model,
@@ -562,16 +578,27 @@ export async function loadImage(
   type: string,
   id: string,
   ext = "png",
+  projectId?: string,
 ): Promise<{ data: Buffer; contentType: string } | null> {
   const contentType = ext === "png" ? "image/png" : "image/jpeg";
 
-  // 1. Memory "latest" cache first
-  const latestKey = `${type}/${id}.${ext}`;
-  const cached = memoryStore.get(latestKey);
-  if (cached) return { data: Buffer.from(cached.data, "base64"), contentType: cached.contentType };
+  // Fix A (v1.0.45): namespace by project_id. Lookup order:
+  //   1. namespaced memory / disk / S3 (`${projectKey}/${kind}/${id}.${ext}`)
+  //   2. legacy un-namespaced (`${kind}/${id}.${ext}`)
+  // The legacy fallback keeps pre-namespace data readable while migration
+  // forward; new writes always land in the namespaced slot.
+  const projectKey = resolveProjectKey(projectId);
+  const namespacedLatest = `${projectKey}/${type}/${id}.${ext}`;
+  const legacyLatest = `${type}/${id}.${ext}`;
 
-  // 2. Newest versioned file on local disk
-  const newest = await findNewestVersionPath(type, id, ext);
+  // 1. Memory "latest" cache — try namespaced then legacy.
+  for (const key of [namespacedLatest, legacyLatest]) {
+    const cached = memoryStore.get(key);
+    if (cached) return { data: Buffer.from(cached.data, "base64"), contentType: cached.contentType };
+  }
+
+  // 2. Newest versioned file on local disk — namespaced dir first, then legacy.
+  const newest = await findNewestVersionPath(type, id, ext, projectKey);
   if (newest) {
     try {
       const data = await fs.readFile(newest);
@@ -581,31 +608,38 @@ export async function loadImage(
     }
   }
 
-  // 3. Legacy unversioned file on disk
-  const legacy = await readLocal(`${type}/${id}.${ext}`);
-  if (legacy) return { data: legacy, contentType };
+  // 3. Legacy unversioned file on disk — namespaced then legacy.
+  for (const path of [namespacedLatest, legacyLatest]) {
+    const legacy = await readLocal(path);
+    if (legacy) return { data: legacy, contentType };
+  }
 
   // 4. S3 "latest alias" — written alongside versioned file in saveImage.
   //    Survives Cloud Run cold starts when local fs has been wiped.
   if (S3_BUCKET) {
-    try {
-      return await s3Download(`${type}/${id}.${ext}`);
-    } catch {
-      /* fall through to versioned scan */
+    for (const key of [namespacedLatest, legacyLatest]) {
+      try {
+        return await s3Download(key);
+      } catch {
+        /* fall through to next key / versioned scan */
+      }
     }
 
-    // 5. S3 versioned scan — if latest-alias is missing (older data, or upload
-    //    race), list all versioned files for this entity and return the newest.
-    const prefix = `${type}/${id}_`;
-    const keys = (await s3List(prefix)).filter(
-      (k) => k.endsWith(`.${ext}`) && !k.endsWith(".json"),
-    );
-    if (keys.length > 0) {
-      keys.sort();
-      try {
-        return await s3Download(keys[keys.length - 1]);
-      } catch {
-        return null;
+    // 5. S3 versioned scan — if latest-alias is missing (older data, or
+    //    upload race), list all versioned files for this entity and return
+    //    the newest. Try the per-project prefix first.
+    const prefixes = [`${projectKey}/${type}/${id}_`, `${type}/${id}_`];
+    for (const prefix of prefixes) {
+      const keys = (await s3List(prefix)).filter(
+        (k) => k.endsWith(`.${ext}`) && !k.endsWith(".json"),
+      );
+      if (keys.length > 0) {
+        keys.sort();
+        try {
+          return await s3Download(keys[keys.length - 1]);
+        } catch {
+          // try next prefix
+        }
       }
     }
   }
@@ -618,11 +652,16 @@ export async function loadImageVersion(
   kind: string,
   image_id: string,
   ext = "png",
+  projectId?: string,
 ): Promise<{ data: Buffer; contentType: string } | null> {
   const contentType = ext === "png" ? "image/png" : "image/jpeg";
 
-  const dir = resolveLocalDir(kind);
-  if (dir) {
+  // Fix A: scan namespaced dir first, then legacy un-namespaced.
+  const projectKey = resolveProjectKey(projectId);
+  const dirsRel = [`${projectKey}/${kind}`, kind];
+  for (const dirRel of dirsRel) {
+    const dir = resolveLocalDir(dirRel);
+    if (!dir) continue;
     try {
       const entries = await fs.readdir(dir);
       const match = entries.find((f) => f.endsWith(`_${image_id}.${ext}`));
@@ -631,45 +670,148 @@ export async function loadImageVersion(
         return { data, contentType };
       }
     } catch {
-      /* fall through to S3 */
+      // try next dir
     }
   }
 
-  // S3 fallback: list versioned files under kind/ and match by image_id suffix.
+  // S3 fallback: list versioned files under namespaced + legacy prefix,
+  // match by image_id suffix.
   if (S3_BUCKET) {
-    const keys = await s3List(`${kind}/`);
-    const match = keys.find((k) => k.endsWith(`_${image_id}.${ext}`));
-    if (!match) return null;
-    try {
-      return await s3Download(match);
-    } catch {
-      return null;
+    for (const prefix of [`${projectKey}/${kind}/`, `${kind}/`]) {
+      const keys = await s3List(prefix);
+      const match = keys.find((k) => k.endsWith(`_${image_id}.${ext}`));
+      if (!match) continue;
+      try {
+        return await s3Download(match);
+      } catch {
+        // try next prefix
+      }
     }
   }
 
   return null;
 }
 
-async function findNewestVersionPath(kind: string, entity_id: string, ext: string): Promise<string | null> {
-  const dir = resolveLocalDir(kind);
-  if (!dir) return null;
-  try {
-    const entries = await fs.readdir(dir);
-    const prefix = `${entity_id}_`;
-    const matches = entries.filter((f) => f.startsWith(prefix) && f.endsWith(`.${ext}`));
-    if (matches.length === 0) return null;
-    const withStat = await Promise.all(
-      matches.map(async (f) => {
-        const full = join(dir, f);
-        const s = await fs.stat(full);
-        return { full, mtime: s.mtimeMs };
-      }),
-    );
-    withStat.sort((a, b) => b.mtime - a.mtime);
-    return withStat[0].full;
-  } catch {
-    return null;
+/**
+ * Load image BYTES for a given `(kind, image_id)` under a per-project
+ * namespace. LS counterpart of CD `loadImageBytes` (post Bug 6 v1.0.32).
+ *
+ * Resolution order:
+ *   1. Local disk under `${projectKey}/${kind}/` then legacy `${kind}/` —
+ *      match a file whose basename ends with `_${image_id}.{png,jpg,jpeg}`.
+ *   2. S3 ListObjectsV2 under the namespaced + legacy prefixes — same
+ *      suffix match. Writeback to local on hit so the next call short-
+ *      circuits in step 1 (warms the cache after a Cloud Run cold start).
+ *
+ * Returns null when no byte source is reachable. The /artifacts/:type/v/:file
+ * route maps null → 404. Unlike `loadImage`, this is the *image_id*-indexed
+ * read path used by PromptCard "select an older version" + the ShotGen
+ * inter-agent fetch.
+ */
+export async function loadImageBytes(
+  kind: string,
+  image_id: string,
+  projectId?: string,
+): Promise<{ data: Buffer; contentType: string } | null> {
+  const projectKey = resolveProjectKey(projectId);
+  const exts: Array<{ ext: string; contentType: string }> = [
+    { ext: "png", contentType: "image/png" },
+    { ext: "jpg", contentType: "image/jpeg" },
+    { ext: "jpeg", contentType: "image/jpeg" },
+  ];
+
+  // 1. Local disk — scan namespaced dir first, then legacy.
+  const dirsRel = [`${projectKey}/${kind}`, kind];
+  for (const dirRel of dirsRel) {
+    const dir = resolveLocalDir(dirRel);
+    if (!dir) continue;
+    let entries: string[] = [];
+    try {
+      entries = await fs.readdir(dir);
+    } catch {
+      continue;
+    }
+    for (const { ext, contentType } of exts) {
+      const match = entries.find((f) => f.endsWith(`_${image_id}.${ext}`));
+      if (!match) continue;
+      try {
+        const data = await fs.readFile(join(dir, match));
+        return { data, contentType };
+      } catch {
+        // try next ext
+      }
+    }
   }
+
+  // 2. S3 fallback under namespaced + legacy prefixes.
+  if (S3_BUCKET) {
+    for (const prefix of [`${projectKey}/${kind}/`, `${kind}/`]) {
+      let keys: string[];
+      try {
+        keys = await s3List(prefix);
+      } catch {
+        continue;
+      }
+      for (const { ext, contentType: ct } of exts) {
+        void ct;
+        const match = keys.find((k) => k.endsWith(`_${image_id}.${ext}`));
+        if (!match) continue;
+        try {
+          const result = await s3Download(match);
+          // Writeback to local under the project-namespaced path so the
+          // next call on this instance hits step 1.
+          if (result?.data) {
+            try {
+              const basename = match.split("/").pop();
+              if (basename) {
+                await writeLocal(`${projectKey}/${kind}/${basename}`, result.data);
+              }
+            } catch {
+              // best-effort warm — return value is still valid
+            }
+          }
+          return result;
+        } catch {
+          // try next ext / prefix
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+async function findNewestVersionPath(
+  kind: string,
+  entity_id: string,
+  ext: string,
+  projectKey?: string,
+): Promise<string | null> {
+  // Scan namespaced dir first, then legacy un-namespaced. Project key may be
+  // undefined when callers haven't migrated yet — degrade to legacy-only.
+  const dirsRel = projectKey ? [`${projectKey}/${kind}`, kind] : [kind];
+  for (const dirRel of dirsRel) {
+    const dir = resolveLocalDir(dirRel);
+    if (!dir) continue;
+    try {
+      const entries = await fs.readdir(dir);
+      const prefix = `${entity_id}_`;
+      const matches = entries.filter((f) => f.startsWith(prefix) && f.endsWith(`.${ext}`));
+      if (matches.length === 0) continue;
+      const withStat = await Promise.all(
+        matches.map(async (f) => {
+          const full = join(dir, f);
+          const s = await fs.stat(full);
+          return { full, mtime: s.mtimeMs };
+        }),
+      );
+      withStat.sort((a, b) => b.mtime - a.mtime);
+      return withStat[0].full;
+    } catch {
+      // try next dir
+    }
+  }
+  return null;
 }
 
 /**
@@ -677,12 +819,21 @@ async function findNewestVersionPath(kind: string, entity_id: string, ext: strin
  * Reads sidecar JSONs where present; falls back to a synthetic entry for any
  * legacy unversioned image so existing dev data isn't lost.
  */
-export async function listVersions(kind: string, entity_id: string): Promise<SidecarEntry[]> {
-  const dir = resolveLocalDir(kind);
+export async function listVersions(
+  kind: string,
+  entity_id: string,
+  projectId?: string,
+): Promise<SidecarEntry[]> {
   const results: SidecarEntry[] = [];
   const seenImageIds = new Set<string>();
 
-  if (dir) {
+  // Fix A: scan namespaced dir first, then legacy un-namespaced.
+  const projectKey = resolveProjectKey(projectId);
+  const dirsRel = [`${projectKey}/${kind}`, kind];
+
+  for (const dirRel of dirsRel) {
+    const dir = resolveLocalDir(dirRel);
+    if (!dir) continue;
     let entries: string[] = [];
     try {
       entries = await fs.readdir(dir);
@@ -693,21 +844,21 @@ export async function listVersions(kind: string, entity_id: string): Promise<Sid
     const sidecarFiles = entries.filter(
       (f) => f.startsWith(prefix) && f.endsWith(".json") && !f.endsWith(".prev.json"),
     );
-
     for (const f of sidecarFiles) {
       try {
         const raw = await fs.readFile(join(dir, f), "utf8");
         const parsed = JSON.parse(raw) as SidecarEntry;
-        if (parsed.entity_id === entity_id) {
-          results.push(parsed);
-          seenImageIds.add(parsed.image_id);
-        }
+        if (parsed.entity_id !== entity_id) continue;
+        if (seenImageIds.has(parsed.image_id)) continue;
+        results.push(parsed);
+        seenImageIds.add(parsed.image_id);
       } catch {
         /* skip malformed */
       }
     }
 
-    // Backward-compat: if we found no sidecars but a legacy `{entity_id}.{ext}` exists, surface it.
+    // Backward-compat: if we still found no sidecars in this dir, look for
+    // a legacy unversioned `{entity_id}.{ext}` so dev fixtures don't vanish.
     if (results.length === 0) {
       for (const ext of ["png", "jpg"]) {
         const legacy = join(dir, `${entity_id}.${ext}`);
@@ -736,22 +887,24 @@ export async function listVersions(kind: string, entity_id: string): Promise<Sid
   }
 
   // Cloud Run cold-start fallback: if local has nothing (or only a subset),
-  // pick up sidecars from S3 so the UI gallery keeps working across restarts.
+  // pick up sidecars from S3 under namespaced + legacy prefixes so the UI
+  // gallery survives revision rollouts.
   if (S3_BUCKET) {
-    const prefix = `${kind}/${entity_id}_`;
-    const keys = (await s3List(prefix)).filter(
-      (k) => k.endsWith(".json") && !k.endsWith(".prev.json"),
-    );
-    for (const key of keys) {
-      try {
-        const { data } = await s3Download(key);
-        const parsed = JSON.parse(data.toString("utf8")) as SidecarEntry;
-        if (parsed.entity_id !== entity_id) continue;
-        if (seenImageIds.has(parsed.image_id)) continue;
-        results.push(parsed);
-        seenImageIds.add(parsed.image_id);
-      } catch {
-        /* skip malformed / missing */
+    for (const prefix of [`${projectKey}/${kind}/${entity_id}_`, `${kind}/${entity_id}_`]) {
+      const keys = (await s3List(prefix)).filter(
+        (k) => k.endsWith(".json") && !k.endsWith(".prev.json"),
+      );
+      for (const key of keys) {
+        try {
+          const { data } = await s3Download(key);
+          const parsed = JSON.parse(data.toString("utf8")) as SidecarEntry;
+          if (parsed.entity_id !== entity_id) continue;
+          if (seenImageIds.has(parsed.image_id)) continue;
+          results.push(parsed);
+          seenImageIds.add(parsed.image_id);
+        } catch {
+          /* skip malformed / missing */
+        }
       }
     }
   }
@@ -769,12 +922,20 @@ export async function listVersions(kind: string, entity_id: string): Promise<Sid
  * fallback), exactly like `listVersions`. S3 is only consulted when
  * `S3_BUCKET` is set — local dev paths still work as-is.
  */
-export async function listAllVersions(kind: string): Promise<SidecarEntry[]> {
-  const dir = resolveLocalDir(kind);
+export async function listAllVersions(
+  kind: string,
+  projectId?: string,
+): Promise<SidecarEntry[]> {
   const results: SidecarEntry[] = [];
   const seenImageIds = new Set<string>();
 
-  if (dir) {
+  // Fix A: scan namespaced dir first, then legacy un-namespaced.
+  const projectKey = resolveProjectKey(projectId);
+  const dirsRel = [`${projectKey}/${kind}`, kind];
+
+  for (const dirRel of dirsRel) {
+    const dir = resolveLocalDir(dirRel);
+    if (!dir) continue;
     let entries: string[] = [];
     try {
       entries = await fs.readdir(dir);
@@ -799,20 +960,21 @@ export async function listAllVersions(kind: string): Promise<SidecarEntry[]> {
   }
 
   if (S3_BUCKET) {
-    const prefix = `${kind}/`;
-    const keys = (await s3List(prefix)).filter(
-      (k) => k.endsWith(".json") && !k.endsWith(".prev.json"),
-    );
-    for (const key of keys) {
-      try {
-        const { data } = await s3Download(key);
-        const parsed = JSON.parse(data.toString("utf8")) as SidecarEntry;
-        if (!parsed.image_id) continue;
-        if (seenImageIds.has(parsed.image_id)) continue;
-        results.push(parsed);
-        seenImageIds.add(parsed.image_id);
-      } catch {
-        /* skip malformed / missing */
+    for (const prefix of [`${projectKey}/${kind}/`, `${kind}/`]) {
+      const keys = (await s3List(prefix)).filter(
+        (k) => k.endsWith(".json") && !k.endsWith(".prev.json"),
+      );
+      for (const key of keys) {
+        try {
+          const { data } = await s3Download(key);
+          const parsed = JSON.parse(data.toString("utf8")) as SidecarEntry;
+          if (!parsed.image_id) continue;
+          if (seenImageIds.has(parsed.image_id)) continue;
+          results.push(parsed);
+          seenImageIds.add(parsed.image_id);
+        } catch {
+          /* skip malformed / missing */
+        }
       }
     }
   }
