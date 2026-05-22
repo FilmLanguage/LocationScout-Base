@@ -224,3 +224,133 @@ describe("image versions (sidecar JSON)", () => {
     expect(versions).toEqual([]);
   });
 });
+
+describe("per-project image namespacing (Fix A)", () => {
+  // saveImage and loadImage / loadImageVersion must read the same per-project
+  // namespace as JSON loadArtifact. Without this, /artifacts/<kind>/<id>.png
+  // can never disambiguate two projects writing the same entity_id, and the
+  // user-ref upload path silently lands at the legacy un-namespaced root
+  // (see invest-b-image-display.md task B5 — `user-ref/loc_001_…46ce32a2.png`
+  // at bucket root, no project prefix).
+  let tempDir: string;
+  let originalEnv: string | undefined;
+
+  beforeAll(async () => {
+    originalEnv = process.env.LOCAL_OUTPUT_DIR;
+    tempDir = mkdtempSync(join(tmpdir(), "ls-storage-image-ns-"));
+    process.env.LOCAL_OUTPUT_DIR = tempDir;
+  });
+
+  afterAll(() => {
+    if (originalEnv === undefined) delete process.env.LOCAL_OUTPUT_DIR;
+    else process.env.LOCAL_OUTPUT_DIR = originalEnv;
+    try { rmSync(tempDir, { recursive: true, force: true }); } catch { /* best effort */ }
+  });
+
+  it("saveImage with explicit project_id writes under namespaced disk path", async () => {
+    const storage = await import("./storage.js");
+    const entity_id = `anchor_ns_${Date.now()}`;
+    const buf = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const saved = await storage.saveImage("anchor", buf, {
+      entity_id,
+      location_id: entity_id,
+      prompt: "namespaced write",
+      model: "nanobanana",
+      source_tool: "generate_anchor",
+      project_id: "proj_ns_A",
+    });
+    // local_path must include the project prefix so two projects writing the
+    // same entity_id do not race on a single disk slot.
+    expect(saved.local_path).toMatch(/[\\/]proj_ns_A[\\/]anchor[\\/]/);
+  });
+
+  it("saveImage with NO explicit project_id falls back to ALS context", async () => {
+    const storage = await import("./storage.js");
+    const log = await import("./log.js");
+    const entity_id = `anchor_als_${Date.now()}`;
+    const buf = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    let saved: Awaited<ReturnType<typeof storage.saveImage>> | null = null;
+    await log.withRequestContext(
+      "req_als_1",
+      "upload_reference",
+      async () => {
+        saved = await storage.saveImage("user-ref", buf, {
+          entity_id,
+          location_id: entity_id,
+          prompt: "uploaded via UI",
+          model: "user_upload",
+          source_tool: "upload_reference",
+        });
+      },
+      "proj_als_B",
+    );
+    expect(saved).not.toBeNull();
+    // ALS-context project_id must drive the disk path, not the default key.
+    expect(saved!.local_path).toMatch(/[\\/]proj_als_B[\\/]user-ref[\\/]/);
+    expect(saved!.local_path).not.toMatch(/[\\/]default-project[\\/]/);
+  });
+
+  it("loadImage with explicit projectId returns project-A bytes", async () => {
+    const storage = await import("./storage.js");
+    const entity_id = `iso_load_${Date.now()}`;
+    const bufA = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xAA]);
+    const bufB = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xBB]);
+    await storage.saveImage("anchor", bufA, {
+      entity_id, location_id: entity_id, prompt: "A",
+      model: "test", source_tool: "test", project_id: "proj_load_A",
+    });
+    await storage.saveImage("anchor", bufB, {
+      entity_id, location_id: entity_id, prompt: "B",
+      model: "test", source_tool: "test", project_id: "proj_load_B",
+    });
+    const loadedA = await storage.loadImage("anchor", entity_id, "png", "proj_load_A");
+    const loadedB = await storage.loadImage("anchor", entity_id, "png", "proj_load_B");
+    expect(loadedA?.data?.[4]).toBe(0xAA);
+    expect(loadedB?.data?.[4]).toBe(0xBB);
+  });
+
+  it("loadImageBytes(kind, image_id, projectId) helper exists and resolves to bytes", async () => {
+    const storage = await import("./storage.js");
+    const entity_id = `bytes_${Date.now()}`;
+    const buf = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xCC, 0xDD]);
+    const saved = await storage.saveImage("setup", buf, {
+      entity_id, location_id: entity_id, prompt: "bytes",
+      model: "test", source_tool: "test", project_id: "proj_bytes",
+    });
+    // loadImageBytes is the LS counterpart of CD v1.0.32 loadImageBytes.
+    // It must (a) accept (kind, image_id, projectId), (b) resolve via the
+    // project namespace, and (c) return Buffer bytes — not the sidecar.
+    const fn = (storage as unknown as { loadImageBytes?: unknown }).loadImageBytes;
+    expect(typeof fn).toBe("function");
+    const loaded = await storage.loadImageBytes!("setup", saved.image_id, "proj_bytes");
+    expect(loaded).not.toBeNull();
+    // Match on the unique byte we wrote so we know it's the right blob.
+    expect(loaded!.includes(Buffer.from([0xCC, 0xDD]))).toBe(true);
+  });
+
+  it("upload_reference threads project_id through ALS into saveImage", async () => {
+    // The MCP middleware stamps ALS from arguments.project_id; the tool
+    // schema doesn't accept project_id directly, so the ALS fallback in
+    // saveImage IS the contract. Without it, every user upload lands at the
+    // default slot and bleeds across projects.
+    const storage = await import("./storage.js");
+    const log = await import("./log.js");
+    const entity_id = `upload_${Date.now()}`;
+    const buf = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x55]);
+    let saved: Awaited<ReturnType<typeof storage.saveImage>> | null = null;
+    await log.withRequestContext(
+      "req_upload_1", "upload_reference",
+      async () => {
+        saved = await storage.saveImage("user-ref", buf, {
+          entity_id, location_id: entity_id,
+          prompt: "from ui upload", model: "user_upload",
+          source_tool: "upload_reference",
+        });
+      },
+      "proj_upload",
+    );
+    expect(saved).not.toBeNull();
+    expect(saved!.local_path).toMatch(/[\\/]proj_upload[\\/]user-ref[\\/]/);
+    expect(saved!.local_path).not.toMatch(/[\\/]default-project[\\/]/);
+  });
+});
