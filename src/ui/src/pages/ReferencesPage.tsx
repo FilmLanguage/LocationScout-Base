@@ -90,7 +90,13 @@ export function ReferencesPage() {
   const { state, dispatch } = usePipeline();
   const navigate = useNavigate();
   const r = state.references;
-  const { projectId, locationId: LOCATION_ID } = useProjectContext();
+  const { projectId, locationId: LOCATION_ID, projectIdReady } = useProjectContext();
+  // Bug 1 REGRESSION guard (2026-05-22): pages must refuse to fire any
+  // generation when projectIdReady === false. Layer A in App.tsx renders
+  // a top-level banner that replaces the routed tree, but every handler
+  // and button here also early-returns / is disabled — defense in depth
+  // against the legacy 'Location Bible not found: agent://location-scout/bible/'
+  // failure mode caused by the empty BIBLE_URI built from LOCATION_ID === "".
   const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
   const ANCHOR_URI = `agent://location-scout/anchor/${LOCATION_ID}`;
   // Backend HTTP routes resolve the storage namespace via ?project_id=… —
@@ -449,6 +455,16 @@ export function ReferencesPage() {
 
   /** Fire generate_anchor and poll until terminal. Requires isometric to exist first. */
   const runGeneration = async (promptOverride?: string) => {
+    // Bug 1 REGRESSION guard: refuse to fire generate_anchor with an empty
+    // BIBLE_URI (LOCATION_ID === "" when projectIdReady is false).
+    if (!projectIdReady) {
+      setAnchor({
+        kind: "error",
+        message:
+          "Cannot generate anchor — project_id is missing from the URL. Reopen this agent with ?project_id=...",
+      });
+      return;
+    }
     // Hard gate: isometric must exist before anchor can be generated
     const isoExists = await checkExists(ISOMETRIC_IMG_PATH);
     if (!isoExists) {
@@ -547,6 +563,16 @@ export function ReferencesPage() {
 
   // ─── Floorplan: user-triggered via the Generate button ──────────
   const runFloorplan = async () => {
+    // Bug 1 REGRESSION guard: empty BIBLE_URI would resolve to a missing
+    // bible on the backend. Refuse to fire.
+    if (!projectIdReady) {
+      setFloorplan({
+        kind: "error",
+        message:
+          "Cannot generate floorplan — project_id is missing from the URL. Reopen this agent with ?project_id=...",
+      });
+      return;
+    }
     setFloorplan({ kind: "generating", status: null });
     try {
       const result = await callTool<{ task_id: string }>("create_floorplan", { bible_uri: BIBLE_URI });
@@ -566,6 +592,16 @@ export function ReferencesPage() {
 
   // ─── Isometric: user-triggered via the Generate button ─────────
   const runIsometric = async (promptOverride?: string) => {
+    // Bug 1 REGRESSION guard: empty BIBLE_URI / FLOORPLAN_URI would resolve
+    // to missing artifacts on the backend.
+    if (!projectIdReady) {
+      setIsometric({
+        kind: "error",
+        message:
+          "Cannot generate isometric — project_id is missing from the URL. Reopen this agent with ?project_id=...",
+      });
+      return;
+    }
     setIsometric({ kind: "generating", status: null });
     try {
       const result = await callTool<{ task_id: string }>("generate_isometric_reference", {
@@ -616,6 +652,11 @@ export function ReferencesPage() {
    * once (idempotent on backend) and triggers extraction once.
    */
   const handleApprove = async () => {
+    // Bug 1 REGRESSION guard: ANCHOR_URI is empty when projectIdReady is
+    // false; approve_artifact + extract_setups would both resolve to the
+    // wrong slot. Refuse to fire.
+    if (!projectIdReady) return;
+
     const willFire = shouldFireExtractSetups({
       floorplanReady: floorplan.kind === "ready",
       currentKind: state.setupsExtraction.kind,
@@ -1006,8 +1047,13 @@ export function ReferencesPage() {
                 <button
                   type="button"
                   className="btn btn--primary"
-                  disabled={floorplan.kind === "generating"}
+                  disabled={floorplan.kind === "generating" || !projectIdReady}
                   onClick={() => runFloorplan()}
+                  title={
+                    !projectIdReady
+                      ? "Open this agent with ?project_id=... in the URL"
+                      : undefined
+                  }
                 >
                   {floorplan.kind === "generating"
                     ? "Generating…"
@@ -1186,14 +1232,17 @@ export function ReferencesPage() {
                   disabled={
                     isometric.kind === "generating" ||
                     floorplan.kind !== "ready" ||
-                    (isometricEditMode && isometricPrompt.trim().length === 0)
+                    (isometricEditMode && isometricPrompt.trim().length === 0) ||
+                    !projectIdReady
                   }
                   title={
-                    floorplan.kind !== "ready"
-                      ? "Disabled — gate not met"
-                      : isometricEditMode && isometricPrompt.trim().length === 0
-                        ? "Describe what to change"
-                        : undefined
+                    !projectIdReady
+                      ? "Open this agent with ?project_id=... in the URL"
+                      : floorplan.kind !== "ready"
+                        ? "Disabled — gate not met"
+                        : isometricEditMode && isometricPrompt.trim().length === 0
+                          ? "Describe what to change"
+                          : undefined
                   }
                 >
                   {isometric.kind === "generating"
@@ -1408,14 +1457,17 @@ export function ReferencesPage() {
                     anchor.kind === "generating" ||
                     anchor.kind === "checking" ||
                     isometric.kind !== "ready" ||
-                    (anchorEditMode && anchorPrompt.trim().length === 0)
+                    (anchorEditMode && anchorPrompt.trim().length === 0) ||
+                    !projectIdReady
                   }
                   title={
-                    isometric.kind !== "ready"
-                      ? "Disabled — gate not met"
-                      : anchorEditMode && anchorPrompt.trim().length === 0
-                        ? "Describe what to change"
-                        : undefined
+                    !projectIdReady
+                      ? "Open this agent with ?project_id=... in the URL"
+                      : isometric.kind !== "ready"
+                        ? "Disabled — gate not met"
+                        : anchorEditMode && anchorPrompt.trim().length === 0
+                          ? "Describe what to change"
+                          : undefined
                   }
                 >
                   {anchor.kind === "generating"
@@ -1448,8 +1500,14 @@ export function ReferencesPage() {
           type="button"
           className="btn btn--primary"
           onClick={handleApprove}
-          disabled={!canApprove}
-          title={!canApprove ? "Wait for the anchor image to finish generating" : undefined}
+          disabled={!canApprove || !projectIdReady}
+          title={
+            !projectIdReady
+              ? "Open this agent with ?project_id=... in the URL"
+              : !canApprove
+                ? "Wait for the anchor image to finish generating"
+                : undefined
+          }
         >
           Approve Anchor
           <span className="btn__arrow" aria-hidden>→</span>

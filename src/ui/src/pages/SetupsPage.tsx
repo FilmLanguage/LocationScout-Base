@@ -137,6 +137,16 @@ export function SetupsPage() {
   const { state, dispatch } = usePipeline();
   const { tiles, selectedId } = state.setups;
   const { locationId: LOCATION_ID, projectId, projectIdReady } = useProjectContext();
+  // Bug 1 REGRESSION guard (2026-05-22): even though Layer A in App.tsx
+  // replaces the routed tree with a banner when projectIdReady === false,
+  // Layer B disables every Generate / Send / Approve button at the page
+  // level too. Two reasons:
+  //   1. Defense in depth — if the banner is ever made dismissable, the
+  //      buttons must still refuse to fire (callTool with empty
+  //      LOCATION_ID would surface the legacy 1001 "Location Bible not
+  //      found: agent://location-scout/bible/" error).
+  //   2. Handler early-returns below short-circuit before any callTool so
+  //      no MCP request goes out with an empty bible/anchor URI.
   // Per Bug 1 (2026-05-22): project_id reaches the backend via two channels:
   //   1. callTool() in api/mcp.ts auto-injects args.project_id from the URL
   //      → MCP middleware stamps it on AsyncLocalStorage → resolveProjectKey
@@ -268,6 +278,17 @@ export function SetupsPage() {
       setBatch({ kind: "ready" });
       return;
     }
+    // Bug 1 REGRESSION guard: never fire generate_setup_images with an
+    // empty BIBLE_URI (which is what LOCATION_ID === "" produces). Buttons
+    // are also visually disabled at the JSX layer below.
+    if (!projectIdReady) {
+      setBatch({
+        kind: "error",
+        message:
+          "Cannot generate setups — project_id is missing from the URL. Reopen this agent with ?project_id=...",
+      });
+      return;
+    }
     setBatch({ kind: "generating", status: null });
     try {
       const result = await callTool<{ task_id: string }>("generate_setup_images", {
@@ -394,6 +415,9 @@ export function SetupsPage() {
 
   const handleRegenerateSelected = useDebouncedAction(async () => {
     if (!selected) return;
+    // Bug 1 REGRESSION guard: don't fire generate_setup_images with an
+    // empty BIBLE_URI when ?project_id= is missing from URL.
+    if (!projectIdReady) return;
     const tile = setupsArg.find((s) => s.id === selected.id);
     if (!tile) return;
     setRegenerating((prev) => new Set(prev).add(selected.id));
@@ -536,6 +560,15 @@ export function SetupsPage() {
   const [sendError, setSendError] = useState<string | null>(null);
 
   const handleSend = async () => {
+    // Bug 1 REGRESSION guard: handleSend approves setup_uri / anchor_uri
+    // entries built from LOCATION_ID, which is empty when projectIdReady is
+    // false. Refuse to fire and surface an explanatory error.
+    if (!projectIdReady) {
+      setSendError(
+        "Cannot send — project_id is missing from the URL. Reopen with ?project_id=...",
+      );
+      return;
+    }
     setSending(true);
     setSendError(null);
     try {
@@ -749,8 +782,14 @@ export function SetupsPage() {
                 type="button"
                 className="btn btn--ghost"
                 onClick={handleRegenerateRejected}
-                disabled={rejectedCount === 0 || isBatchBusy}
-                title={rejectedCount === 0 ? "No rejected setups to regenerate" : undefined}
+                disabled={rejectedCount === 0 || isBatchBusy || !projectIdReady}
+                title={
+                  !projectIdReady
+                    ? "Open this agent with ?project_id=... in the URL"
+                    : rejectedCount === 0
+                      ? "No rejected setups to regenerate"
+                      : undefined
+                }
               >
                 Regenerate Rejected
               </button>
@@ -780,8 +819,14 @@ export function SetupsPage() {
                     type="button"
                     className="btn btn--primary"
                     onClick={handleGenerateAll}
-                    disabled={isBatchBusy || allGenerated}
-                    title={allGenerated ? "All setups already generated" : undefined}
+                    disabled={isBatchBusy || allGenerated || !projectIdReady}
+                    title={
+                      !projectIdReady
+                        ? "Open this agent with ?project_id=... in the URL"
+                        : allGenerated
+                          ? "All setups already generated"
+                          : undefined
+                    }
                   >
                     {label}
                   </button>
@@ -1004,7 +1049,12 @@ export function SetupsPage() {
               type="button"
               className="btn btn--primary"
               onClick={handleSend}
-              disabled={isBatchBusy || sending || sent}
+              disabled={isBatchBusy || sending || sent || !projectIdReady}
+              title={
+                !projectIdReady
+                  ? "Open this agent with ?project_id=... in the URL"
+                  : undefined
+              }
             >
               {sending ? "Sending…" : "Send to Pipeline"}
               <span className="btn__arrow" aria-hidden>→</span>
