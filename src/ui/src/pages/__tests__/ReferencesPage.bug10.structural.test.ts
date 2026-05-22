@@ -37,31 +37,55 @@ const REFERENCES_PAGE_PATH = join(HERE, "..", "ReferencesPage.tsx");
 describe("Bug 10 — ReferencesPage probes backend before firing extract_setups", () => {
   it("ReferencesPage calls list_setups somewhere (the probe surface)", () => {
     const src = readFileSync(REFERENCES_PAGE_PATH, "utf8");
+    // Accept either inline (`callTool("list_setups", ...)`) or the multi-line
+    // generic form (`callTool<...>(\n  "list_setups", ...)`). The latter is
+    // common when callers want type-safe response shapes. The literal tool
+    // name as a quoted string is the load-bearing thing.
     expect(
       src,
       "ReferencesPage must call list_setups to probe existing setups before re-running extract_setups",
-    ).toMatch(/callTool[^"]*"list_setups"/);
+    ).toMatch(/"list_setups"/);
   });
 
   it("handleApprove (or its background helper) checks setups before firing extract_setups", () => {
     const src = readFileSync(REFERENCES_PAGE_PATH, "utf8");
     // The list_setups call should occur in/around the Approve flow. We assert
-    // that the list_setups call literal appears in the same source file as
-    // handleApprove and runExtractSetupsInBackground, and that the file
-    // contains a comment or code marking the idempotency probe path.
+    // that BOTH list_setups and extract_setups calls coexist in the file —
+    // the probe-then-act pattern.
     const lines = src.split(/\r?\n/);
     const approveIdx = lines.findIndex((l) => /handleApprove\s*=/.test(l));
     expect(approveIdx, "handleApprove definition not found").toBeGreaterThan(-1);
 
-    const listCallIdx = lines.findIndex((l) =>
-      /callTool[^"]*"list_setups"/.test(l),
-    );
-    expect(listCallIdx, "list_setups call not found in ReferencesPage").toBeGreaterThan(-1);
+    const listCallIdx = lines.findIndex((l) => /"list_setups"/.test(l));
+    expect(
+      listCallIdx,
+      "list_setups call not found in ReferencesPage",
+    ).toBeGreaterThan(-1);
 
-    // The list_setups call must precede the extract_setups call site for the
-    // Variant A "probe then act" pattern. (The extract_setups call lives
-    // inside runExtractSetupsInBackground; we don't pin the exact ordering,
-    // but we DO require BOTH calls present in the same file.)
-    expect(src).toMatch(/callTool[^"]*"extract_setups"/);
+    // BOTH the probe and the extract call must exist; the runExtractSetupsInBackground
+    // helper does the probe FIRST and only calls extract_setups when probe is empty.
+    expect(src).toMatch(/"extract_setups"/);
+  });
+
+  it("the probe call is inside or upstream of runExtractSetupsInBackground (probe-then-act)", () => {
+    const src = readFileSync(REFERENCES_PAGE_PATH, "utf8");
+    const lines = src.split(/\r?\n/);
+    const runFnIdx = lines.findIndex((l) =>
+      /runExtractSetupsInBackground\s*=/.test(l),
+    );
+    expect(
+      runFnIdx,
+      "runExtractSetupsInBackground definition not found",
+    ).toBeGreaterThan(-1);
+
+    const listIdx = lines.findIndex((l) => /"list_setups"/.test(l));
+    const extractIdx = lines.findIndex((l) => /"extract_setups"/.test(l));
+    expect(listIdx).toBeGreaterThan(-1);
+    expect(extractIdx).toBeGreaterThan(-1);
+    // Probe must come before the extract call in the source (top-to-bottom).
+    expect(
+      listIdx,
+      `list_setups (line ${listIdx + 1}) must appear before extract_setups (line ${extractIdx + 1}) so the probe-then-act fast-path runs first`,
+    ).toBeLessThan(extractIdx);
   });
 });

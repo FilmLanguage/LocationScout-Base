@@ -655,12 +655,61 @@ export function ReferencesPage() {
    * each artifact's sidecar JSON. classifyExtractResult is the single source
    * of truth for the success-vs-error decision — preventing the
    * "3 setups extracted" red banner regression.
+   *
+   * Bug 10 (2026-05-22) — Variant A backend-source-of-truth idempotency:
+   *   Before firing extract_setups (which spends LLM tokens), we probe the
+   *   backend via `list_setups({ location_id, project_id })`. If setups
+   *   already exist, we transition setupsExtraction → ready with their
+   *   metadata and return WITHOUT calling extract_setups. The user's
+   *   complaint ("every Approve re-fires extraction") is closed by this
+   *   probe plus the backend's own idempotency short-circuit (see
+   *   src/tools/location.ts ~ extract_setups idempotency probe).
    */
   const runExtractSetupsInBackground = async (): Promise<void> => {
     dispatch({
       type: "SET_SETUPS_EXTRACTION",
-      state: { kind: "extracting", progress: 0, current_step: "Queueing extract_setups" },
+      state: { kind: "extracting", progress: 0, current_step: "Checking for existing setups" },
     });
+
+    // ── Bug 10 fast-path: ask the backend whether setups already exist.
+    // On success we surface them immediately — no LLM round-trip, no
+    // shouldFireExtractSetups state-machine dependency, no double-billing.
+    try {
+      const probe = await callTool<{
+        count?: number;
+        setups?: Array<{ setup_id: string; scene_id?: string; mood?: string; mood_id?: string; setup_name?: string }>;
+      }>("list_setups", {
+        location_id: LOCATION_ID,
+        project_id: projectId,
+      });
+      const existing = probe.data?.setups ?? [];
+      if (existing.length > 0) {
+        const tiles = existing.map((s) => ({
+          id: s.setup_id,
+          status: "none" as const,
+          scene:
+            (typeof s.scene_id === "string" && s.scene_id) ||
+            (typeof s.setup_name === "string" && s.setup_name) ||
+            "",
+          mood:
+            (typeof s.mood === "string" && s.mood) ||
+            (typeof s.mood_id === "string" && s.mood_id) ||
+            "",
+        }));
+        dispatch({ type: "SET_SETUPS_TILES", tiles });
+        dispatch({
+          type: "SET_SETUPS_EXTRACTION",
+          state: { kind: "ready", count: existing.length, at: Date.now() },
+        });
+        return;
+      }
+    } catch (probeErr) {
+      // Probe failure is non-fatal — log and fall through to the LLM path.
+      // Backend's own idempotency short-circuit still guards against
+      // duplicate-cost runs if extract_setups gets called.
+      console.warn("[list_setups probe] failed:", probeErr);
+    }
+
     try {
       const r = await callTool<{ task_id: string }>("extract_setups", {
         floorplan_uri: `agent://location-scout/floorplan/${LOCATION_ID}`,

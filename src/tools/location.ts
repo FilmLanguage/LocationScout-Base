@@ -1368,13 +1368,13 @@ export function registerLocationTools(server: McpServer) {
   // Setup extraction (hard-gated via floorplan dependency)
   server.tool(
     "extract_setups",
-    "Extract per-scene camera setups by combining floorplan coordinates with mood states. Returns array of setup objects.",
+    "Extract per-scene camera setups by combining floorplan coordinates with mood states. Returns array of setup objects. IDEMPOTENT: if setups for this bible/project already exist, returns them verbatim without re-running the LLM (Bug 10 fix, 2026-05-22).",
     {
       floorplan_uri: z.string().describe("MCP resource URI of the floorplan"),
       mood_state_uris: z.array(z.string()).describe("MCP resource URIs of mood states"),
-      project_id: z.string().optional().describe("Project ID — when set and AGENT_EDITOR_URL is configured, DoP shot specs are fetched from the Editor's shot breakdown and used to anchor setup angles"),
+      project_id: z.string().optional().describe("Project ID — when set and AGENT_EDITOR_URL is configured, DoP shot specs are fetched from the Editor's shot breakdown and used to anchor setup angles. Also used to scope the idempotency probe (setups existing under this project are reused instead of regenerated)."),
     },
-    { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     async ({ floorplan_uri, mood_state_uris, project_id }) => {
       const task_id = crypto.randomUUID();
       createTask(task_id, "Extracting camera setups");
@@ -1383,12 +1383,49 @@ export function registerLocationTools(server: McpServer) {
           updateTask(task_id, { status: "processing", progress: 0.1, current_step: "Loading bible and mood states" });
           // Floorplan stored as saveImage("floorplan", bibleId, ...) — floorplan ID IS the bible ID
           const bibleId = floorplan_uri.split("/").pop() ?? "";
-          const bible = await loadArtifact<Record<string, unknown>>("bible", bibleId);
+
+          // ─── Bug 10 (2026-05-22): idempotency probe ────────────────────
+          // If setups already exist for this bible under this project, return
+          // them verbatim WITHOUT re-running the LLM. Setups are saved with
+          // ids of the form `setup_${bibleId}_${shortUuid}`, so filtering the
+          // namespaced setup list by that prefix gives us the per-location
+          // members. This makes extract_setups safe to fire from any client
+          // re-mount path — the only side effect of a redundant call is a
+          // cheap storage probe.
+          try {
+            const existingIds = await listLocalArtifacts("setup", project_id);
+            const matching = existingIds.filter((id) =>
+              id.startsWith(`setup_${bibleId}_`),
+            );
+            if (matching.length > 0) {
+              const artifacts = matching.map((sid) => ({
+                uri: `agent://location-scout/setup/${sid}`,
+                mime_type: "application/json",
+                created_at: new Date().toISOString(),
+              }));
+              updateTask(task_id, {
+                status: "completed",
+                progress: 1.0,
+                current_step: `Reusing ${matching.length} existing setups for ${bibleId} (idempotent path)`,
+                artifacts,
+              });
+              return;
+            }
+          } catch (probeErr) {
+            // Probe failure is non-fatal — fall through to the LLM path. We
+            // log a warning so the issue is visible without breaking the call.
+            console.warn(
+              `[extract_setups] idempotency probe failed for bible=${bibleId} project=${project_id ?? "<ALS>"}:`,
+              probeErr instanceof Error ? probeErr.message : probeErr,
+            );
+          }
+
+          const bible = await loadArtifact<Record<string, unknown>>("bible", bibleId, project_id);
           if (!bible) { updateTask(task_id, { status: "failed", error: `Bible not found for floorplan: ${bibleId}` }); return; }
 
           const moodStates: unknown[] = [];
           if (mood_state_uris.length > 0) {
-            const loaded = await Promise.all(mood_state_uris.map((u) => loadArtifact("mood", u.split("/").pop() ?? "")));
+            const loaded = await Promise.all(mood_state_uris.map((u) => loadArtifact("mood", u.split("/").pop() ?? "", project_id)));
             for (const ms of loaded) { if (ms) moodStates.push(ms); }
           }
 
@@ -1537,13 +1574,74 @@ export function registerLocationTools(server: McpServer) {
             } else {
               setup.setup_name = existingName.slice(0, 200);
             }
-            await saveArtifact("setup", sid, setup);
+            await saveArtifact("setup", sid, setup, project_id);
             artifacts.push({ uri: `agent://location-scout/setup/${sid}`, mime_type: "application/json", created_at: new Date().toISOString() });
           }
           updateTask(task_id, { status: "completed", progress: 1.0, current_step: `${setups.length} setups extracted`, artifacts });
         } catch (err) { updateTask(task_id, { status: "failed", error: err instanceof Error ? err.message : String(err) }); }
       })();
       return { content: [{ type: "text" as const, text: JSON.stringify({ task_id, status: "accepted" }) }] };
+    },
+  );
+
+  // list_setups — readonly probe surface for the UI's Bug 10 idempotency
+  // path. Returns existing setups for a given location_id under the current
+  // project namespace. Companion to extract_setups's backend idempotency:
+  // the UI uses list_setups to flip setupsExtraction to "ready" instantly
+  // (no LLM ping) when re-entering the page; extract_setups stays safe even
+  // if the UI skips this probe.
+  server.tool(
+    "list_setups",
+    "List existing camera setups for a given location_id (the bibleId) under the supplied project namespace. Synchronous, readonly. Used by the UI to detect already-extracted setups and short-circuit re-extraction (Bug 10 idempotency probe).",
+    {
+      location_id: z.string().describe("Location bible id, e.g. loc_<projectId>. Setups are saved with ids of the form `setup_${location_id}_${shortUuid}` so this is the filter key."),
+      project_id: z.string().optional().describe("Project namespace. Falls back to the RequestContext.project_id (ALS, stamped at MCP entry) when omitted."),
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    async ({ location_id, project_id }) => {
+      try {
+        const setupIds = await listLocalArtifacts("setup", project_id);
+        const matching = setupIds.filter((id) =>
+          id.startsWith(`setup_${location_id}_`),
+        );
+        const setups = await Promise.all(
+          matching.map(async (sid) => {
+            const data = await loadArtifact<Record<string, unknown>>(
+              "setup",
+              sid,
+              project_id,
+            );
+            return {
+              setup_id: sid,
+              uri: `agent://location-scout/setup/${sid}`,
+              ...(data ?? {}),
+            };
+          }),
+        );
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({ location_id, count: setups.length, setups }),
+            },
+          ],
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                error: "list_setups_failed",
+                message: err instanceof Error ? err.message : String(err),
+                location_id,
+                setups: [],
+              }),
+            },
+          ],
+          isError: true,
+        };
+      }
     },
   );
 
