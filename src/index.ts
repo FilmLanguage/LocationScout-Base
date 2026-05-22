@@ -215,7 +215,10 @@ app.get("/artifacts/:type/v/:file", async (req, res) => {
   await withRequestContext(randomUUID(), `artifacts:${type}:v`, async () => {
     try {
       const { loadImageVersion } = await import("./lib/storage.js");
-      const img = await loadImageVersion(type, image_id, ext === "jpeg" ? "jpg" : ext);
+      // Fix A L3: thread project_id explicitly so the namespace contract
+      // doesn't depend on the ALS wrap alone. resolveProjectKey still
+      // falls back to ALS when omitted, but explicit > implicit here.
+      const img = await loadImageVersion(type, image_id, ext === "jpeg" ? "jpg" : ext, project_id);
       if (!img) { res.status(404).json({ error: "not_found" }); return; }
       res.setHeader("Content-Type", img.contentType);
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
@@ -239,14 +242,17 @@ app.get("/artifacts/:type/:file", async (req, res) => {
     try {
       if (["png", "jpg", "jpeg"].includes(ext)) {
         const { loadImage } = await import("./lib/storage.js");
-        const img = await loadImage(type, id, ext === "jpeg" ? "jpg" : ext);
+        // Fix A L3: thread project_id explicitly into the storage call.
+        const img = await loadImage(type, id, ext === "jpeg" ? "jpg" : ext, project_id);
         if (!img) { res.status(404).json({ error: "not_found" }); return; }
         res.setHeader("Content-Type", img.contentType);
         res.setHeader("Cache-Control", "no-cache");
         res.send(img.data);
       } else {
         const { loadArtifact } = await import("./lib/storage.js");
-        const data = await loadArtifact(type, id);
+        // Fix A L3: thread project_id explicitly so the JSON branch matches
+        // the binary branch contract.
+        const data = await loadArtifact(type, id, project_id);
         if (!data) { res.status(404).json({ error: "not_found" }); return; }
         res.json(data);
       }
