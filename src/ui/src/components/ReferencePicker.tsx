@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { callTool } from "../api/mcp";
+import { useProjectContext, buildArtifactUrl } from "../hooks/useProjectContext";
 
 export type ReferenceKind =
   | "face_anchor"
@@ -135,10 +136,13 @@ function sidecarToRef(v: SidecarVersion): ReferenceRef {
   };
 }
 
-function previewUrl(ref: ReferenceRef): string {
+function previewUrl(ref: ReferenceRef, projectId: string): string {
   if (ref.uri.startsWith("data:") || ref.uri.startsWith("http")) return ref.uri;
   const kindPath = ref.kind === "user_upload" ? "user-ref" : ref.kind;
-  return `/artifacts/${encodeURIComponent(kindPath)}/v/${encodeURIComponent(ref.image_id)}.png`;
+  // Fix A L4: route through buildArtifactUrl so the backend HTTP route
+  // can scope the lookup by project_id. Bare /artifacts/<kind>/v/<id>.png
+  // collapsed every project to the same storage slot (invest-b B3).
+  return buildArtifactUrl(kindPath, `v/${encodeURIComponent(ref.image_id)}.png`, projectId);
 }
 
 function kindBadge(kind: ReferenceKind): string {
@@ -158,12 +162,16 @@ function Thumbnail({
   refData,
   onRemove,
   disabled,
+  projectId,
 }: {
   // BETA: prop renamed from `ref` to `refData` — `ref` is reserved by React and
   // gets stripped from props (silent crash on access). See ROLLOUT.md.
   refData: ReferenceRef;
   onRemove: () => void;
   disabled?: boolean;
+  /** Fix A L4: project namespace marker threaded into previewUrl so the
+   *  /artifacts route can scope the backend lookup. */
+  projectId: string;
 }) {
   return (
     <div
@@ -180,7 +188,7 @@ function Thumbnail({
       }}
     >
       <img
-        src={previewUrl(refData)}
+        src={previewUrl(refData, projectId)}
         alt={refData.kind}
         style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
       />
@@ -409,6 +417,7 @@ function GalleryModal({
   currentRefs,
   onPick,
   onClose,
+  projectId,
 }: {
   entity_id: string;
   bible_id: string;
@@ -416,6 +425,8 @@ function GalleryModal({
   currentRefs: ReferenceRef[];
   onPick: (ref: ReferenceRef) => void;
   onClose: () => void;
+  /** Fix A L4: threaded into previewUrl for the modal's gallery grid. */
+  projectId: string;
 }) {
   const [tab, setTab] = useState<"user" | "location">("user");
   const [userRefs, setUserRefs] = useState<SidecarVersion[]>([]);
@@ -484,7 +495,7 @@ function GalleryModal({
             }}
           >
             <img
-              src={previewUrl(sidecarToRef(v))}
+              src={previewUrl(sidecarToRef(v), projectId)}
               alt={v.kind}
               style={{ width: "100%", height: 100, objectFit: "cover", display: "block" }}
             />
@@ -629,6 +640,11 @@ export function ReferencePicker({
 }: ReferencePickerProps) {
   const [uploading, setUploading] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  // Fix A L4: project namespace for every <img src=> built by Thumbnail or
+  // the gallery modal. Without this, `/artifacts/<kind>/v/<image_id>.png`
+  // hits the backend without ?project_id= and the lookup falls back to the
+  // legacy un-namespaced slot, which leaks cross-project bytes (invest-b B3).
+  const { projectId } = useProjectContext();
   // Fall back to entity_id only when caller didn't supply a real bible_id.
   // This keeps the Location gallery useful for non-setup callers (anchor/iso
   // pickers already pass the bible id as entity_id).
@@ -684,6 +700,7 @@ export function ReferencePicker({
             refData={ref}
             onRemove={() => handleRemove(i)}
             disabled={disabled}
+            projectId={projectId}
           />
         ))}
         <UploadTile onFile={handleFile} busy={uploading} disabled={disabled} />
@@ -701,6 +718,7 @@ export function ReferencePicker({
             }
           }}
           onClose={() => setGalleryOpen(false)}
+          projectId={projectId}
         />
       )}
     </div>

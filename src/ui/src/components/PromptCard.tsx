@@ -10,6 +10,7 @@
  */
 
 import { useMemo, useState } from "react";
+import { useProjectContext, buildArtifactUrl } from "../hooks/useProjectContext";
 
 export interface GalleryVersion {
   image_id: string;
@@ -109,6 +110,12 @@ export function PromptCard(props: PromptCardProps) {
 
   const [collapsed, setCollapsed] = useState<boolean>(collapsible && defaultCollapsed);
 
+  // Fix A L4: thread project_id into every preview URL via buildArtifactUrl.
+  // Without this, both the latest-alias and versioned URLs hit the backend
+  // without a namespace marker and any pre-existing un-namespaced bytes
+  // (or another project's bytes) bled through (invest-b B3).
+  const { projectId } = useProjectContext();
+
   const selected = useMemo(
     () => versions.find((v) => v.image_id === selectedVersionId) ?? versions[0] ?? null,
     [versions, selectedVersionId],
@@ -121,8 +128,8 @@ export function PromptCard(props: PromptCardProps) {
   const previewSrc = !selected
     ? null
     : isNewest
-    ? `/artifacts/${encodeURIComponent(kind)}/${encodeURIComponent(entityId)}.png?v=${cacheBust ?? selected.image_id}`
-    : `/artifacts/${encodeURIComponent(kind)}/v/${encodeURIComponent(selected.image_id)}.png`;
+    ? buildArtifactUrl(kind, `${encodeURIComponent(entityId)}.png`, projectId, cacheBust ?? selected.image_id)
+    : buildArtifactUrl(kind, `v/${encodeURIComponent(selected.image_id)}.png`, projectId);
 
   const showWarning =
     promptUsed != null &&

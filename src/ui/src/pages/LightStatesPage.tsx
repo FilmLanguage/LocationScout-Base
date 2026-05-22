@@ -13,13 +13,18 @@ import { useNavigate } from "react-router-dom";
 import { callTool, pollTask, type TaskStatus } from "../api/mcp";
 import { usePipeline } from "../state/PipelineContext";
 import type { SetupTile } from "../state/pipeline";
-import { useProjectContext } from "../hooks/useProjectContext";
+import { useProjectContext, buildArtifactUrl } from "../hooks/useProjectContext";
 
 const variationUri = (id: string) =>
   `agent://location-scout/mood-variation/${encodeURIComponent(id)}`;
 
-const setupImgPath = (id: string) => `/artifacts/setup/${id}.png`;
-const moodVariationImgPath = (setupId: string) => `/artifacts/mood-variation/${setupId}.png`;
+// Fix A L4: namespace by project_id via buildArtifactUrl. Without this,
+// every project's variations collided on a single backend storage slot
+// (invest-b task B3 — `/artifacts/mood-variation/${setupId}.png` literal).
+const setupImgPath = (id: string, projectId: string) =>
+  buildArtifactUrl("setup", `${id}.png`, projectId);
+const moodVariationImgPath = (setupId: string, projectId: string) =>
+  buildArtifactUrl("mood-variation", `${setupId}.png`, projectId);
 
 /**
  * Resolve the setup tile ID whose generated image should back a given
@@ -54,7 +59,7 @@ export function LightStatesPage() {
   const navigate = useNavigate();
   const ls = state.lightStates;
   const setupTiles = state.setups.tiles;
-  const { locationId: LOCATION_ID } = useProjectContext();
+  const { locationId: LOCATION_ID, projectId } = useProjectContext();
   const BIBLE_URI = `agent://location-scout/bible/${LOCATION_ID}`;
   const activeSource = ls.sources.find((s) => s.id === ls.activeSourceId) ?? ls.sources[0];
   const visibleVariations = ls.variations.filter((v) => v.status !== "canceled");
@@ -329,7 +334,7 @@ export function LightStatesPage() {
                   >
                     {imgId ? (
                       <img
-                        src={setupImgPath(imgId)}
+                        src={setupImgPath(imgId, projectId)}
                         alt={`${s.id} setup reference`}
                         style={{
                           width: 72,
@@ -407,7 +412,7 @@ export function LightStatesPage() {
                     </div>
                   ) : imgId ? (
                     <img
-                      src={setupImgPath(imgId)}
+                      src={setupImgPath(imgId, projectId)}
                       alt={`Variation ${v.id}`}
                       className="setup-tile__image"
                       style={{ objectFit: "cover", width: "100%", display: "block" }}
@@ -496,7 +501,7 @@ export function LightStatesPage() {
                 {activeGen.cacheBust !== null ? (
                   <img
                     key={`mood-${activeSource.id}-${activeGen.cacheBust}`}
-                    src={`${moodVariationImgPath(activeSource.id)}?v=${activeGen.cacheBust}`}
+                    src={buildArtifactUrl("mood-variation", `${activeSource.id}.png`, projectId, activeGen.cacheBust)}
                     alt={`${activeSource.id} mood variation`}
                     style={{
                       width: "100%",
@@ -511,7 +516,7 @@ export function LightStatesPage() {
                 ) : activeSourceImageId ? (
                   <img
                     key={`setup-${activeSource.id}-${activeSourceImageId}`}
-                    src={setupImgPath(activeSourceImageId)}
+                    src={setupImgPath(activeSourceImageId, projectId)}
                     alt={`${activeSource.id} base setup`}
                     style={{
                       width: "100%",

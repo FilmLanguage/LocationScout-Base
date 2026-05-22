@@ -39,7 +39,11 @@ import { useAssemblePrompt } from "../hooks/useAssemblePrompt";
 import { useProjectContext, buildArtifactUrl } from "../hooks/useProjectContext";
 import { useDebouncedAction } from "../hooks/useDebouncedAction";
 const setupUri = (id: string) => `agent://location-scout/setup/${id}`;
-const setupImgPath = (id: string) => `/artifacts/setup/${id}.png`;
+// Fix A L4: setupImgPath now namespaces by project_id via buildArtifactUrl.
+// Was: `/artifacts/setup/${id}.png` — bare URL collapsed every project to
+// the same backend storage slot (invest-b task B3).
+const setupImgPath = (id: string, projectId: string) =>
+  buildArtifactUrl("setup", `${id}.png`, projectId);
 
 // Camera descriptions previously hardcoded per Figma mock IDs (S1-A through S3-C)
 // containing fixture-specific text from the Figma mock — removed 2026-05-15. Real
@@ -261,7 +265,7 @@ export function SetupsPage() {
     await Promise.all(
       ts.map(async (t) => {
         try {
-          const res = await fetch(setupImgPath(t.id), { method: "HEAD", cache: "no-store" });
+          const res = await fetch(setupImgPath(t.id, projectId), { method: "HEAD", cache: "no-store" });
           if (!res.ok) missing.push(t.id);
         } catch {
           missing.push(t.id);
@@ -635,7 +639,7 @@ export function SetupsPage() {
     }
     return (
       <img
-        src={`${setupImgPath(t.id)}?v=${bust}`}
+        src={buildArtifactUrl("setup", `${t.id}.png`, projectId, bust)}
         alt={`Setup ${t.id}`}
         className="setup-tile__image"
         style={{ objectFit: "cover", width: "100%", display: "block" }}
@@ -645,7 +649,7 @@ export function SetupsPage() {
 
   const selectedBust = selected ? tileCacheBust[selected.id] : undefined;
   const selectedImgSrc = selected
-    ? `${setupImgPath(selected.id)}${selectedBust ? `?v=${selectedBust}` : ""}`
+    ? buildArtifactUrl("setup", `${selected.id}.png`, projectId, selectedBust)
     : "";
   const selectedEditMode = selected ? setupEditMode[selected.id] === true : false;
   const selectedBusy = selected ? regenerating.has(selected.id) || isBatchBusy : false;
@@ -982,7 +986,7 @@ export function SetupsPage() {
                     lockedAutoRefs={[
                       {
                         parentLabel: "anchor",
-                        imageUrl: `/artifacts/anchor/${LOCATION_ID}.png`,
+                        imageUrl: buildArtifactUrl("anchor", `${LOCATION_ID}.png`, projectId),
                         kind: "anchor",
                       },
                     ]}
