@@ -898,6 +898,10 @@ export function registerLocationTools(server: McpServer) {
             lastReport = report;
 
             // Persist the validation report so reviewers/UI can inspect retry history.
+            // L9-allowlist: validation — VLM validation reports for retry-history inspection only;
+            // not consumed by downstream agents. v2.validation_reports (polymorphic target_table/target_id
+            // shape) exists but doesn't match the TYPE_MAP entityColumn pattern; backend backlog tracks
+            // adding a writer once the schema reconciliation lands.
             await saveArtifact("validation", report.validation_id, report);
             validationReports.push({
               uri: `agent://location-scout/validation/${report.validation_id}`,
@@ -1846,6 +1850,8 @@ export function registerLocationTools(server: McpServer) {
             counts: { periodFactsCount, typicalElementsCount, anachronismCount, referencesCount },
             evaluated_at: new Date().toISOString(),
           };
+          // L9-allowlist: research-depth — internal evaluation report (research pack depth scoring);
+          // not consumed by downstream agents. No matching v2 table — backend backlog item to add one.
           await saveArtifact("research-depth", reportId, report);
 
           updateTask(task_id, {
@@ -2109,6 +2115,8 @@ export function registerLocationTools(server: McpServer) {
           report.setup_uri = setup_uri;
           report.anchor_uri = anchor_uri;
           report.compared_at = new Date().toISOString();
+          // L9-allowlist: comparison — vision-similarity report between setup image and anchor;
+          // not consumed by downstream agents. No matching v2 table — backend backlog item to add one.
           await saveArtifact("comparison", reportId, report);
 
           updateTask(task_id, {
