@@ -784,26 +784,34 @@ export function registerLocationTools(server: McpServer) {
               ? prompt_override
               : fillTemplate(PROMPT_ANCHOR_TEMPLATE, buildAnchorPromptVars(bible)));
 
-          // run-019/020 D: Drop the isometric.png image input. nano-banana
-          // ignores `image_ref_strength` below ~0.5 — when the only image
-          // reference IS the isometric, the output bleeds isometric/3D
-          // aesthetics regardless of prompt + negatives. We now derive the
-          // spatial layout from the bible (passport dimensions + spaces +
-          // floorplan-described layout) as TEXT and run text-to-image.
-          // Edit mode and explicit user reference_images still attach images.
-          updateTask(task_id, { progress: 0.08, current_step: editing ? "Loading edit base image" : "Composing layout text from bible" });
+          // run-021: restore isometric img2img per canonical pipeline
+          // (floorplan → isometric → anchor). nano-banana ignores
+          // `image_ref_strength` below ~0.5 — see refStrength bump below.
+          // When isometric is missing we fall back to the run-020 text-hint
+          // path so we never hard-fail.
+          updateTask(task_id, { progress: 0.08, current_step: editing ? "Loading edit base image" : "Loading isometric for img2img" });
+          // Note: precise "img2img from isometric" vs "text-to-image (no isometric available)"
+          // status is set below after we know whether the isometric load succeeded.
           const imageUrls: string[] = [];
           let layoutHint = "";
           if (editing && editBase) {
             imageUrls.push(editBase.dataUrl);
           } else {
             if (auto_resolve !== false) {
-              layoutHint = buildLayoutHintFromBible(bible);
+              // run-021: restore isometric img2img per canonical pipeline.
+              const isometricImage = await loadImage("isometric", bibleId);
+              if (isometricImage) {
+                imageUrls.push(`data:image/png;base64,${isometricImage.data.toString("base64")}`);
+                updateTask(task_id, { current_step: "img2img from isometric" });
+              } else {
+                // Fallback: derive spatial layout from bible as TEXT when isometric
+                // hasn't been generated. Preserves run-020 fix as a degraded path.
+                layoutHint = buildLayoutHintFromBible(bible);
+                updateTask(task_id, { current_step: "text-to-image (no isometric available)" });
+              }
             }
             const extraRefs = await resolveReferenceImages(reference_images);
             imageUrls.push(...extraRefs);
-            // text-to-image is fine here: the prompt + layoutHint carry the
-            // spatial spec. We no longer require imageUrls to be non-empty.
           }
           const basePrompt = (
             layoutHint ? `${rawPrompt}\n\nLayout (spatial guide, not visible elements): ${layoutHint}` : rawPrompt
@@ -836,7 +844,11 @@ export function registerLocationTools(server: McpServer) {
             // as a SPATIAL LAYOUT GUIDE only — prompt must dominate so the output
             // reads as a photoreal eye-level photograph, not an isometric illustration.
             // Edit mode keeps the high strength so iterations preserve the prior version.
-            const refStrength = editing ? 0.85 : 0.35;
+            // run-021: restore isometric img2img per canonical pipeline (floorplan → isometric → anchor).
+            // Bumped refStrength from 0.35 to 0.55 to clear nano-banana's ~0.5 ignore threshold —
+            // below that, the model bleeds 3D-isometric aesthetic regardless of prompt+negatives
+            // (see run-019 I5 history).
+            const refStrength = editing ? 0.85 : 0.55;
             const result = await generateImage({
               prompt: promptForAttempt,
               negative_prompt: negativePrompt || undefined,

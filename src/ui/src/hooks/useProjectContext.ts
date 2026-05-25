@@ -90,6 +90,9 @@ export function buildArtifactUrl(
   projectId: string,
   cacheBust?: string | number,
 ): string {
+  if (!projectId) {
+    console.warn("[buildArtifactUrl] called with empty projectId — request will 404. type=" + type + " filename=" + filename, new Error("trace").stack);
+  }
   const qs = new URLSearchParams({ project_id: projectId });
   if (cacheBust !== undefined) qs.set("v", String(cacheBust));
   return `/artifacts/${type}/${filename}?${qs.toString()}`;

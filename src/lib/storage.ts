@@ -512,6 +512,12 @@ export async function saveImage(
       } catch (e) {
         console.warn(`[storage] saveImage: latest-alias S3 upload failed for ${latestKey}: ${(e as Error)?.message ?? e}`);
       }
+      // run-020 fix: also mirror versioned key so loadImageVersion survives cold start (fixes /artifacts/<kind>/v/<image_id>.png 404 — user-ref upload preview)
+      try {
+        await s3Upload(imagePath, data, contentType);
+      } catch (e) {
+        console.warn(`[storage] saveImage: versioned-key S3 upload failed for ${imagePath}: ${(e as Error)?.message ?? e}`);
+      }
     }
   } catch (err) {
     console.warn(`[storage] saveImage: two-phase blob write failed: ${(err as Error)?.message ?? err}`);

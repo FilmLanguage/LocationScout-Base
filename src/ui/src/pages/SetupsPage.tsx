@@ -421,7 +421,10 @@ export function SetupsPage() {
     if (!selected) return;
     // Bug 1 REGRESSION guard: don't fire generate_setup_images with an
     // empty BIBLE_URI when ?project_id= is missing from URL.
-    if (!projectIdReady) return;
+    if (!projectIdReady) {
+      setBatch({ kind: "error", message: "Cannot regenerate — project_id is missing from the URL. Reopen this agent with ?project_id=..." });
+      return;
+    }
     const tile = setupsArg.find((s) => s.id === selected.id);
     if (!tile) return;
     setRegenerating((prev) => new Set(prev).add(selected.id));
@@ -983,13 +986,15 @@ export function SetupsPage() {
                     onChange={(next) =>
                       setSetupRefs((prev) => ({ ...prev, [selected.id]: next }))
                     }
-                    lockedAutoRefs={[
-                      {
-                        parentLabel: "anchor",
-                        imageUrl: buildArtifactUrl("anchor", `${LOCATION_ID}.png`, projectId),
-                        kind: "anchor",
-                      },
-                    ]}
+                    lockedAutoRefs={
+                      LOCATION_ID && projectId
+                        ? [{
+                            parentLabel: "anchor",
+                            imageUrl: buildArtifactUrl("anchor", `${LOCATION_ID}.png`, projectId),
+                            kind: "anchor",
+                          }]
+                        : []
+                    }
                     label={`Refs for ${selected.id}`}
                     disabled={selectedBusy}
                   />

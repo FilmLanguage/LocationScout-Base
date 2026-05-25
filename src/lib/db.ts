@@ -440,6 +440,11 @@ export async function saveBlobMetadataToPg(
     try {
       await client.query("BEGIN");
 
+      // Slug→UUID resolve: callers pass the project slug, but v2.blobs.project_id
+      // is a UUID FK to v2.projects(id). Without this hop the INSERT throws
+      // "invalid input syntax for type uuid" and blob metadata never lands in PG.
+      const projectIdUuid = await ensureProject(client, projectId, projectId);
+
       // Upsert blob row (idempotent on sha256)
       const blobRes = await client.query<{ id: string }>(
         `INSERT INTO v2.blobs
@@ -448,7 +453,7 @@ export async function saveBlobMetadataToPg(
          ON CONFLICT (sha256) DO UPDATE SET
            entity_id = COALESCE(EXCLUDED.entity_id, v2.blobs.entity_id)
          RETURNING id;`,
-        [projectId, kind, entityId, sha256, s3Uri, mimeType, sizeBytes, AGENT_ID]
+        [projectIdUuid, kind, entityId, sha256, s3Uri, mimeType, sizeBytes, AGENT_ID]
       );
       const blobId = blobRes.rows[0].id;
 
@@ -456,7 +461,7 @@ export async function saveBlobMetadataToPg(
       await client.query(
         `INSERT INTO v2.events (project_id, event_type, entity_type, entity_id, payload, published_by)
          VALUES ($1, 'blob_generated', 'blob', $2, $3::jsonb, $4);`,
-        [projectId, blobId, JSON.stringify({ sha256, s3_uri: s3Uri, kind, entity_id: entityId, ...meta }), AGENT_ID]
+        [projectIdUuid, blobId, JSON.stringify({ sha256, s3_uri: s3Uri, kind, entity_id: entityId, ...meta }), AGENT_ID]
       );
 
       await client.query("COMMIT");
