@@ -12,7 +12,8 @@
     "params": {
       "name": "get_shot_image",
       "arguments": {
-        "image_id": "<UUID extracted from generate_shot artifacts[0].uri trailing segment>"
+        "image_id": "<UUID extracted from generate_shot artifacts[0].uri trailing segment>",
+        "project_id": "<project_id>"
       }
     }
   },

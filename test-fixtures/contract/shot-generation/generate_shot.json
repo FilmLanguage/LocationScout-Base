@@ -105,6 +105,7 @@
     }
   },
   "extract_for_chaining": {
-    "image_id": "split($.artifacts[0].uri, '/')[-1]"
+    "image_id": "split($.artifacts[0].uri, '/')[-1]",
+    "project_id": "$.request.arguments.project_id"
   }
 }
