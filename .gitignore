@@ -2,7 +2,7 @@ node_modules/
 dist/
 dist-ui/
 output/
-.env
+.env*
 *.tsbuildinfo
 __pycache__/
 
