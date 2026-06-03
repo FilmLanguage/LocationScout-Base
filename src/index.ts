@@ -279,7 +279,17 @@ app.get("/health", async (_req, res) => {
 // Serve production UI bundle (built into dist-ui by Dockerfile).
 const __dirname_ui = path.dirname(fileURLToPath(import.meta.url));
 const uiDir = path.join(__dirname_ui, "..", "dist-ui");
-app.use(express.static(uiDir));
+app.use(express.static(uiDir, {
+  setHeaders: (res, filePath) => {
+    // Hashed Vite assets (/assets/*) → cache forever; HTML shell must
+    // revalidate so a redeploy lands instantly (not shadowed by a stale bundle).
+    if (filePath.includes("/assets/")) {
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    } else {
+      res.setHeader("Cache-Control", "no-cache");
+    }
+  },
+}));
 app.get("*", (req, res, next) => {
   // Don't swallow API/MCP/health/artifacts paths if they 404 — pass through.
   if (
@@ -290,6 +300,7 @@ app.get("*", (req, res, next) => {
   ) {
     return next();
   }
+  res.setHeader("Cache-Control", "no-cache");
   res.sendFile(path.join(uiDir, "index.html"));
 });
 
